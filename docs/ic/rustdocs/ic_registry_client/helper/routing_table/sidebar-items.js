@@ -1,0 +1,1 @@
+initSidebarItems({"trait":[["RoutingTableRegistry","A trait that allows access to `RoutingTable`.  The expectation for the forseeable future is that the `RoutingTable` will remain small enough so that we can simply return the entire struct here."]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Hashed","Bundle of both a value and its hash. Once created it remains immutable, which is why both fields are only accessible through member functions, not as record fields."]]});

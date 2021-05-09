@@ -1,0 +1,4 @@
+(function() {var implementors = {};
+implementors["ic_embedders"] = [{"text":"impl <a class=\"trait\" href=\"ic_interfaces/execution_environment/trait.AsyncResult.html\" title=\"trait ic_interfaces::execution_environment::AsyncResult\">AsyncResult</a>&lt;<a class=\"struct\" href=\"ic_embedders/struct.WasmExecutionOutput.html\" title=\"struct ic_embedders::WasmExecutionOutput\">WasmExecutionOutput</a>&gt; for <a class=\"struct\" href=\"ic_embedders/struct.WasmExecutionResult.html\" title=\"struct ic_embedders::WasmExecutionResult\">WasmExecutionResult</a>","synthetic":false,"types":["ic_embedders::WasmExecutionResult"]}];
+implementors["ic_interfaces"] = [];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

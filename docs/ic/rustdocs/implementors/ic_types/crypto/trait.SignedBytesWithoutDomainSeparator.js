@@ -1,0 +1,4 @@
+(function() {var implementors = {};
+implementors["ic_interfaces"] = [{"text":"impl <a class=\"trait\" href=\"ic_types/crypto/trait.SignedBytesWithoutDomainSeparator.html\" title=\"trait ic_types::crypto::SignedBytesWithoutDomainSeparator\">SignedBytesWithoutDomainSeparator</a> for <a class=\"struct\" href=\"ic_interfaces/crypto/struct.SignableMock.html\" title=\"struct ic_interfaces::crypto::SignableMock\">SignableMock</a>","synthetic":false,"types":["ic_interfaces::crypto::sign::SignableMock"]}];
+implementors["ic_types"] = [];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

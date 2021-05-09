@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_execution_environment"] = [{"text":"impl <a class=\"trait\" href=\"ic_interfaces/execution_environment/trait.QueryHandler.html\" title=\"trait ic_interfaces::execution_environment::QueryHandler\">QueryHandler</a> for <a class=\"struct\" href=\"ic_execution_environment/struct.HttpQueryHandlerImpl.html\" title=\"struct ic_execution_environment::HttpQueryHandlerImpl\">HttpQueryHandlerImpl</a>","synthetic":false,"types":["ic_execution_environment::query_handler::HttpQueryHandlerImpl"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

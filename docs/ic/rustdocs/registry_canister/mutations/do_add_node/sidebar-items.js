@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["connection_endpoint_from_string","Parses the ConnectionEndpoint string"],["flow_endpoint_from_string","Parses a P2P flow encoded in a string"]],"struct":[["AddNodePayload","The payload of an update request to add a new node."]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["RemoveNodePayload","The payload of an update request to add a new node."]]});

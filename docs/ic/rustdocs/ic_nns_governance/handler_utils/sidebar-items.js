@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["submit_proposal","Wraps the given proposal_payload into a proposal; sends it to the proposal canister; returns the proposal id."]]});

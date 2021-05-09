@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["NiDkgIdFromProtoError","Occurs if the `NiDkgId` cannot be obtained from the corresponding protobuf."]],"fn":[["ni_dkg_target_id","Creates a target ID for the given data."]],"struct":[["InvalidNiDkgTargetIdSizeError","Occurs if the target ID size is invalid."],["NiDkgId","The ID for non-interactive DKG. Identifies a DKG epoch."]]});

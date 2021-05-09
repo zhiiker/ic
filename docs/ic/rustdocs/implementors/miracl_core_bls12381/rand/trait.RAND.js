@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_crypto_internal_fs_ni_dkg"] = [{"text":"impl RAND for <a class=\"struct\" href=\"ic_crypto_internal_fs_ni_dkg/utils/struct.RAND_ChaCha20.html\" title=\"struct ic_crypto_internal_fs_ni_dkg::utils::RAND_ChaCha20\">RAND_ChaCha20</a>","synthetic":false,"types":["ic_crypto_internal_fs_ni_dkg::utils::RAND_ChaCha20"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

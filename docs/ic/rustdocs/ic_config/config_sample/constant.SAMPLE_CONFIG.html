@@ -1,0 +1,309 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `SAMPLE_CONFIG` constant in crate `ic_config`."><meta name="keywords" content="rust, rustlang, rust-lang, SAMPLE_CONFIG"><title>ic_config::config_sample::SAMPLE_CONFIG - Rust</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="shortcut icon" href="../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../down-arrow.svg");}</style></head><body class="rustdoc constant"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../ic_config/index.html'><div class='logo-container'><img src='../../rust-logo.png' alt='logo'></div></a><div class="sidebar-elems"><p class='location'><a href='../index.html'>ic_config</a>::<wbr><a href='index.html'>config_sample</a></p><script>window.sidebarCurrent = {name: 'SAMPLE_CONFIG', ty: 'constant', relpath: ''};</script><script defer src="sidebar-items.js"></script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../../src/ic_config/config_sample.rs.html#64-319' title='goto source code'>[src]</a></span><span class='in-band'>Constant <a href='../index.html'>ic_config</a>::<wbr><a href='index.html'>config_sample</a>::<wbr><a class="constant" href=''>SAMPLE_CONFIG</a></span></h1><pre class='rust const'>pub const SAMPLE_CONFIG: &amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a> = r#&quot;
+{
+    // ============================================
+    // Global Replica Configuration
+    // ============================================
+
+    // Id of the subnet this node belongs to. This will be removed as soon as the replica can
+    // retrieve its own subnet id from the registry.
+    subnet_id: 0,
+
+    // ============================================
+    // Configuration of node transport
+    // ============================================
+    transport: {
+        // IP address to bind if p2p_connections is not empty.
+        node_ip: &quot;127.0.0.1&quot;,
+
+        // mapping of flow ids to TCP port number, also depth of send queue
+        p2p_flows: [{flow_tag: 1, server_port: 3000, queue_size: 1024}],
+    },
+    // ============================================
+    // Configuration of registry client
+    // ============================================
+    registry_client: {
+        // Alternatives:
+        //   * EXAMPLE: registry_canister_url: &quot;https://registry.ic.org/&quot;,
+        //     fetch updates from node at given url
+        //     DEPRECATED (use local_store)
+        //   * EXAMPLE: protobuf_file: &quot;/tmp/registry.proto&quot;
+        //     read the registry from a file during boot
+        //     DEPRECATED (use local_store)
+        //   * EXAMPLE: bootstrap:{registry_canister_url: [&quot;&lt;url&gt;&quot;],initial_registry_file:&quot;&lt;path&gt;&quot;}
+        //     used to bootstrap the NNS subnetwork. V1 is read from `initial_registry_file`,
+        //     all request beyond V1 are forwarded to registry_canister_url
+        //     DEPRECATED (use local_store)
+        //   * EXAMPLE: local_store: &quot;/tmp/local_store&quot;
+        //     read registry from the registry&#39;s local store.
+        //
+        // The default is not to specify it.
+    },
+    // ============================================
+    // Configuration of the node state persistence.
+    // ============================================
+    state_manager: {
+        // The directory that should be used to persist node state.
+        state_root: &quot;/tmp/ic_state&quot;
+    },
+    // ============================================
+    // Configuration of the node artifact pool persistence.
+    // ============================================
+    artifact_pool: {
+        // The directory that should be used to persist consensus artifacts.
+        consensus_pool_path: &quot;/tmp/ic_consensus_pool&quot;,
+        // The directory for the blockchain backup.
+        backup_spool_path: &quot;/tmp/ic_backup/&quot;
+    },
+    // ============================================
+    // Consensus related config.
+    // ============================================
+    consensus: {
+        // Whether or not to detect starvation. Should only be set to false in tests.
+        detect_starvation: true,
+    },
+    // ============================================
+    // Configuration of the node state persistence.
+    // ============================================
+    crypto: {
+        // The directory that should be used to persist node&#39;s cryptographic keys.
+        crypto_root: &quot;/tmp/ic_crypto&quot;
+    },
+    // ========================================
+    // Configuration of the message scheduling.
+    // ========================================
+    scheduler: {
+        // The max number of cores to use for canister code execution.
+        scheduler_cores: 1,
+
+        // Maximum amount of instructions a single round can consume.
+        max_instructions_per_round: 26843545600,
+
+        // Maximum amount of instructions a single message&#39;s execution can consume.
+        // This should be significantly smaller than `max_instructions_per_round`.
+        max_instructions_per_message: 5368709120,
+    },
+    // ================================================
+    // Configuration of the execution environment.
+    // ================================================
+    hypervisor: {
+        // Which implementation of the runtime to use.
+        // For now, &quot;wasmtime&quot; is the default option.
+        embedder_type: &quot;wasmtime&quot;,
+
+        // Which technology to use to intercept Wasm memory changes.
+        //
+        // Alternatives:
+        // - EXAMPLE: persistence_type: &quot;sigsegv&quot;,
+        //   Use memory persistence based on mprotect + SIGSEGV.
+        // - EXAMPLE: persistence_type: &quot;pagemap&quot;,
+        //   Use memory persistence based on /proc/pid/pagemap (Linux) or Mac OS equivalent.
+        persistence_type: &quot;sigsegv&quot;,
+    },
+    // ====================================
+    // Configuration of the HTTPS endpoint.
+    // ====================================
+    http_handler: {
+        // The address to listen on.
+        listen_addr: &quot;127.0.0.1:8080&quot;
+    },
+    // ==================================================
+    // Configuration of the metrics collection subsystem.
+    // ==================================================
+    metrics: {
+        // How to export metrics.
+        //
+        // Alternatives:
+        // - EXAMPLE: exporter: &quot;log&quot;,
+        //   Periodically write prometheus metrics to the application log.
+        // - EXAMPLE: exporter: { http: &quot;127.0.0.1:9000&quot; },
+        //   Expose prometheus metrics on the specified address.
+        // - EXAMPLE: exporter: { file: &quot;/path/to/file&quot; },
+        //   Dump prometheus metrics to the specified file on shutdown.
+        exporter: &quot;log&quot;
+    },
+    // ===================================
+    // Configuration of the logging setup.
+    // ===================================
+    logger: {
+        // The node id to append to log lines. [deprecated]
+        node_id: 100,
+
+        // The datacenter id to append to log lines. [deprecated]
+        dc_id: 200,
+
+        // The log level to use.
+        // EXAMPLE: level: &quot;critical&quot;,
+        // EXAMPLE: level: &quot;error&quot;,
+        // EXAMPLE: level: &quot;warning&quot;,
+        // EXAMPLE: level: &quot;info&quot;,
+        // EXAMPLE: level: &quot;debug&quot;,
+        // EXAMPLE: level: &quot;trace&quot;,
+        level: &quot;info&quot;,
+
+        // The format of emitted log lines
+        // EXAMPLE: format: &quot;text_full&quot;,
+        // EXAMPLE: format: &quot;json&quot;,
+        format: &quot;text_full&quot;,
+
+        // Output debug logs for these module paths
+        // EXAMPLE: debug_overrides: [&quot;ic_consensus::finalizer&quot;, &quot;ic_messaging::coordinator&quot;],
+        debug_overrides: [],
+
+        // Output logs for these tags
+        // EXAMPLE: enabled_tags: [&quot;artifact_tracing&quot;],
+        enabled_tags: [],
+
+        // If `true` the async channel for low-priority messages will block instead of drop messages.
+        // This behavior is required for instrumentation in System Testing until we have a
+        // dedicated solution for instrumentation.
+        //
+        // The default for this value is `false` and thus matches the previously expected behavior in
+        // production use cases.
+        block_on_overflow: false,
+    },
+    // ===================================
+    // Configuration of the logging setup for the nodemanager.
+    // ===================================
+    nodemanager_logger: {
+        // The node id to append to log lines. [deprecated]
+        node_id: 100,
+
+        // The datacenter id to append to log lines. [deprecated]
+        dc_id: 200,
+
+        // The log level to use.
+        // EXAMPLE: level: &quot;critical&quot;,
+        // EXAMPLE: level: &quot;error&quot;,
+        // EXAMPLE: level: &quot;warning&quot;,
+        // EXAMPLE: level: &quot;info&quot;,
+        // EXAMPLE: level: &quot;debug&quot;,
+        // EXAMPLE: level: &quot;trace&quot;,
+        level: &quot;info&quot;,
+
+        // The format of emitted log lines
+        // EXAMPLE: format: &quot;text_full&quot;,
+        // EXAMPLE: format: &quot;json&quot;,
+        format: &quot;text_full&quot;,
+
+        // Output debug logs for these module paths
+        // EXAMPLE: debug_overrides: [&quot;ic_consensus::finalizer&quot;, &quot;ic_messaging::coordinator&quot;],
+        debug_overrides: [],
+
+        // Output logs for these tags
+        // EXAMPLE: enabled_tags: [&quot;artifact_tracing&quot;],
+        enabled_tags: [],
+
+        // If `true` the async channel for low-priority messages will block instead of drop messages.
+        // This behavior is required for instrumentation in System Testing until we have a
+        // dedicated solution for instrumentation.
+        //
+        // The default for this value is `false` and thus matches the previously expected behavior in
+        // production use cases.
+        block_on_overflow: false,
+    },
+    // =================================
+    // Configuration of Message Routing.
+    // =================================
+    message_routing: {
+        // Currently empty, but will contain timeouts, max slice sizes etc.
+    },
+    // =================================
+    // Configuration of Malicious behavior.
+    // =================================
+    malicious_behaviour: {
+       allow_malicious_behaviour: false,
+       maliciously_seg_fault: false,
+
+       malicious_flags: {
+         maliciously_gossip_drop_requests: false,
+         maliciously_gossip_artifact_not_found: false,
+         maliciously_gossip_send_many_artifacts: false,
+         maliciously_gossip_send_invalid_artifacts: false,
+         maliciously_gossip_send_late_artifacts: false,
+         maliciously_propose_equivocating_blocks: false,
+         maliciously_propose_empty_blocks: false,
+         maliciously_finalize_all: false,
+         maliciously_notarize_all: false,
+         maliciously_tweak_dkg: false,
+         maliciously_certify_invalid_hash: false,
+         maliciously_malfunctioning_xnet_endpoint: false,
+         maliciously_disable_execution: false,
+         maliciously_disable_http_handler_ingress_validation: false,
+         maliciously_corrupt_own_state_at_heights: [],
+       },
+    },
+
+    firewall: {
+        config_file: &quot;/path/to/nftables/config&quot;,
+        firewall_config: &quot;&quot;,
+        ipv4_prefixes: [],
+        ipv6_prefixes: [],
+    },
+
+    // =================================
+    // Configuration of registration parameters.
+    // =================================
+    registration: {
+      pkcs11_keycard_transport_pin: &quot;358138&quot;,
+    },
+    // =================================
+    // NNS Registry Replicator
+    // =================================
+    nns_registry_replicator: {
+      poll_delay_duration_ms: 5000
+    },
+}
+&quot;#;</pre><div class='docblock'><p>This constant contains a configuration of ic-replica with extra
+comments describing the purpose and possible values of every
+field.</p>
+<p>This configuration is displayed as-is if the replica binary is
+run with the <code>--sample-config</code> flag.</p>
+<p>There are tests detecting significant deviations of this
+configuration from the default configuration.  For example, the
+test should break if:</p>
+<ul>
+<li>New sections/fields are added/removed.</li>
+<li>Types of leaf values are changed.</li>
+</ul>
+<h1 id="checking-alternative-values-of-options" class="section-header"><a href="#checking-alternative-values-of-options">Checking alternative values of options</a></h1>
+<p>For options having several fixed alternatives, there are tests
+verifying that every alternative parses with the rest of the
+config.</p>
+<p>In order to take advantage of this feature, prefix alternatives
+with a special &quot;EXAMPLE:&quot; marker in the comment above the
+option.</p>
+<p>For example, for a config of the following form</p>
+<pre><code class="language-text">&lt;prefix&gt;
+# EXAMPLE: y: &quot;a&quot;
+# Some docs
+#
+# EXAMPLE: x: &quot;b&quot;
+# More docs
+#
+# &gt;&gt;&gt; NOTE: all the examples need to be defined in a single
+#     continuous block of comments.
+#
+# &gt;&gt;&gt; NOTE: there should be no blank line between the comment
+#     and the value in the config.
+y: &quot;c&quot;
+&lt;suffix&gt;
+</code></pre>
+<p>the tests will check that the following config files can be parsed
+successfully:</p>
+<ul>
+<li><code>&lt;prefix&gt; y: &quot;a&quot; &lt;suffix&gt;</code></li>
+<li><code>&lt;prefix&gt; x: &quot;b&quot; &lt;suffix&gt;</code></li>
+<li><code>&lt;prefix&gt; y: &quot;c&quot; &lt;suffix&gt;</code></li>
+</ul>
+<p>If the field is not set by default, leave an empty line after the
+comment with alternatives:</p>
+<pre><code class="language-text"># field x docs
+# EXAMPLE: x: &quot;a&quot;
+# EXAMPLE: x: &quot;b&quot;
+# &gt;&gt;&gt; The empty line below means that the field is not set by default.
+
+# field y docs
+# EXAMPLE: y: &quot;bad&quot;
+y: &quot;good&quot;
+</code></pre>
+</div></section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../../";window.currentCrate = "ic_config";</script><script src="../../main.js"></script><script defer src="../../search-index.js"></script></body></html>

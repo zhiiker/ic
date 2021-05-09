@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["RegistryClientError","Errors returned by the registry client."],["RegistryDataProviderError","Errors returned by the registry data provider."],["RegistryError","Errors returned when requesting a value from the registry."]],"mod":[["connection_endpoint","Defines `ConnectionEndpoint` as a URL."]]});

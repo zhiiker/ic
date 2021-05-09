@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_artifact_pool"] = [{"text":"impl <a class=\"trait\" href=\"ic_interfaces/ingress_pool/trait.IngressPoolSelect.html\" title=\"trait ic_interfaces::ingress_pool::IngressPoolSelect\">IngressPoolSelect</a> for <a class=\"struct\" href=\"ic_artifact_pool/ingress_pool/struct.IngressPoolImpl.html\" title=\"struct ic_artifact_pool::ingress_pool::IngressPoolImpl\">IngressPoolImpl</a>","synthetic":false,"types":["ic_artifact_pool::ingress_pool::IngressPoolImpl"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

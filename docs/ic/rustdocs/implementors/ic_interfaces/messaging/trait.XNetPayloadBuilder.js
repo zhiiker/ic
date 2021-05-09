@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_messaging"] = [{"text":"impl <a class=\"trait\" href=\"ic_interfaces/messaging/trait.XNetPayloadBuilder.html\" title=\"trait ic_interfaces::messaging::XNetPayloadBuilder\">XNetPayloadBuilder</a> for <a class=\"struct\" href=\"ic_messaging/struct.XNetPayloadBuilderImpl.html\" title=\"struct ic_messaging::XNetPayloadBuilderImpl\">XNetPayloadBuilderImpl</a>","synthetic":false,"types":["ic_messaging::xnet_payload_builder::XNetPayloadBuilderImpl"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

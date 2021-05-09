@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["DkgLoadTranscriptError","Occurs if loading a transcript using `NiDkgAlgorithm::load_transcript` fails."]]});

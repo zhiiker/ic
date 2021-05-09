@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Polynomial","A univariate polynomial Note: The polynomial terms are: coefficients[i] * x^i       E.g. 3 + 2x + x^2 - x^4 is encoded as:       Polynomial{ coefficients: [3,2,1,0,-1] }"]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"mod":[["pairing","Serialisation and deserialisation of the pairing library BLS12-381 types."]]});

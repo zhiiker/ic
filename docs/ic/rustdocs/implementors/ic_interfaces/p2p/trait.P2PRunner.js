@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_p2p"] = [{"text":"impl <a class=\"trait\" href=\"ic_interfaces/p2p/trait.P2PRunner.html\" title=\"trait ic_interfaces::p2p::P2PRunner\">P2PRunner</a> for <a class=\"struct\" href=\"ic_p2p/p2p/struct.P2PService.html\" title=\"struct ic_p2p::p2p::P2PService\">P2PService</a>","synthetic":false,"types":["ic_p2p::p2p::P2PService"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

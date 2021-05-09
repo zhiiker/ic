@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["InvalidDealingError","A dealing is invalid"]]});

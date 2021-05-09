@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["CertificationPoolImpl","Certification pool contains 2 types of artifacts: partial and multi-signatures of (height, hash) pairs, where hash corresponds to an execution state."]],"trait":[["MutablePoolSection","Operations that mutates the persistent pool."]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"mod":[["bls12_381","Data types for the BLS12_381 elliptic curve."],["test_vectors","Test vectors for curve serial representations."]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["WitnessEnum",""]],"struct":[["Fork","Binary fork."],["Known","Marker for provided data (leaf or subtree)."],["Node","Labeled leaf or subtree."],["Pruned","Pruned leaf or subtree."]]});

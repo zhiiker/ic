@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["ReplicaConfigStoreError","Errors that ReplicaConfigStore can return."]],"trait":[["ReplicaConfigStore","An API for storing a `ReplicaConfig`."]]});

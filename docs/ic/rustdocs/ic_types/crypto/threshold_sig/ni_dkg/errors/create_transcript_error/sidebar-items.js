@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["DkgCreateTranscriptError","Occurs if creating a transcript using `NiDkgAlgorithm::create_transcript` fails."]]});

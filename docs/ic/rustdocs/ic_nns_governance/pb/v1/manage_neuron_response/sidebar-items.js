@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["Command",""]],"struct":[["ConfigureResponse",""],["DisburseResponse",""],["DisburseToNeuronResponse",""],["FollowResponse",""],["MakeProposalResponse",""],["RegisterVoteResponse",""],["SpawnResponse",""],["SplitResponse",""]]});

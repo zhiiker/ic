@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["DkgCreateDealingError","Occurs if creating a dealing using `NiDkgAlgorithm::create_dealing` fails."]]});

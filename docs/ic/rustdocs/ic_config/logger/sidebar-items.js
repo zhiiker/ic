@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["LevelDef","Represents the required log level defined in the `LoggerConfig`."],["LogFormat","The format of emitted log lines"],["LogTarget",""]],"fn":[["default_logtarget",""]],"struct":[["Config",""]]});

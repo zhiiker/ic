@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["PublicKey","An Ed25519 public key."],["PublicKeyByteConversionError","The conversion from Ed25519 public key bytes failed."],["SecretKey","An Ed25519 secret key."],["SecretKeyByteConversionError","The conversion from Ed25519 secret key bytes failed."],["Signature","An Ed25519 signature."]]});

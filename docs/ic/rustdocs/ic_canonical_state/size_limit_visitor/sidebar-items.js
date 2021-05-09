@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["Matcher","Simple label matcher: either any label matches; or only equal labels."]],"struct":[["SizeLimitVisitor","Visitor that limits the byte size of blob leaves matching a given pattern by skipping all leaves after at least one leaf was visited and the size limit has been reached."]]});

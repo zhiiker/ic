@@ -1,0 +1,1 @@
+initSidebarItems({"mod":[["dkg","Distributed key generation"],["ni_dkg","Non-Interactive Distributed Key Generation"]]});

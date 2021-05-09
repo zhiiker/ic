@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["ScopedMmap","`ScopedMmap` contains a memory region that is automatically unmapped when the value is dropped."]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Pattern","Pattern defines a rule to filter a tree."],["SubtreeVisitor","Visitor that applies visitor V to the subtree that matches a pattern."]]});

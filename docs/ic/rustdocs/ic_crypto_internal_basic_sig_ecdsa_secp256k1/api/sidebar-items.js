@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["public_key_from_der","Parse a secp256k1 public key from the DER enncoding"],["public_key_to_der","Encode a secp256k1 public key to the DER encoding"],["secret_key_from_components","Create a secp256k1 secret key from raw bytes"],["sign","Sign a message using a secp256k1 private key"],["verify","Verify a signature using a secp256k1 public key"]]});

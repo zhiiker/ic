@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["UpdateNodeOperatorConfigPayload","The payload of a proposal to update an existing Node Operator"]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["CspCertificateChainCreationError","An error indicating that a certificate chain could not be created"]],"struct":[["CspCertificateChain","A non-empty list of certificates representing a certificate chain."]]});

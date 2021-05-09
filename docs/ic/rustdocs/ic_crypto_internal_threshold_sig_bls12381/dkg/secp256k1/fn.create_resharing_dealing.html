@@ -1,0 +1,48 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `create_resharing_dealing` fn in crate `ic_crypto_internal_threshold_sig_bls12381`."><meta name="keywords" content="rust, rustlang, rust-lang, create_resharing_dealing"><title>ic_crypto_internal_threshold_sig_bls12381::dkg::secp256k1::create_resharing_dealing - Rust</title><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../dark.css"><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script src="../../../storage.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="shortcut icon" href="../../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../../down-arrow.svg");}</style></head><body class="rustdoc fn"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../../ic_crypto_internal_threshold_sig_bls12381/index.html'><div class='logo-container'><img src='../../../rust-logo.png' alt='logo'></div></a><div class="sidebar-elems"><p class='location'><a href='../../index.html'>ic_crypto_internal_threshold_sig_bls12381</a>::<wbr><a href='../index.html'>dkg</a>::<wbr><a href='index.html'>secp256k1</a></p><script>window.sidebarCurrent = {name: 'create_resharing_dealing', ty: 'fn', relpath: ''};</script><script defer src="sidebar-items.js"></script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../../settings.html"><img src="../../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../../../src/ic_crypto_internal_threshold_sig_bls12381/dkg/secp256k1/dealing.rs.html#133-175' title='goto source code'>[src]</a></span><span class='in-band'>Function <a href='../../index.html'>ic_crypto_internal_threshold_sig_bls12381</a>::<wbr><a href='../index.html'>dkg</a>::<wbr><a href='index.html'>secp256k1</a>::<wbr><a class="fn" href=''>create_resharing_dealing</a></span></h1><pre class='rust fn'>pub fn create_resharing_dealing(<br>&nbsp;&nbsp;&nbsp;&nbsp;seed: <a class="type" href="../../../ic_types/type.Randomness.html" title="type ic_types::Randomness">Randomness</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;dealer_ephemeral_secret_key_bytes: <a class="struct" href="../../../ic_crypto_internal_threshold_sig_bls12381/dkg/secp256k1/types/struct.EphemeralSecretKeyBytes.html" title="struct ic_crypto_internal_threshold_sig_bls12381::dkg::secp256k1::types::EphemeralSecretKeyBytes">EphemeralSecretKeyBytes</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;dkg_id: <a class="struct" href="../../../ic_types/struct.IDkgId.html" title="struct ic_types::IDkgId">IDkgId</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;threshold: <a class="type" href="../../../ic_types/type.NumberOfNodes.html" title="type ic_types::NumberOfNodes">NumberOfNodes</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;receiver_keys: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">&amp;[</a><a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">(</a><a class="struct" href="../../../ic_crypto_internal_threshold_sig_bls12381/dkg/secp256k1/types/struct.EphemeralPublicKeyBytes.html" title="struct ic_crypto_internal_threshold_sig_bls12381::dkg::secp256k1::types::EphemeralPublicKeyBytes">EphemeralPublicKeyBytes</a>, <a class="struct" href="../../../ic_crypto_internal_threshold_sig_bls12381/dkg/secp256k1/types/struct.EphemeralPopBytes.html" title="struct ic_crypto_internal_threshold_sig_bls12381::dkg::secp256k1::types::EphemeralPopBytes">EphemeralPopBytes</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">)</a>&gt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">]</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;reshared_threshold_secret_key_bytes: <a class="struct" href="../../../ic_crypto_internal_threshold_sig_bls12381/types/struct.SecretKeyBytes.html" title="struct ic_crypto_internal_threshold_sig_bls12381::types::SecretKeyBytes">ThresholdSecretKeyBytes</a><br>) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="struct" href="../../../ic_crypto_internal_threshold_sig_bls12381/dkg/secp256k1/types/struct.CLibDealingBytes.html" title="struct ic_crypto_internal_threshold_sig_bls12381::dkg::secp256k1::types::CLibDealingBytes">CLibDealingBytes</a>, <a class="enum" href="../../../ic_crypto_internal_threshold_sig_bls12381/api/dkg_errors/enum.DkgCreateReshareDealingError.html" title="enum ic_crypto_internal_threshold_sig_bls12381::api::dkg_errors::DkgCreateReshareDealingError">DkgCreateReshareDealingError</a>&gt;</pre><div class='docblock'><p>Creates a resharing dealing.</p>
+<p>The special property of a resharing key generation is that the dealer
+predefines the combined threshold secret key.</p>
+<h1 id="arguments" class="section-header"><a href="#arguments">Arguments</a></h1>
+<ul>
+<li><code>seed</code> is a secret random number used to generate the threshold keys.</li>
+<li><code>dealer_ephemeral_secret_key_bytes</code> is used to encrypt shares.</li>
+<li><code>threshold</code> is the minimum number of receivers needed to sign a valid
+threshold signature.</li>
+<li><code>dkg_id</code> is the identifier of the DKG instance this dealing is used for.</li>
+<li><code>receiver_keys</code> is the ephemeral public keys of the receivers, used to
+encrypt their shares.  Given that some receivers may be ineligible this
+takes the standard form <code>&lt;Vec&lt;Option&lt;EphemeralPublicKey&gt;&gt;</code>, where:
+<ul>
+<li>the index in the vector corresponds to the receiver index</li>
+<li>the <code>Option</code> is set to <code>None</code> for ineligible, discredited or otherwise
+non-participating receivers.</li>
+</ul>
+</li>
+<li><code>reshared_threshold_secret_key</code> is the dealer's preceding threshold secret
+key; it is shared in this dealing.</li>
+</ul>
+<h1 id="panics" class="section-header"><a href="#panics">Panics</a></h1>
+<ul>
+<li>Threshold keys should be generated for every participating receiver.  This
+method panics if there is a mismatch, i.e.:
+<ul>
+<li>there is a receiver with an ephemeral key for which no threshold key is
+generated, OR</li>
+<li>there is a receiver with no ephemeral key for which a threshold key is
+generated.</li>
+</ul>
+</li>
+</ul>
+<h1 id="errors" class="section-header"><a href="#errors">Errors</a></h1>
+<ul>
+<li>The number of eligible receivers should be equal to or greater than the
+threshold; otherwise this MUST return an error.  Note: This is checked in
+the threshold library by <code>keygen(..)</code>.</li>
+<li>The public keys must be well formed, otherwise this MUST return an error.</li>
+<li><code>reshared_secret_key</code> must be well formed, otherwise this MUST return an
+error.</li>
+</ul>
+<h1 id="returns" class="section-header"><a href="#returns">Returns</a></h1>
+<p>The returned data structure contains the threshold public coefficients and
+encrypted threshold secret keys.  Each encrypted secret key can be decrypted
+by the corresponding receiver.</p>
+</div></section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../../../";window.currentCrate = "ic_crypto_internal_threshold_sig_bls12381";</script><script src="../../../main.js"></script><script defer src="../../../search-index.js"></script></body></html>

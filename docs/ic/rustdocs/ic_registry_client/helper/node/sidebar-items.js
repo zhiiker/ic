@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["ConnectionEndpoint","A connection endpoint."],["NodeRecord","A node: one machine running a replica instance."]],"trait":[["NodeRegistry",""]],"type":[["NodeId","A type representing a node's [`PrincipalId`]."],["RegistryVersion","A type representing the registry's version."],["SubnetId","A type representing a subnet's [`PrincipalId`]."]]});

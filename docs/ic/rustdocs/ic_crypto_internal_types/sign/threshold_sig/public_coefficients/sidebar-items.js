@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["PublicCoefficients","Public coefficients for threshold signatures. This is a generalized public key."]],"mod":[["bls12_381","Data types for BLS12-381 public coefficients."]],"type":[["CspPublicCoefficients","A type alias for `PublicCoefficients`."]]});

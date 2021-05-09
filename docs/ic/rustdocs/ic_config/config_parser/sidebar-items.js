@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["ConfigError",""],["ConfigSource","ConfigSource specifies source of a serialized configuration file."]],"trait":[["ConfigValidate","Rules for validating the values of the Config struct This prevents the Replica from being instantiated with an invalid configuration"]]});

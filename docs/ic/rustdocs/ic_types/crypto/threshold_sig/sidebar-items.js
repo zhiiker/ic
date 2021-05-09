@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["ThresholdSigPublicKeyBytesConversionError","Converting a threshold signature public key to bytes failed."]],"mod":[["errors","Errors that may occur in the context of threshold signatures."],["ni_dkg","Types for non-interactive distributed key generation (NI-DKG)."]],"struct":[["ThresholdSigPublicKey","A threshold signature public key."]]});

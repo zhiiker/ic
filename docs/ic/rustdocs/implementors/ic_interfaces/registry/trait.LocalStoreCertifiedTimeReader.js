@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_registry_common"] = [{"text":"impl <a class=\"trait\" href=\"ic_interfaces/registry/trait.LocalStoreCertifiedTimeReader.html\" title=\"trait ic_interfaces::registry::LocalStoreCertifiedTimeReader\">LocalStoreCertifiedTimeReader</a> for <a class=\"struct\" href=\"ic_registry_common/local_store/struct.LocalStoreImpl.html\" title=\"struct ic_registry_common::local_store::LocalStoreImpl\">LocalStoreImpl</a>","synthetic":false,"types":["ic_registry_common::local_store::LocalStoreImpl"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

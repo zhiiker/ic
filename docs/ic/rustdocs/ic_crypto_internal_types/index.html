@@ -1,0 +1,36 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `ic_crypto_internal_types` crate."><meta name="keywords" content="rust, rustlang, rust-lang, ic_crypto_internal_types"><title>ic_crypto_internal_types - Rust</title><link rel="stylesheet" type="text/css" href="../normalize.css"><link rel="stylesheet" type="text/css" href="../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../dark.css"><link rel="stylesheet" type="text/css" href="../light.css" id="themeStyle"><script src="../storage.js"></script><noscript><link rel="stylesheet" href="../noscript.css"></noscript><link rel="shortcut icon" href="../favicon.ico"><style type="text/css">#crate-search{background-image:url("../down-arrow.svg");}</style></head><body class="rustdoc mod"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../ic_crypto_internal_types/index.html'><div class='logo-container'><img src='../rust-logo.png' alt='logo'></div></a><p class='location'>Crate ic_crypto_internal_types</p><div class="sidebar-elems"><a id='all-types' href='all.html'><p>See all ic_crypto_internal_types's items</p></a><div class="block items"><ul><li><a href="#modules">Modules</a></li><li><a href="#macros">Macros</a></li><li><a href="#types">Type Definitions</a></li></ul></div><p class='location'></p><script>window.sidebarCurrent = {name: 'ic_crypto_internal_types', ty: 'mod', relpath: '../'};</script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../settings.html"><img src="../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../src/ic_crypto_internal_types/lib.rs.html#1-35' title='goto source code'>[src]</a></span><span class='in-band'>Crate <a class="mod" href=''>ic_crypto_internal_types</a></span></h1><div class='docblock'><p>Types that are used internally in the crypto component.</p>
+<p>The structure of internal types is as follows:</p>
+<p>The type for the external API (e.g. <code>EncryptionPublicKey</code>) is defined in the
+types crate:</p>
+<ul>
+<li>It wraps a type (e.g. <code>CspEncryptionPublicKey</code>) that is defined in the
+internal-types crate. The type is wrapped as a private field called
+<code>internal</code>.</li>
+<li>This ensures that callers using the external API do not have access to the
+internal type (unless they imported crypto/internal-types in Cargo.toml,
+which is frowned upon).</li>
+</ul>
+<p>The type for the internal API (e.g. <code>CspEncryptionPublicKey</code>) is defined in
+the internal-types crate:</p>
+<ul>
+<li>It wraps a type (e.g. <code>InternalCspEncryptionPublicKey</code>) that is defined in
+the same crate. The type is wrapped as a private field called <code>internal</code>.</li>
+<li>This makes it a bit harder to access the internal CSP type from the
+outside, as it would explicitly have to be imported (which is frowned
+upon).</li>
+<li>Note that the same pattern as for external types could be used for CSP
+types at a later point, so that accessing the internal CSP type would
+require an import in Cargo.toml.</li>
+</ul>
+</div><h2 id='modules' class='section-header'><a href="#modules">Modules</a></h2>
+<table><tr class='module-item'><td><a class="mod" href="context/index.html" title='ic_crypto_internal_types::context mod'>context</a></td><td class='docblock-short'><p>Domain separation context types for hashing.</p>
+</td></tr><tr class='module-item'><td><a class="mod" href="curves/index.html" title='ic_crypto_internal_types::curves mod'>curves</a></td><td class='docblock-short'><p>Elliptic curve data types.</p>
+</td></tr><tr class='module-item'><td><a class="mod" href="encrypt/index.html" title='ic_crypto_internal_types::encrypt mod'>encrypt</a></td><td class='docblock-short'><p>Encryption scheme types.</p>
+</td></tr><tr class='module-item'><td><a class="mod" href="scope/index.html" title='ic_crypto_internal_types::scope mod'>scope</a></td><td class='docblock-short'><p>Defines scopes for grouping keys.</p>
+</td></tr><tr class='module-item'><td><a class="mod" href="serde_macro/index.html" title='ic_crypto_internal_types::serde_macro mod'>serde_macro</a></td><td class='docblock-short'><p>Macros for serialization and deserialization.</p>
+</td></tr><tr class='module-item'><td><a class="mod" href="sign/index.html" title='ic_crypto_internal_types::sign mod'>sign</a></td><td class='docblock-short'><p>Data types used for signing, verification and key generation.</p>
+</td></tr></table><h2 id='macros' class='section-header'><a href="#macros">Macros</a></h2>
+<table><tr class='module-item'><td><a class="macro" href="macro.derive_serde.html" title='ic_crypto_internal_types::derive_serde macro'>derive_serde</a></td><td class='docblock-short'><p>A custom macro to serialize from and to bytes.</p>
+</td></tr></table><h2 id='types' class='section-header'><a href="#types">Type Definitions</a></h2>
+<table><tr class='module-item'><td><a class="type" href="type.NodeIndex.html" title='ic_crypto_internal_types::NodeIndex type'>NodeIndex</a></td><td class='docblock-short'><p>The index of a node.</p>
+</td></tr></table></section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../";window.currentCrate = "ic_crypto_internal_types";</script><script src="../main.js"></script><script defer src="../search-index.js"></script></body></html>

@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["EphemeralPublicKeyBytes","The public key as byte array."]]});

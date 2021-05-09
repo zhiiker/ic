@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["fs_key_set","Converts a secret key into a forward secure secret key set."]],"mod":[["groth20","Type specialisations for the NiDkg_Groth20 scheme."]],"struct":[["SpecialisationError","An error during specialisation"]]});

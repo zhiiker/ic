@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["CreateNeuron","This message specifies how to create a new neuron on behalf of the node provider."]]});

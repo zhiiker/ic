@@ -1,0 +1,1 @@
+initSidebarItems({"constant":[["DECIMAL_PLACES",""],["ICP_SUBDIVIDABLE_BY","How many times can ICPs be divided"],["MIN_BURN_AMOUNT",""],["TRANSACTION_FEE","This is 1/10,000th of an ICP, this is probably more than it costs us to store a transaction so it will likely come down in the future"]],"struct":[["ICPTs",""]]});

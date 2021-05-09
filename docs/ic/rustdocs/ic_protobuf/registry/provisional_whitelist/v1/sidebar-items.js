@@ -1,0 +1,1 @@
+initSidebarItems({"mod":[["provisional_whitelist","Nested message and enum types in `ProvisionalWhitelist`."]],"struct":[["ProvisionalWhitelist",""]]});

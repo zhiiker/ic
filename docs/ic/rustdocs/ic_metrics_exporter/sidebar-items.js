@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["MetricsRuntimeImpl","The type of a metrics runtime implementation."]]});

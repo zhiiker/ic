@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["create_external_update_proposal_binary",""],["create_external_update_proposal_candid","Simplified the process of creating an ExternalUpdate proposal."],["create_make_proposal_payload","Wraps the given proposal into a MakeProposal command, and wraps the command into a payload to call `manage_neuron`."],["decode_make_proposal_response",""]]});

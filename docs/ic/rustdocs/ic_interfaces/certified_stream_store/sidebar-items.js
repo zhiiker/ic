@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["DecodeStreamError","Describes errors that can happen when decoding a certified stream slice."],["EncodeStreamError","Describes errors that can happen when encoding a certified stream slice."]],"trait":[["CertifiedStreamStore","Responsible for fetching slices of certified streams and attaching certifications to them."]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["CryptoConfig","`# use ic_config::crypto::CryptoConfig; let config = \"{ crypto_root: '/tmp/ic_crypto' }\"; # let deserialized: CryptoConfig = json5::from_str(&config).unwrap();`"]]});

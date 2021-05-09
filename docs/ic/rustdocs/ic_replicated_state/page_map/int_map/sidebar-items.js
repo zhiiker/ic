@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["IntMap","Purely functional persistent sorted map with an integer key."],["IntMapIter","Iterates over an IntMap, visiting keys in sorted order."]]});

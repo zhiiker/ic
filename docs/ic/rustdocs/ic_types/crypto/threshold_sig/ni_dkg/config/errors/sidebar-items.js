@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["NiDkgConfigValidationError","Occurs if a non-interactive DKG configuration is invalid."]],"struct":[["NiDkgThresholdZeroError","Occurs if the threshold is zero."]]});

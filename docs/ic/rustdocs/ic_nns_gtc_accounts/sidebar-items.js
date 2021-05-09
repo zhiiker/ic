@@ -1,0 +1,1 @@
+initSidebarItems({"static":[["ECT_ACCOUNTS","Early Contributor Tokenholder accounts"],["SEED_ROUND_ACCOUNTS","Seed Round accounts"]]});

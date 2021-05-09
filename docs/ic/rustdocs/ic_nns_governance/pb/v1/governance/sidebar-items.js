@@ -1,0 +1,1 @@
+initSidebarItems({"mod":[["neuron_in_flight_command","Nested message and enum types in `NeuronInFlightCommand`."]],"struct":[["NeuronInFlightCommand","The possible commands that require interaction with the ledger."]]});

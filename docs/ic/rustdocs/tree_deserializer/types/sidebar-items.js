@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["LebDecodingError","Error indicating that conversion from bytes to an integer failed."]],"struct":[["Leb128EncodedU64","64-bit unsigned integer that is deserialized from a byte array using LEB-128 encoding."]]});

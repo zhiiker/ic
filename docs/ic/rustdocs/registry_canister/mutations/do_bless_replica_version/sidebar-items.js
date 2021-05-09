@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["blessed_versions_to_string",""]],"struct":[["BlessReplicaVersionPayload","The payload of a proposal to bless a given replica version."]]});

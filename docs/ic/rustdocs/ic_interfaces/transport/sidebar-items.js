@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["SendError",""]],"trait":[["AsyncTransportEventHandler","Async version of the transport event handler"],["Transport","Transport layer APIs."],["TransportEventHandler","API for handling transport events."]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["spawn_and_wait","Executes async task in sync context without starving other independently  spawned tasks."]],"struct":[["ObservableCountingSemaphore","Semaphore with integrated gauge that tracks the outstanding permits."],["SemaphorePermit","The semaphore permit type returned from the `ObservableCountingSemaphore`."]]});

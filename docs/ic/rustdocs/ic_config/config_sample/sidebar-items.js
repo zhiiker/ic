@@ -1,0 +1,1 @@
+initSidebarItems({"constant":[["SAMPLE_CONFIG","This constant contains a configuration of ic-replica with extra comments describing the purpose and possible values of every field."]]});

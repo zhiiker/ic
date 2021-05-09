@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["ConstScope","Simple, fixed labels."],["Scope","A scope is a label for grouping keys."],["ScopeSchemeNames","Auto-generated discriminant enum variants"]],"struct":[["ConstScopeIter",""]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["PublicCoefficientsBytes","The public coefficients of a threshold public key."]]});

@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_embedders"] = [{"text":"impl <a class=\"trait\" href=\"ic_interfaces/execution_environment/trait.InterruptedExec.html\" title=\"trait ic_interfaces::execution_environment::InterruptedExec\">InterruptedExec</a>&lt;<a class=\"struct\" href=\"ic_embedders/struct.WasmExecutionOutput.html\" title=\"struct ic_embedders::WasmExecutionOutput\">WasmExecutionOutput</a>&gt; for <a class=\"struct\" href=\"ic_embedders/struct.ResumeToken.html\" title=\"struct ic_embedders::ResumeToken\">ResumeToken</a>","synthetic":false,"types":["ic_embedders::ResumeToken"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

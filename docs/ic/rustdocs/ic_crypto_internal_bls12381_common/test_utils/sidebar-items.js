@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["int_to_fr","Convert a signed integer into the corresponding field element"],["uint_to_fr","Convert an unsigned number into the corresponding field element.  This is so that we can make tests on Fr that are easily understandable to humans by using the integer equivalents."],["uint_to_g2","Get G2 elements by primitive double and add."]]});

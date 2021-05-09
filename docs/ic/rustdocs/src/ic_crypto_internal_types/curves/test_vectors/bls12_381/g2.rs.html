@@ -1,0 +1,231 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source to the Rust file `crypto/internal/crypto_lib/types/src/curves/test_vectors/bls12_381/g2.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>g2.rs.html -- source</title><link rel="stylesheet" type="text/css" href="../../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../../dark.css"><link rel="stylesheet" type="text/css" href="../../../../../light.css" id="themeStyle"><script src="../../../../../storage.js"></script><noscript><link rel="stylesheet" href="../../../../../noscript.css"></noscript><link rel="shortcut icon" href="../../../../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../../../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../../../../ic_crypto_internal_types/index.html'><div class='logo-container'><img src='../../../../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../../../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../../../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../../../../settings.html"><img src="../../../../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1">  1</span>
+<span id="2">  2</span>
+<span id="3">  3</span>
+<span id="4">  4</span>
+<span id="5">  5</span>
+<span id="6">  6</span>
+<span id="7">  7</span>
+<span id="8">  8</span>
+<span id="9">  9</span>
+<span id="10"> 10</span>
+<span id="11"> 11</span>
+<span id="12"> 12</span>
+<span id="13"> 13</span>
+<span id="14"> 14</span>
+<span id="15"> 15</span>
+<span id="16"> 16</span>
+<span id="17"> 17</span>
+<span id="18"> 18</span>
+<span id="19"> 19</span>
+<span id="20"> 20</span>
+<span id="21"> 21</span>
+<span id="22"> 22</span>
+<span id="23"> 23</span>
+<span id="24"> 24</span>
+<span id="25"> 25</span>
+<span id="26"> 26</span>
+<span id="27"> 27</span>
+<span id="28"> 28</span>
+<span id="29"> 29</span>
+<span id="30"> 30</span>
+<span id="31"> 31</span>
+<span id="32"> 32</span>
+<span id="33"> 33</span>
+<span id="34"> 34</span>
+<span id="35"> 35</span>
+<span id="36"> 36</span>
+<span id="37"> 37</span>
+<span id="38"> 38</span>
+<span id="39"> 39</span>
+<span id="40"> 40</span>
+<span id="41"> 41</span>
+<span id="42"> 42</span>
+<span id="43"> 43</span>
+<span id="44"> 44</span>
+<span id="45"> 45</span>
+<span id="46"> 46</span>
+<span id="47"> 47</span>
+<span id="48"> 48</span>
+<span id="49"> 49</span>
+<span id="50"> 50</span>
+<span id="51"> 51</span>
+<span id="52"> 52</span>
+<span id="53"> 53</span>
+<span id="54"> 54</span>
+<span id="55"> 55</span>
+<span id="56"> 56</span>
+<span id="57"> 57</span>
+<span id="58"> 58</span>
+<span id="59"> 59</span>
+<span id="60"> 60</span>
+<span id="61"> 61</span>
+<span id="62"> 62</span>
+<span id="63"> 63</span>
+<span id="64"> 64</span>
+<span id="65"> 65</span>
+<span id="66"> 66</span>
+<span id="67"> 67</span>
+<span id="68"> 68</span>
+<span id="69"> 69</span>
+<span id="70"> 70</span>
+<span id="71"> 71</span>
+<span id="72"> 72</span>
+<span id="73"> 73</span>
+<span id="74"> 74</span>
+<span id="75"> 75</span>
+<span id="76"> 76</span>
+<span id="77"> 77</span>
+<span id="78"> 78</span>
+<span id="79"> 79</span>
+<span id="80"> 80</span>
+<span id="81"> 81</span>
+<span id="82"> 82</span>
+<span id="83"> 83</span>
+<span id="84"> 84</span>
+<span id="85"> 85</span>
+<span id="86"> 86</span>
+<span id="87"> 87</span>
+<span id="88"> 88</span>
+<span id="89"> 89</span>
+<span id="90"> 90</span>
+<span id="91"> 91</span>
+<span id="92"> 92</span>
+<span id="93"> 93</span>
+<span id="94"> 94</span>
+<span id="95"> 95</span>
+<span id="96"> 96</span>
+<span id="97"> 97</span>
+<span id="98"> 98</span>
+<span id="99"> 99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+</pre><div class="example-wrap"><pre class="rust ">
+<span class="attribute">#![<span class="ident">allow</span>(<span class="ident">clippy</span>::<span class="ident">unwrap_used</span>)]</span>
+<span class="doccomment">//! Test vectors for the serial representation of BLS12-381 G2</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! Spec:</span>
+<span class="doccomment">//! * Latest: https://datatracker.ietf.org/doc/draft-irtf-cfrg-pairing-friendly-curves/?include_text=1#ddSearchMenu:~:text=introduce%20the%20parameters%20of%20the%20Barreto%2DLynn%2DScott</span>
+<span class="doccomment">//! * Version 8: https://tools.ietf.org/html/draft-irtf-cfrg-pairing-friendly-curves-08#page-17</span>
+
+<span class="doccomment">/// The chosen generator for the G2 group.</span>
+<span class="doccomment">///</span>
+<span class="doccomment">/// Note: This matches `x&#39;_1 || x&#39;_0` in the spec, with flag bits added to the</span>
+<span class="doccomment">/// first byte.</span>
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">GENERATOR</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8&quot;</span>;
+<span class="doccomment">/// The additive identity, also known as zero.</span>
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">INFINITY</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000&quot;</span>;
+<span class="doccomment">/// Powers of 2: `g2_generator * [1, 2, 4, 8, ..., 256]`</span>
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">POWERS_OF_2</span>: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span><span class="ident">str</span>] <span class="op">=</span> <span class="kw-2">&amp;</span>[
+    <span class="ident">GENERATOR</span>,
+    <span class="string">&quot;aa4edef9c1ed7f729f520e47730a124fd70662a904ba1074728114d1031e1572c6c886f6b57ec72a6178288c47c335771638533957d540a9d2370f17cc7ed5863bc0b995b8825e0ee1ea1e1e4d00dbae81f14b0bf3611b78c952aacab827a053&quot;</span>,
+    <span class="string">&quot;870227d3f13684fdb7ce31b8065ba3acb35f7bde6fe2ddfefa359f8b35d08a9ab9537b43e24f4ffb720b5a0bda2a82f20e7a30979a8853a077454eb63b8dcee75f106221b262886bb8e01b0abb043368da82f60899cc1412e33e4120195fc557&quot;</span>,
+    <span class="string">&quot;92be651a5fa620340d418834526d37a8c932652345400b4cd9d43c8f41c080f41a6d9558118ebeab9d4268bb73e850e102142a58bae275564a6d63cb6bd6266ca66bef07a6ab8ca37b9d0ba2d4effbccfd89c169649f7d0e8a3eb006846579ad&quot;</span>,
+    <span class="string">&quot;a70401d9bba01c0445e0a682406b099f21d16d9c348cc97156769084055ca328a145c134b8c8b58f019d62882b2965de1800ecc167bb714100f31e7610cd3fd010ca299b394c01b1a89afd11b051e92989f6336db5e6d3212f6b04673526d839&quot;</span>,
+    <span class="string">&quot;ac1bcdf2034a7d577355b280f431cf2bf2cb5e955915904766a52d57b3aca6e8c4c96af35382e0c63687f4a77724012b0f22d7c4d43cbb513893e53e6cf995c70e4f5fa7c5b6f167838b217825d3d2dadab5f07764ef69d346f2dc97c231a3f6&quot;</span>,
+    <span class="string">&quot;b6480241fab3ca8ec408219988d8dce6180dbed76fd5e9b84fdb42d73759ea991f179a40566038c1ec6cbbd2d16745390254b59e8676796a65a52610b9c88e366f9dbf7fdbdd5983a4e0b691a3c310f8eb5d2bc1177833bdfa1c1b42cacb953f&quot;</span>,
+    <span class="string">&quot;afc5f85e7adc6cea5b3792af7c9fa9d3acc465e3785f40654292be3a09dfd2f266bc765fcfe8da55e948c2312ec571d211f6a8f78fa020f9ea41dc9c2b54e1037c77f59dcb9058a1f7ff95a0102d30b7ad18e0ada1dee28bc05183abf87cdb1e&quot;</span>,
+    <span class="string">&quot;82f7f6cc00b080cb3a7f8976c44d1987fd36a8334db831be269c6f6144c392b54bb934313d5fc832ec41d2f9a4b7ea910412f6b2e37effc7e16d566d6f831572411d130eee4c15d82aa29e44cb4db9b5eb8c08b0ae158cde970d9d29ba368780&quot;</span>,
+];
+<span class="doccomment">/// Positive numbers: `g2_generator * [1, 2, 3, ..., 9]`</span>
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">POSITIVE_NUMBERS</span>: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span><span class="ident">str</span>] <span class="op">=</span> <span class="kw-2">&amp;</span>[
+    <span class="ident">GENERATOR</span>,
+    <span class="string">&quot;aa4edef9c1ed7f729f520e47730a124fd70662a904ba1074728114d1031e1572c6c886f6b57ec72a6178288c47c335771638533957d540a9d2370f17cc7ed5863bc0b995b8825e0ee1ea1e1e4d00dbae81f14b0bf3611b78c952aacab827a053&quot;</span>,
+    <span class="string">&quot;89380275bbc8e5dcea7dc4dd7e0550ff2ac480905396eda55062650f8d251c96eb480673937cc6d9d6a44aaa56ca66dc122915c824a0857e2ee414a3dccb23ae691ae54329781315a0c75df1c04d6d7a50a030fc866f09d516020ef82324afae&quot;</span>,
+    <span class="string">&quot;870227d3f13684fdb7ce31b8065ba3acb35f7bde6fe2ddfefa359f8b35d08a9ab9537b43e24f4ffb720b5a0bda2a82f20e7a30979a8853a077454eb63b8dcee75f106221b262886bb8e01b0abb043368da82f60899cc1412e33e4120195fc557&quot;</span>,
+    <span class="string">&quot;80fb837804dba8213329db46608b6c121d973363c1234a86dd183baff112709cf97096c5e9a1a770ee9d7dc641a894d60411a5de6730ffece671a9f21d65028cc0f1102378de124562cb1ff49db6f004fcd14d683024b0548eff3d1468df2688&quot;</span>,
+    <span class="string">&quot;83f4b4e761936d90fd5f55f99087138a07a69755ad4a46e4dd1c2cfe6d11371e1cc033111a0595e3bba98d0f538db45119e384121b7d70927c49e6d044fd8517c36bc6ed2813a8956dd64f049869e8a77f7e46930240e6984abe26fa6a89658f&quot;</span>,
+    <span class="string">&quot;8d0273f6bf31ed37c3b8d68083ec3d8e20b5f2cc170fa24b9b5be35b34ed013f9a921f1cad1644d4bdb14674247234c8049cd1dbb2d2c3581e54c088135fef36505a6823d61b859437bfc79b617030dc8b40e32bad1fa85b9c0f368af6d38d3c&quot;</span>,
+    <span class="string">&quot;92be651a5fa620340d418834526d37a8c932652345400b4cd9d43c8f41c080f41a6d9558118ebeab9d4268bb73e850e102142a58bae275564a6d63cb6bd6266ca66bef07a6ab8ca37b9d0ba2d4effbccfd89c169649f7d0e8a3eb006846579ad&quot;</span>,
+    <span class="string">&quot;ac48e0d4f9404ae0a7f10774c55a9e838bb09d3bae85b5eaa6b16b0f4dc2354368117f3799c37f3f7126d8b54d3f8393018405e4b67f957b6465ead9f5afc47832d45643dc3aa03af7314c6cf980fa23dd3bb8db3358693ad06011f6a6b1a5ff&quot;</span>,
+];
+<span class="doccomment">/// Negative numbers: `g2_generator * [-1, -2, -3, ..., -9]`</span>
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">NEGATIVE_NUMBERS</span>: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span><span class="ident">str</span>] <span class="op">=</span> <span class="kw-2">&amp;</span>[
+    <span class="string">&quot;b3e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8&quot;</span>,
+    <span class="string">&quot;8a4edef9c1ed7f729f520e47730a124fd70662a904ba1074728114d1031e1572c6c886f6b57ec72a6178288c47c335771638533957d540a9d2370f17cc7ed5863bc0b995b8825e0ee1ea1e1e4d00dbae81f14b0bf3611b78c952aacab827a053&quot;</span>,
+    <span class="string">&quot;a9380275bbc8e5dcea7dc4dd7e0550ff2ac480905396eda55062650f8d251c96eb480673937cc6d9d6a44aaa56ca66dc122915c824a0857e2ee414a3dccb23ae691ae54329781315a0c75df1c04d6d7a50a030fc866f09d516020ef82324afae&quot;</span>,
+    <span class="string">&quot;a70227d3f13684fdb7ce31b8065ba3acb35f7bde6fe2ddfefa359f8b35d08a9ab9537b43e24f4ffb720b5a0bda2a82f20e7a30979a8853a077454eb63b8dcee75f106221b262886bb8e01b0abb043368da82f60899cc1412e33e4120195fc557&quot;</span>,
+    <span class="string">&quot;a0fb837804dba8213329db46608b6c121d973363c1234a86dd183baff112709cf97096c5e9a1a770ee9d7dc641a894d60411a5de6730ffece671a9f21d65028cc0f1102378de124562cb1ff49db6f004fcd14d683024b0548eff3d1468df2688&quot;</span>,
+    <span class="string">&quot;a3f4b4e761936d90fd5f55f99087138a07a69755ad4a46e4dd1c2cfe6d11371e1cc033111a0595e3bba98d0f538db45119e384121b7d70927c49e6d044fd8517c36bc6ed2813a8956dd64f049869e8a77f7e46930240e6984abe26fa6a89658f&quot;</span>,
+    <span class="string">&quot;ad0273f6bf31ed37c3b8d68083ec3d8e20b5f2cc170fa24b9b5be35b34ed013f9a921f1cad1644d4bdb14674247234c8049cd1dbb2d2c3581e54c088135fef36505a6823d61b859437bfc79b617030dc8b40e32bad1fa85b9c0f368af6d38d3c&quot;</span>,
+    <span class="string">&quot;b2be651a5fa620340d418834526d37a8c932652345400b4cd9d43c8f41c080f41a6d9558118ebeab9d4268bb73e850e102142a58bae275564a6d63cb6bd6266ca66bef07a6ab8ca37b9d0ba2d4effbccfd89c169649f7d0e8a3eb006846579ad&quot;</span>,
+    <span class="string">&quot;8c48e0d4f9404ae0a7f10774c55a9e838bb09d3bae85b5eaa6b16b0f4dc2354368117f3799c37f3f7126d8b54d3f8393018405e4b67f957b6465ead9f5afc47832d45643dc3aa03af7314c6cf980fa23dd3bb8db3358693ad06011f6a6b1a5ff&quot;</span>,
+];
+
+<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
+<span class="kw">mod</span> <span class="ident">tests</span> {
+    <span class="kw">use</span> <span class="kw">super</span>::<span class="kw-2">*</span>;
+    <span class="kw">use</span> <span class="kw">crate</span>::<span class="ident">curves</span>::<span class="ident">bls12_381</span>::<span class="ident">G2</span>;
+    <span class="kw">const</span> <span class="ident">FINITE_TEST_VECTORS</span>: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span><span class="ident">str</span>]] <span class="op">=</span> <span class="kw-2">&amp;</span>[<span class="ident">POSITIVE_NUMBERS</span>, <span class="ident">POWERS_OF_2</span>, <span class="ident">NEGATIVE_NUMBERS</span>];
+
+    <span class="attribute">#[<span class="ident">test</span>]</span>
+    <span class="kw">fn</span> <span class="ident">flags_have_weight_1_and_do_not_overlap</span>() {
+        <span class="kw">fn</span> <span class="ident">weight</span>(<span class="ident">byte</span>: <span class="ident">u8</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">u8</span> {
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">ans</span>: <span class="ident">u8</span> <span class="op">=</span> (<span class="ident">byte</span> <span class="op">&amp;</span> <span class="number">0x55</span>) <span class="op">+</span> ((<span class="ident">byte</span> <span class="op">&gt;</span><span class="op">&gt;</span> <span class="number">1</span>) <span class="op">&amp;</span> <span class="number">0x55</span>);
+            <span class="ident">ans</span> <span class="op">=</span> (<span class="ident">ans</span> <span class="op">&amp;</span> <span class="number">0x33</span>) <span class="op">+</span> ((<span class="ident">ans</span> <span class="op">&gt;</span><span class="op">&gt;</span> <span class="number">2</span>) <span class="op">&amp;</span> <span class="number">0x33</span>);
+            (<span class="ident">ans</span> <span class="op">&amp;</span> <span class="number">0x0f</span>) <span class="op">+</span> ((<span class="ident">ans</span> <span class="op">&gt;</span><span class="op">&gt;</span> <span class="number">4</span>) <span class="op">&amp;</span> <span class="number">0x0f</span>)
+        }
+        <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">weight</span>(<span class="ident">G2</span>::<span class="ident">COMPRESSED_FLAG</span>), <span class="number">1</span>);
+        <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">weight</span>(<span class="ident">G2</span>::<span class="ident">INFINITY_FLAG</span>), <span class="number">1</span>);
+        <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">weight</span>(<span class="ident">G2</span>::<span class="ident">SIGN_FLAG</span>), <span class="number">1</span>);
+        <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">weight</span>(<span class="ident">G2</span>::<span class="ident">NON_FLAG_BITS</span>), <span class="number">5</span>);
+        <span class="macro">assert_eq</span><span class="macro">!</span>(
+            <span class="ident">weight</span>(<span class="ident">G2</span>::<span class="ident">COMPRESSED_FLAG</span> <span class="op">|</span> <span class="ident">G2</span>::<span class="ident">INFINITY_FLAG</span> <span class="op">|</span> <span class="ident">G2</span>::<span class="ident">SIGN_FLAG</span> <span class="op">|</span> <span class="ident">G2</span>::<span class="ident">NON_FLAG_BITS</span>),
+            <span class="number">8</span>
+        );
+    }
+
+    <span class="attribute">#[<span class="ident">test</span>]</span>
+    <span class="kw">fn</span> <span class="ident">compression_flag_is_set_for_test_vectors</span>() {
+        <span class="kw">for</span> <span class="ident">hex</span> <span class="kw">in</span> <span class="ident">FINITE_TEST_VECTORS</span>
+            .<span class="ident">iter</span>()
+            .<span class="ident">flat_map</span>(<span class="op">|</span><span class="ident">x</span><span class="op">|</span> <span class="ident">x</span>.<span class="ident">iter</span>())
+            .<span class="ident">chain</span>([<span class="ident">INFINITY</span>].<span class="ident">iter</span>())
+        {
+            <span class="macro">assert_eq</span><span class="macro">!</span>(
+                <span class="ident">hex</span>::<span class="ident">decode</span>(<span class="ident">hex</span>).<span class="ident">unwrap</span>()[<span class="ident">G2</span>::<span class="ident">FLAG_BYTE_OFFSET</span>] <span class="op">&amp;</span> <span class="ident">G2</span>::<span class="ident">COMPRESSED_FLAG</span>,
+                <span class="ident">G2</span>::<span class="ident">COMPRESSED_FLAG</span>
+            );
+        }
+    }
+
+    <span class="attribute">#[<span class="ident">test</span>]</span>
+    <span class="kw">fn</span> <span class="ident">infinity_flag_is_set_for_infinity</span>() {
+        <span class="macro">assert_eq</span><span class="macro">!</span>(
+            <span class="ident">hex</span>::<span class="ident">decode</span>(<span class="ident">INFINITY</span>).<span class="ident">unwrap</span>()[<span class="ident">G2</span>::<span class="ident">FLAG_BYTE_OFFSET</span>] <span class="op">&amp;</span> <span class="ident">G2</span>::<span class="ident">INFINITY_FLAG</span>,
+            <span class="ident">G2</span>::<span class="ident">INFINITY_FLAG</span>
+        );
+    }
+    <span class="attribute">#[<span class="ident">test</span>]</span>
+    <span class="kw">fn</span> <span class="ident">infinity_flag_is_not_set_for_finite_values</span>() {
+        <span class="kw">for</span> <span class="ident">hex</span> <span class="kw">in</span> <span class="ident">FINITE_TEST_VECTORS</span>.<span class="ident">iter</span>().<span class="ident">flat_map</span>(<span class="op">|</span><span class="ident">x</span><span class="op">|</span> <span class="ident">x</span>.<span class="ident">iter</span>()) {
+            <span class="macro">assert_eq</span><span class="macro">!</span>(
+                <span class="ident">hex</span>::<span class="ident">decode</span>(<span class="ident">hex</span>).<span class="ident">unwrap</span>()[<span class="ident">G2</span>::<span class="ident">FLAG_BYTE_OFFSET</span>] <span class="op">&amp;</span> <span class="ident">G2</span>::<span class="ident">INFINITY_FLAG</span>,
+                <span class="number">0</span>
+            );
+        }
+    }
+    <span class="attribute">#[<span class="ident">test</span>]</span>
+    <span class="kw">fn</span> <span class="ident">sign_flag_distinguishes_negative_from_positive</span>() {
+        <span class="kw">for</span> (<span class="ident">negative</span>, <span class="ident">positive</span>) <span class="kw">in</span> <span class="ident">NEGATIVE_NUMBERS</span>.<span class="ident">iter</span>().<span class="ident">zip</span>(<span class="ident">POSITIVE_NUMBERS</span>) {
+            <span class="kw">let</span> <span class="ident">positive</span> <span class="op">=</span> <span class="ident">hex</span>::<span class="ident">decode</span>(<span class="ident">positive</span>).<span class="ident">unwrap</span>();
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">negated_negative</span> <span class="op">=</span> <span class="ident">hex</span>::<span class="ident">decode</span>(<span class="ident">negative</span>).<span class="ident">unwrap</span>();
+            <span class="ident">negated_negative</span>[<span class="ident">G2</span>::<span class="ident">FLAG_BYTE_OFFSET</span>] <span class="op">^</span><span class="op">=</span> <span class="ident">G2</span>::<span class="ident">SIGN_FLAG</span>;
+            <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">negated_negative</span>, <span class="ident">positive</span>);
+        }
+    }
+}
+</pre></div>
+</section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../../../../../";window.currentCrate = "ic_crypto_internal_types";</script><script src="../../../../../main.js"></script><script src="../../../../../source-script.js"></script><script src="../../../../../source-files.js"></script><script defer src="../../../../../search-index.js"></script></body></html>

@@ -1,0 +1,87 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source to the Rust file `crypto/internal/crypto_service_provider/src/imported_test_utils/ed25519.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>ed25519.rs.html -- source</title><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../dark.css"><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script src="../../../storage.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="shortcut icon" href="../../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../../ic_crypto_internal_csp/index.html'><div class='logo-container'><img src='../../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../../settings.html"><img src="../../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1"> 1</span>
+<span id="2"> 2</span>
+<span id="3"> 3</span>
+<span id="4"> 4</span>
+<span id="5"> 5</span>
+<span id="6"> 6</span>
+<span id="7"> 7</span>
+<span id="8"> 8</span>
+<span id="9"> 9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+</pre><div class="example-wrap"><pre class="rust ">
+<span class="doccomment">//! Ed25519 test vectors</span>
+
+<span class="kw">use</span> <span class="kw">crate</span>::<span class="ident">types</span>::{<span class="ident">CspPublicKey</span>, <span class="ident">CspSecretKey</span>, <span class="ident">CspSignature</span>};
+<span class="kw">use</span> <span class="ident">ic_crypto_internal_test_vectors</span>::<span class="ident">ed25519</span>::<span class="kw-2">*</span>;
+<span class="kw">use</span> <span class="ident">ic_crypto_internal_test_vectors</span>::<span class="ident">unhex</span>::<span class="ident">hex_to_byte_vec</span>;
+
+<span class="doccomment">/// TODO(CRP-995): This function is only used for testing and should be removed</span>
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">csp_testvec</span>(
+    <span class="ident">test_vec</span>: <span class="ident">Ed25519TestVector</span>,
+) <span class="op">-</span><span class="op">&gt;</span> (<span class="ident">CspSecretKey</span>, <span class="ident">CspPublicKey</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="ident">CspSignature</span>) {
+    <span class="kw">match</span> <span class="ident">test_vec</span> {
+        <span class="ident">Ed25519TestVector</span>::<span class="ident">RFC8032_ED25519_1</span> <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="kw">let</span> <span class="ident">sk</span> <span class="op">=</span> <span class="ident">CspSecretKey</span>::<span class="ident">ed25519_from_hex</span>(<span class="ident">TESTVEC_RFC8032_ED25519_1_SK</span>);
+            <span class="kw">let</span> <span class="ident">pk</span> <span class="op">=</span> <span class="ident">CspPublicKey</span>::<span class="ident">ed25519_from_hex</span>(<span class="ident">TESTVEC_RFC8032_ED25519_1_PK</span>);
+            <span class="kw">let</span> <span class="ident">msg</span> <span class="op">=</span> <span class="ident">hex_to_byte_vec</span>(<span class="ident">TESTVEC_RFC8032_ED25519_1_MSG</span>);
+            <span class="kw">let</span> <span class="ident">sig</span> <span class="op">=</span> <span class="ident">CspSignature</span>::<span class="ident">ed25519_from_hex</span>(<span class="ident">TESTVEC_RFC8032_ED25519_1_SIG</span>);
+            (<span class="ident">sk</span>, <span class="ident">pk</span>, <span class="ident">msg</span>, <span class="ident">sig</span>)
+        }
+        <span class="ident">Ed25519TestVector</span>::<span class="ident">RFC8032_ED25519_SHA_ABC</span> <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="kw">let</span> <span class="ident">sk</span> <span class="op">=</span> <span class="ident">CspSecretKey</span>::<span class="ident">ed25519_from_hex</span>(<span class="ident">TESTVEC_RFC8032_ED25519_SHA_ABC_SK</span>);
+            <span class="kw">let</span> <span class="ident">pk</span> <span class="op">=</span> <span class="ident">CspPublicKey</span>::<span class="ident">ed25519_from_hex</span>(<span class="ident">TESTVEC_RFC8032_ED25519_SHA_ABC_PK</span>);
+            <span class="kw">let</span> <span class="ident">msg</span> <span class="op">=</span> <span class="ident">hex_to_byte_vec</span>(<span class="ident">TESTVEC_RFC8032_ED25519_SHA_ABC_MSG</span>);
+            <span class="kw">let</span> <span class="ident">sig</span> <span class="op">=</span> <span class="ident">CspSignature</span>::<span class="ident">ed25519_from_hex</span>(<span class="ident">TESTVEC_RFC8032_ED25519_SHA_ABC_SIG</span>);
+            (<span class="ident">sk</span>, <span class="ident">pk</span>, <span class="ident">msg</span>, <span class="ident">sig</span>)
+        }
+        <span class="ident">Ed25519TestVector</span>::<span class="ident">MESSAGE_LEN_256_BIT_STABILITY_1</span> <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="kw">let</span> <span class="ident">sk</span> <span class="op">=</span> <span class="ident">CspSecretKey</span>::<span class="ident">ed25519_from_hex</span>(<span class="ident">TESTVEC_MESSAGE_LEN_256_BIT_STABILITY_1_SK</span>);
+            <span class="kw">let</span> <span class="ident">pk</span> <span class="op">=</span> <span class="ident">CspPublicKey</span>::<span class="ident">ed25519_from_hex</span>(<span class="ident">TESTVEC_MESSAGE_LEN_256_BIT_STABILITY_1_PK</span>);
+            <span class="kw">let</span> <span class="ident">msg</span> <span class="op">=</span> <span class="ident">hex_to_byte_vec</span>(<span class="ident">TESTVEC_MESSAGE_LEN_256_BIT_STABILITY_1_MSG</span>);
+            <span class="kw">let</span> <span class="ident">sig</span> <span class="op">=</span> <span class="ident">CspSignature</span>::<span class="ident">ed25519_from_hex</span>(<span class="ident">TESTVEC_MESSAGE_LEN_256_BIT_STABILITY_1_SIG</span>);
+            (<span class="ident">sk</span>, <span class="ident">pk</span>, <span class="ident">msg</span>, <span class="ident">sig</span>)
+        }
+        <span class="ident">Ed25519TestVector</span>::<span class="ident">MESSAGE_LEN_256_BIT_STABILITY_2</span> <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="kw">let</span> <span class="ident">sk</span> <span class="op">=</span> <span class="ident">CspSecretKey</span>::<span class="ident">ed25519_from_hex</span>(<span class="ident">TESTVEC_MESSAGE_LEN_256_BIT_STABILITY_2_SK</span>);
+            <span class="kw">let</span> <span class="ident">pk</span> <span class="op">=</span> <span class="ident">CspPublicKey</span>::<span class="ident">ed25519_from_hex</span>(<span class="ident">TESTVEC_MESSAGE_LEN_256_BIT_STABILITY_2_PK</span>);
+            <span class="kw">let</span> <span class="ident">msg</span> <span class="op">=</span> <span class="ident">hex_to_byte_vec</span>(<span class="ident">TESTVEC_MESSAGE_LEN_256_BIT_STABILITY_2_MSG</span>);
+            <span class="kw">let</span> <span class="ident">sig</span> <span class="op">=</span> <span class="ident">CspSignature</span>::<span class="ident">ed25519_from_hex</span>(<span class="ident">TESTVEC_MESSAGE_LEN_256_BIT_STABILITY_2_SIG</span>);
+            (<span class="ident">sk</span>, <span class="ident">pk</span>, <span class="ident">msg</span>, <span class="ident">sig</span>)
+        }
+        <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">unimplemented</span><span class="macro">!</span>(<span class="string">&quot;not implemented because currently not used&quot;</span>),
+    }
+}
+</pre></div>
+</section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../../../";window.currentCrate = "ic_crypto_internal_csp";</script><script src="../../../main.js"></script><script src="../../../source-script.js"></script><script src="../../../source-files.js"></script><script defer src="../../../search-index.js"></script></body></html>

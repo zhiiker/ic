@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["UtilityCommandError",""]],"struct":[["UtilityCommand","An invocation of a program, possibly including some input that is passed to stdin."]],"type":[["UtilityCommandResult",""]]});

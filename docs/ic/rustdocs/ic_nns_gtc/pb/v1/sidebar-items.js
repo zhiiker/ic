@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["AccountState","The state of a GTC account"],["Gtc","The internal state of the Genesis Token Canister"],["TransferredNeuron",""]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["assert_bte_node_components_are_redacted","Check that components of a BTENode struct aren't logged in a given debug string."],["malformed_secret_threshold_key_test_vectors","Secret key serialisations, some malformed, some well formed."],["select_n","Select `n` entries from a `list` in a randomized way, as determined by `seed`."]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["main","Processes a command from the command line."]]});

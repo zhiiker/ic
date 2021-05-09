@@ -1,0 +1,153 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source to the Rust file `crypto/internal/test_vectors/src/multi_bls12_381.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>multi_bls12_381.rs.html -- source</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="shortcut icon" href="../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../ic_crypto_internal_test_vectors/index.html'><div class='logo-container'><img src='../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1"> 1</span>
+<span id="2"> 2</span>
+<span id="3"> 3</span>
+<span id="4"> 4</span>
+<span id="5"> 5</span>
+<span id="6"> 6</span>
+<span id="7"> 7</span>
+<span id="8"> 8</span>
+<span id="9"> 9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+</pre><div class="example-wrap"><pre class="rust ">
+<span class="doccomment">//! Test vectors for multisignatures using BLS12-381.</span>
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_1_SK</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;d9c35fad8d209c951f5facdb23ff9615\
+                                                862ae6c68f4b8b35f90f319c411d638b&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_1_PK</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;abf62cf8f448af4fa2071cc31fcdbe56\
+                                                172d90b2a466ef0a66f3f72c063f4d29\
+                                                192f5f19b5ee7118ad2de65da489efac\
+                                                0366758ddfd009fe07afb6d02c0d201b\
+                                                337d0276d68e04c6c56f531a428c27ab\
+                                                b94baaf388d36ecce932843b8ecd9042&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_1_POP</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;aaa8b88d778dae553c8e29b2a0e10b5\
+                                                 4e5f06faef63070113111046ddbcd5c\
+                                                 a3b437bf67001df1b9ccbb0787f1962\
+                                                 a5e&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_1_MSG</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;data&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_1_SIG</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;a29459b4df8957baf446c278ac13979\
+                                                 a54acfca851ba95f49eee0f63198dda\
+                                                 bd690508f48aca0d4fd1afd7a5df8b3\
+                                                 3e7&quot;</span>;
+
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_2_SK</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;5d35cff694966061a3dce24899dbeaa0\
+                                                dea6b7b5ad646cdf8123bda7ec0bc001&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_2_PK</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;b8c1bd6219c455692b8258236e27cd2a\
+                                                709faa36c974c855e482a25ea97d5d8e\
+                                                45d458ce78aab2e7901a58018e56f6d3\
+                                                196d1ba6432aad831a51cf088d263890\
+                                                9d7e02a62bd828cac5df755ee1a3917a\
+                                                29c986b0b98a1eb2b7205ffdf53a5dac&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_2_POP</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;a9b9e680ea05afc3cb9124e5e69ed51\
+                                                 4f9d8ac35df7479103a8e8f0f9719ec\
+                                                 62950a98328781dbebca2165ed39fe2\
+                                                 be0&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_2_MSG</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;data&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_2_SIG</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;ac596a8b71c4dde5adc7d5b35ee27a1\
+                                                 6b6a2b098e4f8022f79f12abd3d8e9d\
+                                                 49bd653157bbe1df10bc09731fcc0e7\
+                                                 c56&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_3_SK</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;e04e114ab24fabb0fa2d3b49065ba50f\
+                                                567660179368a651c05e611fd8ed57a5&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_3_PK</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;a6a627ecde572a33a0c6dfd939e1dc48\
+                                                e588bd6d457c0d5560aa6bb9d31aa7c8\
+                                                0d05c5c95ae48f26564f1459cf6cfc69\
+                                                107ade34921347fe0a655ec95b0ebf3a\
+                                                2071f24dcd24fc166a493011c90e9c47\
+                                                73acf1aebfe14c5aaa449d4943598d90&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_3_POP</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;81de1607289c388ae232650fc59f074\
+                                                 a94f1422acda503772b193b02a928bd\
+                                                 5d83dfa62c9c05dc63043c5fdced89f\
+                                                 e88&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_3_MSG</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;data&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_3_SIG</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;b2e0f15f983adaf08e1066c50d1cffd\
+                                                 8747bfd67cc1066d6f70da89003b581\
+                                                 f75b2fb08d703c5950d2d6645ee6d36\
+                                                 3fa&quot;</span>;
+
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_4_SK</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;77c0436af873795b5914d44679091c15\
+                                                81c1d5b0c5df65f79e9e322b9dc00147&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_4_PK</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;a7e5f60d05e7b3e3f36aa1b64a93083e\
+                                                6dc72a05b36dea8223f5b0b674007185\
+                                                6e1ff2e179755b06022d084925432b9e\
+                                                0f43517184e724840239103a885a6b07\
+                                                8e94dbca38e1b2535c185563a3867d7e\
+                                                83f09643406d25d87cc77b3ebf5c5183&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_4_POP</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;a3f78cafe0394b48c08f134a82390b9\
+                                                 e624466a50da113fc22a57922ce06a8\
+                                                 1f9010558ddf59a55e2844537f7a024\
+                                                 8ff&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_4_MSG</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;data&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_4_SIG</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;a32d7a3fedcbef575d9f42e8872f46a\
+                                                 2320fa29571a08a9bf43f3bfc71c01b\
+                                                 8fb3a59ca217d506971a7969f0b1f6b\
+                                                 66f&quot;</span>;
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">TESTVEC_MULTI_BLS12_381_COMB_SIG_1_2</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;a0dee0b8a78ad6ae0a5808c1\
+                                                 22ed608deaeb2d63550d562a16d4adb\
+                                                 12b877880d03b69147ba4d5162e2e15\
+                                                 76ad1b6219&quot;</span>;
+</pre></div>
+</section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../../";window.currentCrate = "ic_crypto_internal_test_vectors";</script><script src="../../main.js"></script><script src="../../source-script.js"></script><script src="../../source-files.js"></script><script defer src="../../search-index.js"></script></body></html>

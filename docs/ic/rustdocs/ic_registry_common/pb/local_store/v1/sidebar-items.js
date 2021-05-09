@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["MutationType",""]],"struct":[["CertifiedTime","The time when the last certified update was successfully received."],["ChangelogEntry","Set of all mutations that, when applied to the registry at version v, produce the registry at version v+1"],["KeyMutation","A mutation of a single key."]]});

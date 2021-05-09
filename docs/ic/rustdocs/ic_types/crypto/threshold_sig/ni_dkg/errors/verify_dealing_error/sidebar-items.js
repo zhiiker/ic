@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["DkgVerifyDealingError","Occurs if verifying a dealing using `NiDkgAlgorithm::verify_dealing` fails."]]});

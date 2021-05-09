@@ -1,0 +1,61 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `transport` mod in crate `ic_transport`."><meta name="keywords" content="rust, rustlang, rust-lang, transport"><title>ic_transport::transport - Rust</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="shortcut icon" href="../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../down-arrow.svg");}</style></head><body class="rustdoc mod"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../ic_transport/index.html'><div class='logo-container'><img src='../../rust-logo.png' alt='logo'></div></a><p class='location'>Module transport</p><div class="sidebar-elems"><div class="block items"><ul><li><a href="#functions">Functions</a></li></ul></div><p class='location'><a href='../index.html'>ic_transport</a></p><script>window.sidebarCurrent = {name: 'transport', ty: 'mod', relpath: '../'};</script><script defer src="../sidebar-items.js"></script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../../src/ic_transport/transport.rs.html#1-238' title='goto source code'>[src]</a></span><span class='in-band'>Module <a href='../index.html'>ic_transport</a>::<wbr><a class="mod" href=''>transport</a></span></h1><div class='docblock'><p>Transport client interface.</p>
+<p>Transport processes different types of messages classified into flows by
+their QoS requirements.  The same flow id and weight is used for both
+incoming (RX)  and outgoing (TX) messages of the same type.</p>
+<p>Example: Gossip(one of Transport's clients) uses separate flows for control
+messages (adverts, requests) and data messages (artifact chunks for ingress
+manager, consensus (incl DKG and certification) and state sync). Thus,
+Transport has to handle 3 x 3 flows per peer.</p>
+<p>The diagram below shows the flow/connect set up sequence:</p>
+<p>Transport clients invoke add_peer(peer_id) to set up the
+connections with a valid peer. Control plane then looks up the
+client config and sets up the peer state. If we are the TCP/TLS
+client, the control plane initiates the connections for all the
+flows with the peer. If we are the server, we wait for peers to
+initiate the flow connections. When a connection is established,
+the ownership is passed from control plane to the data plane via
+on_connnect(flow_id, socket_read_half, socket_write_half)
+callback. The read/write halves are passed to the receive/send
+tasks respectively. At this point, data plane can start performing
+IOs on the peer connection.  If the data plane tasks detect a
+connection error, IOs are paused on the connection, and control
+plane is notified via on_disconnect(flow_id) callback. Control
+plane then initiates re-connection with the peer.  Successfully
+re-connections are handled according via the on_connect() described
+earlier.</p>
+<p>The send data path has two hops:</p>
+<p>Transport client calls send(flow_id, message). The message is
+en-queued to the per-flow send queue. The send data plane task then
+dequeues the messages and sends it over the socket.</p>
+<p>The receive data path has one hop:</p>
+<p>The receive data plane task scans the read half of the
+connections. Once a complete message is read from the socket, the
+client's on_message(flow_id, message) callback is invoked for
+messages delivery.</p>
+<pre><code class="language-text">+-----------------------------------------------------+
+|    Transport Client (Gossip)                        |
++-----------------------------------------------------+
+     |                                 |           ^
+     | start_connection()      send()  |           |
+     v                                 |           |
++----------+                 +-------------------------------+
+|          |                 |         |           |         |
+| Control  | on_connect()    |   Send Queues       |         |
+| Plane    |----------------&gt;|         |           |         |
+|          |                 |  +------v----+  +----------+  |
+|          | on_disconnect() |  | Send Task |  | Receive  |  |
+|          |&lt;----------------|  +-----------+  | Task     |  |
++----------+                 |         |       +----------+  |
+                             |         |           |         |
+                             |         v           |         |
+                             |  +------------+ +------------+|
+                             |  | Connection | | Connection ||
+                             |  | Write Half | | Read Half  ||
+                             |  +------------+ +------------+|
+                             |     Data Plane                |
+                             +-------------------------------+
+</code></pre>
+</div><h2 id='functions' class='section-header'><a href="#functions">Functions</a></h2>
+<table><tr class='module-item'><td><a class="fn" href="fn.create_transport.html" title='ic_transport::transport::create_transport fn'>create_transport</a></td><td class='docblock-short'><p>Creates a new instance of
+<a href="../types/struct.TransportImpl.html"><code>TransportImpl</code></a>.</p>
+</td></tr></table></section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../../";window.currentCrate = "ic_transport";</script><script src="../../main.js"></script><script defer src="../../search-index.js"></script></body></html>

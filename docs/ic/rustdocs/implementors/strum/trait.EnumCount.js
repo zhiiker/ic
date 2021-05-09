@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_crypto"] = [{"text":"impl EnumCount for <a class=\"enum\" href=\"ic_crypto/prng/enum.RandomnessPurpose.html\" title=\"enum ic_crypto::prng::RandomnessPurpose\">RandomnessPurpose</a>","synthetic":false,"types":["ic_crypto::prng::RandomnessPurpose"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

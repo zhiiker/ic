@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["deserialize_registry_value","Utility function to deserialize the bytes returned from the RegistryClient into a protobuf type."]]});

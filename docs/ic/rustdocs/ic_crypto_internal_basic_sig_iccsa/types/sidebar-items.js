@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["PublicKey","A ICCSA public key that was successfully parsed."],["PublicKeyBytes","Container for an ICCSA public key without the DER-wrapping. The byte representation may be invalid and needs to be parsed"],["Signature","A decoded ICCSA signature"],["SignatureBytes","An ICCSA signature encoded as a bytestring"]]});

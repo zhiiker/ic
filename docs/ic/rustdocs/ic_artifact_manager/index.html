@@ -1,0 +1,45 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `ic_artifact_manager` crate."><meta name="keywords" content="rust, rustlang, rust-lang, ic_artifact_manager"><title>ic_artifact_manager - Rust</title><link rel="stylesheet" type="text/css" href="../normalize.css"><link rel="stylesheet" type="text/css" href="../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../dark.css"><link rel="stylesheet" type="text/css" href="../light.css" id="themeStyle"><script src="../storage.js"></script><noscript><link rel="stylesheet" href="../noscript.css"></noscript><link rel="shortcut icon" href="../favicon.ico"><style type="text/css">#crate-search{background-image:url("../down-arrow.svg");}</style></head><body class="rustdoc mod"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../ic_artifact_manager/index.html'><div class='logo-container'><img src='../rust-logo.png' alt='logo'></div></a><p class='location'>Crate ic_artifact_manager</p><div class="sidebar-elems"><a id='all-types' href='all.html'><p>See all ic_artifact_manager's items</p></a><div class="block items"><ul><li><a href="#modules">Modules</a></li></ul></div><p class='location'></p><script>window.sidebarCurrent = {name: 'ic_artifact_manager', ty: 'mod', relpath: '../'};</script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../settings.html"><img src="../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../src/ic_artifact_manager/lib.rs.html#1-46' title='goto source code'>[src]</a></span><span class='in-band'>Crate <a class="mod" href=''>ic_artifact_manager</a></span></h1><div class='docblock'><h1>Overview</h1>
+<p>The <em>Artifact Manager</em> stores artifacts in the artifact pool. These
+artifacts are used by the node it is running on and other nodes in the same
+subnet. The <em>Artifact Manager</em> interacts with <em>Gossip</em> and its application
+components:</p>
+<ul>
+<li><em>Consensus</em></li>
+<li><em>Distributed Key Generation</em></li>
+<li><em>Certification</em></li>
+<li><em>Ingress Manager</em></li>
+<li><em>State Sync</em></li>
+</ul>
+<p>It acts as a dispatcher for <em>Gossip</em> and ensures that the artifacts are
+processed by the correct application components. It (de)multiplexes
+artifacts to and from the different application components on behalf of
+<em>Gossip</em> and bundles filters and priority functions.</p>
+<p>In order to let the <em>Consensus</em> components be stateless, the artifact
+manager notifies the application components of artifacts received from
+peers. The application components can then check if they are valid and
+change their artifact pools (with a write lock to prevent conflicts and to
+allow concurrent reads to the artifact pools).</p>
+<h1>Properties</h1>
+<ul>
+<li>All artifacts in the validated part of the artifact pool have been
+checked to be valid by the corresponding application component.</li>
+<li>When new artifacts have been added to the artifact pool or when
+triggered by <em>Gossip</em>, the <em>Artifact Manager</em> asks the application
+components to check if they want to add new artifacts or move artifacts
+from the unvalidated part to the validated part of the pool.</li>
+<li>When artifacts are added to the validated part of the artifact pool, the
+<em>Artifact Manager</em> notifies <em>Gossip</em> of adverts to send to peers.
+checked to be valid by the corresponding application component</li>
+<li>When new artifacts have been added to the artifact pool or when
+triggered by Gossip the Artifact Manager asks the application components
+to check if they want to add new artifacts or move artifacts from the
+unvalidated part to the validated part of the pool</li>
+<li>When artifacts are added to the validated part of the artifact pool, the
+Artifact Manager notifies Gossip of adverts to send to peers.</li>
+</ul>
+</div><h2 id='modules' class='section-header'><a href="#modules">Modules</a></h2>
+<table><tr class='module-item'><td><a class="mod" href="actors/index.html" title='ic_artifact_manager::actors mod'>actors</a></td><td class='docblock-short'><p>The module runs <code>ArtifactProcessor</code> as actors.</p>
+</td></tr><tr class='module-item'><td><a class="mod" href="artifact/index.html" title='ic_artifact_manager::artifact mod'>artifact</a></td><td class='docblock-short'><p>The module contains implementations for different artifact kinds.</p>
+</td></tr><tr class='module-item'><td><a class="mod" href="clients/index.html" title='ic_artifact_manager::clients mod'>clients</a></td><td class='docblock-short'><p>The module contains implementations of the artifact client trait.</p>
+</td></tr><tr class='module-item'><td><a class="mod" href="manager/index.html" title='ic_artifact_manager::manager mod'>manager</a></td><td class='docblock-short'><p>The artifact manager implementation.</p>
+</td></tr></table></section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../";window.currentCrate = "ic_artifact_manager";</script><script src="../main.js"></script><script defer src="../search-index.js"></script></body></html>

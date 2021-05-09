@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["KeyValidationError","A key validation error."],["ValidNodePublicKeys","Validated public key material of a node."]]});

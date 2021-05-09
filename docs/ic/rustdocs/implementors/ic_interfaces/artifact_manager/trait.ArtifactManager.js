@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_artifact_manager"] = [{"text":"impl <a class=\"trait\" href=\"ic_interfaces/artifact_manager/trait.ArtifactManager.html\" title=\"trait ic_interfaces::artifact_manager::ArtifactManager\">ArtifactManager</a> for <a class=\"struct\" href=\"ic_artifact_manager/manager/struct.ArtifactManagerImpl.html\" title=\"struct ic_artifact_manager::manager::ArtifactManagerImpl\">ArtifactManagerImpl</a>","synthetic":false,"types":["ic_artifact_manager::manager::ArtifactManagerImpl"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

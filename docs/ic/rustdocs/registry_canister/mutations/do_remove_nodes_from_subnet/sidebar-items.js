@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["RemoveNodesFromSubnetPayload","The payload of a proposal to remove a Node from a Subnet"]]});

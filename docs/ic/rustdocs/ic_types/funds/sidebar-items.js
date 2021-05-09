@@ -1,0 +1,1 @@
+initSidebarItems({"mod":[["icp",""]],"struct":[["Cycles","Struct to handle cycles on the IC. They are maintained as a simple u128. We implement our own arithmetic functions on them so that we can ensure that they never overflow or underflow."],["Funds","A struct to hold various types of funds."]]});

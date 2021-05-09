@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["MaliciousFlags","Groups all available malicious flags."]]});

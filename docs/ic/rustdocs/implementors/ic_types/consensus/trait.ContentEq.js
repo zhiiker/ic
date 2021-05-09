@@ -1,0 +1,4 @@
+(function() {var implementors = {};
+implementors["ic_interfaces"] = [{"text":"impl <a class=\"trait\" href=\"ic_types/consensus/trait.ContentEq.html\" title=\"trait ic_types::consensus::ContentEq\">ContentEq</a> for <a class=\"enum\" href=\"ic_interfaces/consensus_pool/enum.ChangeAction.html\" title=\"enum ic_interfaces::consensus_pool::ChangeAction\">ChangeAction</a>","synthetic":false,"types":["ic_interfaces::consensus_pool::ChangeAction"]}];
+implementors["ic_types"] = [];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

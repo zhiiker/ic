@@ -1,0 +1,1 @@
+initSidebarItems({"trait":[["CanisterQueuesTesting","Exposes public testing-only `CanisterQueues` methods to be used in other crates' unit tests."],["CanisterStateTesting","Exposes public testing-only `CanisterState` methods to be used in other crates' unit tests."]]});

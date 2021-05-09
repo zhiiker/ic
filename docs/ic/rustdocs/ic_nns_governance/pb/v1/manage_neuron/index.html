@@ -1,0 +1,50 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `manage_neuron` mod in crate `ic_nns_governance`."><meta name="keywords" content="rust, rustlang, rust-lang, manage_neuron"><title>ic_nns_governance::pb::v1::manage_neuron - Rust</title><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../dark.css"><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script src="../../../../storage.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="shortcut icon" href="../../../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../../../down-arrow.svg");}</style></head><body class="rustdoc mod"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../../../ic_nns_governance/index.html'><div class='logo-container'><img src='../../../../rust-logo.png' alt='logo'></div></a><p class='location'>Module manage_neuron</p><div class="sidebar-elems"><div class="block items"><ul><li><a href="#modules">Modules</a></li><li><a href="#structs">Structs</a></li><li><a href="#enums">Enums</a></li></ul></div><p class='location'><a href='../../../index.html'>ic_nns_governance</a>::<wbr><a href='../../index.html'>pb</a>::<wbr><a href='../index.html'>v1</a></p><script>window.sidebarCurrent = {name: 'manage_neuron', ty: 'mod', relpath: '../'};</script><script defer src="../sidebar-items.js"></script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../../../settings.html"><img src="../../../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../../../../src/ic_nns_governance/pb/up/up/gen/ic_nns_governance.pb.v1.rs.html#455-644' title='goto source code'>[src]</a></span><span class='in-band'>Module <a href='../../../index.html'>ic_nns_governance</a>::<wbr><a href='../../index.html'>pb</a>::<wbr><a href='../index.html'>v1</a>::<wbr><a class="mod" href=''>manage_neuron</a></span></h1><div class='docblock'><p>Nested message and enum types in <code>ManageNeuron</code>.</p>
+</div><h2 id='modules' class='section-header'><a href="#modules">Modules</a></h2>
+<table><tr class='module-item'><td><a class="mod" href="configure/index.html" title='ic_nns_governance::pb::v1::manage_neuron::configure mod'>configure</a></td><td class='docblock-short'><p>Nested message and enum types in <code>Configure</code>.</p>
+</td></tr><tr class='module-item'><td><a class="mod" href="disburse/index.html" title='ic_nns_governance::pb::v1::manage_neuron::disburse mod'>disburse</a></td><td class='docblock-short'><p>Nested message and enum types in <code>Disburse</code>.</p>
+</td></tr></table><h2 id='structs' class='section-header'><a href="#structs">Structs</a></h2>
+<table><tr class='module-item'><td><a class="struct" href="struct.AddHotKey.html" title='ic_nns_governance::pb::v1::manage_neuron::AddHotKey struct'>AddHotKey</a></td><td class='docblock-short'><p>Add a new hot key that can be used to manage the neuron. This
+provides an alternative to using the controller principal’s cold key to
+manage the neuron, which might be onerous and difficult to keep
+secure, especially if it is used regularly. A hot key might be a
+WebAuthn key that is maintained inside a user device, such as a
+smartphone.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.Configure.html" title='ic_nns_governance::pb::v1::manage_neuron::Configure struct'>Configure</a></td><td class='docblock-short'><p>Commands that only configure a given neuron, but do not interact
+with the outside world. They all require the caller to be the
+controller of the neuron.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.Disburse.html" title='ic_nns_governance::pb::v1::manage_neuron::Disburse struct'>Disburse</a></td><td class='docblock-short'><p>Disburse this neuron's stake: transfer the staked ICP to the
+specified account.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.DisburseToNeuron.html" title='ic_nns_governance::pb::v1::manage_neuron::DisburseToNeuron struct'>DisburseToNeuron</a></td><td class='docblock-short'><p>Disburse a portion of this neuron's stake into another neuron.
+This allows to split a neuron but with a new dissolve delay
+and owned by someone else.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.Follow.html" title='ic_nns_governance::pb::v1::manage_neuron::Follow struct'>Follow</a></td><td class='docblock-short'><p>Add a rule that enables the neuron to vote automatically on
+proposals that belong to a specific topic, by specifying a group
+of followee neurons whose majority vote is followed. The
+configuration of such follow rules can be used to a) distribute
+control over voting power amongst multiple entities, b) have a
+neuron vote automatically when its owner lacks time to evaluate
+newly submitted proposals, c) have a neuron vote automatically
+when its own lacks the expertise to evaluate newly submitted
+proposals, and d) for other purposes. A follow rule specifies a
+set of followees. Once a majority of the followees votes to adopt
+or reject a proposal belonging to the specified topic, the neuron
+votes the same way. If it becomes impossible for a majority of
+the followees to adopt (for example, because they are split 50-50
+between adopt and reject), then the neuron votes to reject. If a
+rule is specified where the proposal topic is UNSPECIFIED, then it
+becomes a catch-all follow rule, which will be used to vote
+automatically on proposals belonging to topics for which no
+specific rule has been specified.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.IncreaseDissolveDelay.html" title='ic_nns_governance::pb::v1::manage_neuron::IncreaseDissolveDelay struct'>IncreaseDissolveDelay</a></td><td class='docblock-short'><p>The dissolve delay of a neuron can be increased up to a maximum
+of 8 years.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.RegisterVote.html" title='ic_nns_governance::pb::v1::manage_neuron::RegisterVote struct'>RegisterVote</a></td><td class='docblock-short'><p>Have the neuron vote to either adopt or reject a proposal with a specified
+id.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.RemoveHotKey.html" title='ic_nns_governance::pb::v1::manage_neuron::RemoveHotKey struct'>RemoveHotKey</a></td><td class='docblock-short'><p>Remove a hot key that has been previously assigned to the neuron.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.Spawn.html" title='ic_nns_governance::pb::v1::manage_neuron::Spawn struct'>Spawn</a></td><td class='docblock-short'><p>When the maturity of a neuron has risen above a threshold, it can
+be instructed to spawn a new neuron. This creates a new neuron
+that locks a new balance of ICP on the ledger. The new neuron can
+remain controlled by the same principal as its parent, or be
+assigned to a new principal.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.Split.html" title='ic_nns_governance::pb::v1::manage_neuron::Split struct'>Split</a></td><td class='docblock-short'><p>Split this neuron into two neurons.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.StartDissolving.html" title='ic_nns_governance::pb::v1::manage_neuron::StartDissolving struct'>StartDissolving</a></td><td class='docblock-short'></td></tr><tr class='module-item'><td><a class="struct" href="struct.StopDissolving.html" title='ic_nns_governance::pb::v1::manage_neuron::StopDissolving struct'>StopDissolving</a></td><td class='docblock-short'></td></tr></table><h2 id='enums' class='section-header'><a href="#enums">Enums</a></h2>
+<table><tr class='module-item'><td><a class="enum" href="enum.Command.html" title='ic_nns_governance::pb::v1::manage_neuron::Command enum'>Command</a></td><td class='docblock-short'></td></tr></table></section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../../../../";window.currentCrate = "ic_nns_governance";</script><script src="../../../../main.js"></script><script defer src="../../../../search-index.js"></script></body></html>

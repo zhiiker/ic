@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["PopBytesFromProtoError","Parsing a PoP from protobuf failed."]],"struct":[["PublicKeyBytesFromProtoError","Parsing a public key from protobuf failed."]]});

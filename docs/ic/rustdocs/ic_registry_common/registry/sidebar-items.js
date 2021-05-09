@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["registry_deltas_to_registry_transport_records","Convert `Vec<RegistryDelta>` to `Vec<RegistryTransportRecord>`."]],"struct":[["RegistryCanister","A higher level helper to interact with the registry canister."]]});

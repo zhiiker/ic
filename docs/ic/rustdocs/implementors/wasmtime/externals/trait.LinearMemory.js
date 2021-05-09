@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_embedders"] = [{"text":"impl&lt;M:&nbsp;<a class=\"trait\" href=\"ic_embedders/trait.LinearMemory.html\" title=\"trait ic_embedders::LinearMemory\">LinearMemory</a>&gt; LinearMemory for <a class=\"struct\" href=\"ic_embedders/wasmtime_embedder/host_memory/struct.WasmtimeMemory.html\" title=\"struct ic_embedders::wasmtime_embedder::host_memory::WasmtimeMemory\">WasmtimeMemory</a>&lt;M&gt;","synthetic":false,"types":["ic_embedders::wasmtime_embedder::host_memory::WasmtimeMemory"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

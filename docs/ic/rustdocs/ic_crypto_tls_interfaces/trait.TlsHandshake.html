@@ -1,0 +1,201 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `TlsHandshake` trait in crate `ic_crypto_tls_interfaces`."><meta name="keywords" content="rust, rustlang, rust-lang, TlsHandshake"><title>ic_crypto_tls_interfaces::TlsHandshake - Rust</title><link rel="stylesheet" type="text/css" href="../normalize.css"><link rel="stylesheet" type="text/css" href="../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../dark.css"><link rel="stylesheet" type="text/css" href="../light.css" id="themeStyle"><script src="../storage.js"></script><noscript><link rel="stylesheet" href="../noscript.css"></noscript><link rel="shortcut icon" href="../favicon.ico"><style type="text/css">#crate-search{background-image:url("../down-arrow.svg");}</style></head><body class="rustdoc trait"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../ic_crypto_tls_interfaces/index.html'><div class='logo-container'><img src='../rust-logo.png' alt='logo'></div></a><p class='location'>Trait TlsHandshake</p><div class="sidebar-elems"><div class="block items"><a class="sidebar-title" href="#required-methods">Required Methods</a><div class="sidebar-links"><a href="#tymethod.perform_tls_client_handshake">perform_tls_client_handshake</a><a href="#tymethod.perform_tls_server_handshake">perform_tls_server_handshake</a><a href="#tymethod.perform_tls_server_handshake_temp_with_optional_client_auth">perform_tls_server_handshake_temp_with_optional_client_auth</a></div><a class="sidebar-title" href="#implementors">Implementors</a></div><p class='location'><a href='index.html'>ic_crypto_tls_interfaces</a></p><script>window.sidebarCurrent = {name: 'TlsHandshake', ty: 'trait', relpath: ''};</script><script defer src="sidebar-items.js"></script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../settings.html"><img src="../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../src/ic_crypto_tls_interfaces/lib.rs.html#249-456' title='goto source code'>[src]</a></span><span class='in-band'>Trait <a href='index.html'>ic_crypto_tls_interfaces</a>::<wbr><a class="trait" href=''>TlsHandshake</a></span></h1><div class="docblock type-decl hidden-by-usual-hider"><pre class='rust trait'>pub trait TlsHandshake {
+<span class="docblock attributes">#[must_use]</span>    fn <a href='#tymethod.perform_tls_server_handshake' class='fnname'>perform_tls_server_handshake</a>&lt;'life0, 'async_trait&gt;(<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&amp;'life0 self, <br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;tcp_stream: <a class="struct" href="https://docs.rs/tokio/0.2.24/tokio/net/tcp/stream/struct.TcpStream.html" title="struct tokio::net::tcp::stream::TcpStream">TcpStream</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;allowed_clients: <a class="struct" href="../ic_crypto_tls_interfaces/struct.AllowedClients.html" title="struct ic_crypto_tls_interfaces::AllowedClients">AllowedClients</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;registry_version: <a class="type" href="../ic_base_types/type.RegistryVersion.html" title="type ic_base_types::RegistryVersion">RegistryVersion</a><br>&nbsp;&nbsp;&nbsp;&nbsp;) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/nightly/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">(</a><a class="struct" href="../ic_crypto_tls_interfaces/struct.TlsStream.html" title="struct ic_crypto_tls_interfaces::TlsStream">TlsStream</a>, <a class="enum" href="../ic_crypto_tls_interfaces/enum.AuthenticatedPeer.html" title="enum ic_crypto_tls_interfaces::AuthenticatedPeer">AuthenticatedPeer</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">)</a>, <a class="enum" href="../ic_crypto_tls_interfaces/enum.TlsServerHandshakeError.html" title="enum ic_crypto_tls_interfaces::TlsServerHandshakeError">TlsServerHandshakeError</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt;<br>&nbsp;&nbsp;&nbsp; <span class="where">where<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'life0: 'async_trait,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Self: 'async_trait</span>;
+<div class='item-spacer'></div><span class="docblock attributes">#[must_use]</span>    fn <a href='#tymethod.perform_tls_server_handshake_temp_with_optional_client_auth' class='fnname'>perform_tls_server_handshake_temp_with_optional_client_auth</a>&lt;'life0, 'async_trait&gt;(<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&amp;'life0 self, <br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;tcp_stream: <a class="struct" href="https://docs.rs/tokio/0.2.24/tokio/net/tcp/stream/struct.TcpStream.html" title="struct tokio::net::tcp::stream::TcpStream">TcpStream</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;allowed_authenticating_clients: <a class="struct" href="../ic_crypto_tls_interfaces/struct.AllowedClients.html" title="struct ic_crypto_tls_interfaces::AllowedClients">AllowedClients</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;registry_version: <a class="type" href="../ic_base_types/type.RegistryVersion.html" title="type ic_base_types::RegistryVersion">RegistryVersion</a><br>&nbsp;&nbsp;&nbsp;&nbsp;) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/nightly/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">(</a><a class="struct" href="../ic_crypto_tls_interfaces/struct.TlsStream.html" title="struct ic_crypto_tls_interfaces::TlsStream">TlsStream</a>, <a class="enum" href="../ic_crypto_tls_interfaces/enum.Peer.html" title="enum ic_crypto_tls_interfaces::Peer">Peer</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">)</a>, <a class="enum" href="../ic_crypto_tls_interfaces/enum.TlsServerHandshakeError.html" title="enum ic_crypto_tls_interfaces::TlsServerHandshakeError">TlsServerHandshakeError</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt;<br>&nbsp;&nbsp;&nbsp; <span class="where">where<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'life0: 'async_trait,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Self: 'async_trait</span>;
+<div class='item-spacer'></div><span class="docblock attributes">#[must_use]</span>    fn <a href='#tymethod.perform_tls_client_handshake' class='fnname'>perform_tls_client_handshake</a>&lt;'life0, 'async_trait&gt;(<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&amp;'life0 self, <br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;tcp_stream: <a class="struct" href="https://docs.rs/tokio/0.2.24/tokio/net/tcp/stream/struct.TcpStream.html" title="struct tokio::net::tcp::stream::TcpStream">TcpStream</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;server: <a class="type" href="../ic_base_types/type.NodeId.html" title="type ic_base_types::NodeId">NodeId</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;registry_version: <a class="type" href="../ic_base_types/type.RegistryVersion.html" title="type ic_base_types::RegistryVersion">RegistryVersion</a><br>&nbsp;&nbsp;&nbsp;&nbsp;) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/nightly/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="struct" href="../ic_crypto_tls_interfaces/struct.TlsStream.html" title="struct ic_crypto_tls_interfaces::TlsStream">TlsStream</a>, <a class="enum" href="../ic_crypto_tls_interfaces/enum.TlsClientHandshakeError.html" title="enum ic_crypto_tls_interfaces::TlsClientHandshakeError">TlsClientHandshakeError</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt;<br>&nbsp;&nbsp;&nbsp; <span class="where">where<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'life0: 'async_trait,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Self: 'async_trait</span>;
+}</pre></div><div class='docblock'><p>Implementors provide methods for transforming TCP streams into TLS stream.</p>
+<p>The TLS streams are returned as trait objects over a trait that does not
+allow for extracting the secret keys of the underlying TLS session. This
+is done because directly returning the underlying structs may allow for
+extraction of the secret session keys.</p>
+</div>
+            <h2 id='required-methods' class='small-section-header'>Required methods<a href='#required-methods' class='anchor'></a></h2><div class='methods'><h3 id='tymethod.perform_tls_server_handshake' class='method'><code id='perform_tls_server_handshake.v'><span class="docblock attributes">#[must_use]</span>fn <a href='#tymethod.perform_tls_server_handshake' class='fnname'>perform_tls_server_handshake</a>&lt;'life0, 'async_trait&gt;(<br>&nbsp;&nbsp;&nbsp;&nbsp;&amp;'life0 self, <br>&nbsp;&nbsp;&nbsp;&nbsp;tcp_stream: <a class="struct" href="https://docs.rs/tokio/0.2.24/tokio/net/tcp/stream/struct.TcpStream.html" title="struct tokio::net::tcp::stream::TcpStream">TcpStream</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;allowed_clients: <a class="struct" href="../ic_crypto_tls_interfaces/struct.AllowedClients.html" title="struct ic_crypto_tls_interfaces::AllowedClients">AllowedClients</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;registry_version: <a class="type" href="../ic_base_types/type.RegistryVersion.html" title="type ic_base_types::RegistryVersion">RegistryVersion</a><br>) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/nightly/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">(</a><a class="struct" href="../ic_crypto_tls_interfaces/struct.TlsStream.html" title="struct ic_crypto_tls_interfaces::TlsStream">TlsStream</a>, <a class="enum" href="../ic_crypto_tls_interfaces/enum.AuthenticatedPeer.html" title="enum ic_crypto_tls_interfaces::AuthenticatedPeer">AuthenticatedPeer</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">)</a>, <a class="enum" href="../ic_crypto_tls_interfaces/enum.TlsServerHandshakeError.html" title="enum ic_crypto_tls_interfaces::TlsServerHandshakeError">TlsServerHandshakeError</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt; <span class="where fmt-newline">where<br>&nbsp;&nbsp;&nbsp;&nbsp;'life0: 'async_trait,<br>&nbsp;&nbsp;&nbsp;&nbsp;Self: 'async_trait,&nbsp;</span></code></h3><div class='docblock'><p>Transforms a TCP stream into a TLS stream by first performing a TLS
+server handshake and then verifying that the authenticated peer is an
+allowed client.</p>
+<p>For the handshake, the server uses the following configuration:</p>
+<ul>
+<li>Minimum protocol version: TLS 1.3</li>
+<li>Supported signature algorithms: ed25519</li>
+<li>Allowed cipher suites: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384</li>
+<li>Client authentication: mandatory, with ed25519 certificate</li>
+<li>Maximum number of intermediate CA certificates: 1</li>
+</ul>
+<p>To determine whether the peer (that successfully performed the
+handshake) is an allowed client, the following steps are taken:</p>
+<ol>
+<li>Determine the peer's node ID N_claimed from the <em>subject name</em> of
+the certificate C_handshake that the peer presented during the
+handshake (and for which the peer therefore knows the private key).
+If N_claimed is contained in the nodes in <code>allowed_clients</code>,
+determine the certificate C_registry by querying the registry for the
+TLS certificate of node with ID N_claimed, and if C_registry is equal
+to C_handshake, then the peer successfully authenticated as node
+N_claimed. Otherwise, step 2 is taken.</li>
+<li>Compare the root of the certificate chain that the peer presented
+during the handshake (and for which the peer therefore knows the
+private key of the chain's leaf certificate) to all the (explicitly
+allowed) certificates in <code>allowed_clients</code>. If there is a match,
+then the peer represented by the chain's leaf certificate
+successfully authenticated.</li>
+</ol>
+<p>The given <code>tcp_stream</code> is consumed. If an error is returned, the TCP
+connection is therefore dropped.</p>
+<p>Returns the TLS stream together with the peer that successfully
+authenticated.</p>
+<h1 id="errors" class="section-header"><a href="#errors">Errors</a></h1>
+<ul>
+<li>TlsServerHandshakeError::RegistryError if the registry cannot be
+accessed.</li>
+<li>TlsServerHandshakeError::CertificateNotInRegistry if a certificate
+that is expected to be in the registry is not found.</li>
+<li>TlsServerHandshakeError::MalformedSelfCertificate if the node's own
+server certificate is malformed.</li>
+<li>TlsServerHandshakeError::MalformedClientCertificate if a client
+certificate corresponding to an client in <code>allowed_clients</code> is
+malformed.</li>
+<li>TlsServerHandshakeError::CreateAcceptorError if there is a problem
+configuring the server for accepting connections from clients.</li>
+<li>TlsServerHandshakeError::HandshakeError if there is an error during
+the TLS handshake, or the handshake fails.</li>
+<li>TlsServerHandshakeError::ClientNotAllowed if the node_id in the
+subject CN of the client's certificate presented in the handshake is
+not in <code>allowed_clients</code>, or if the client's certificate presented in
+the handshake does not exactly match the client's certificate in the
+registry.</li>
+<li>TlsServerHandshakeError::UnauthenticatedClient if the client did not
+authenticate using a client certificate.</li>
+</ul>
+<h1 id="panics" class="section-header"><a href="#panics">Panics</a></h1>
+<ul>
+<li>If the secret key corresponding to the server certificate cannot be
+found or is malformed in the server's secret key store. Note that this
+is an error in the setup of the node and registry.</li>
+</ul>
+</div><h3 id='tymethod.perform_tls_server_handshake_temp_with_optional_client_auth' class='method'><code id='perform_tls_server_handshake_temp_with_optional_client_auth.v'><span class="docblock attributes">#[must_use]</span>fn <a href='#tymethod.perform_tls_server_handshake_temp_with_optional_client_auth' class='fnname'>perform_tls_server_handshake_temp_with_optional_client_auth</a>&lt;'life0, 'async_trait&gt;(<br>&nbsp;&nbsp;&nbsp;&nbsp;&amp;'life0 self, <br>&nbsp;&nbsp;&nbsp;&nbsp;tcp_stream: <a class="struct" href="https://docs.rs/tokio/0.2.24/tokio/net/tcp/stream/struct.TcpStream.html" title="struct tokio::net::tcp::stream::TcpStream">TcpStream</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;allowed_authenticating_clients: <a class="struct" href="../ic_crypto_tls_interfaces/struct.AllowedClients.html" title="struct ic_crypto_tls_interfaces::AllowedClients">AllowedClients</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;registry_version: <a class="type" href="../ic_base_types/type.RegistryVersion.html" title="type ic_base_types::RegistryVersion">RegistryVersion</a><br>) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/nightly/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">(</a><a class="struct" href="../ic_crypto_tls_interfaces/struct.TlsStream.html" title="struct ic_crypto_tls_interfaces::TlsStream">TlsStream</a>, <a class="enum" href="../ic_crypto_tls_interfaces/enum.Peer.html" title="enum ic_crypto_tls_interfaces::Peer">Peer</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">)</a>, <a class="enum" href="../ic_crypto_tls_interfaces/enum.TlsServerHandshakeError.html" title="enum ic_crypto_tls_interfaces::TlsServerHandshakeError">TlsServerHandshakeError</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt; <span class="where fmt-newline">where<br>&nbsp;&nbsp;&nbsp;&nbsp;'life0: 'async_trait,<br>&nbsp;&nbsp;&nbsp;&nbsp;Self: 'async_trait,&nbsp;</span></code></h3><div class='docblock'><p>IMPORTANT NODE: This method is temporary. It will be replaced by
+<code>perform_tls_server_handshake</code> and a new method
+<code>perform_tls_server_handshake_without_client_auth</code> soon. This method is
+currently needed to allow connections without knowing if a client
+performs client authentication.</p>
+<p>SECURITY WARNING: The caller of this method is responsible to check if
+the peer authenticated or not. Only if this method returns
+<code>Peer::Authenticated</code> it is guaranteed that the client is an allowed
+client wrt. <code>allowed__authenticating_clients</code>, see below.</p>
+<p>Transforms a TCP stream into a TLS stream by performing a TLS server
+handshake.</p>
+<p>For the handshake, the server uses the following configuration:</p>
+<ul>
+<li>Minimum protocol version: TLS 1.3</li>
+<li>Supported signature algorithms: ed25519</li>
+<li>Allowed cipher suites: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384</li>
+<li>Client authentication: optional, with ed25519 certificate</li>
+<li>Maximum number of intermediate CA certificates: 1</li>
+</ul>
+<p>Whenever the TLS handshake fails, this method returns an error.</p>
+<p>The given <code>tcp_stream</code> is consumed. If an error is returned, the TCP
+connection is therefore dropped.</p>
+<h1 id="connections-without-client-authentcation" class="section-header"><a href="#connections-without-client-authentcation">Connections without client authentcation</a></h1>
+<p>The client may present a client certificate to authenticate. If it
+doesn't, <code>Peer:Unauthenticated</code> is returned.</p>
+<h1 id="connections-with-client-authentication" class="section-header"><a href="#connections-with-client-authentication">Connections with client authentication</a></h1>
+<p>If the client presents a certificate, the TLS handshake only succeeds if
+the certificate is valid and trusted given the
+<code>allowed_authenticating_clients</code>. Additionally, after the handshake, to
+determine whether the peer (that successfully performed the handshake)
+is an allowed client, the following steps are taken:</p>
+<ol>
+<li>Determine the peer's node ID N_claimed from the <em>subject name</em> of
+the certificate C_handshake that the peer presented during the
+handshake (and for which the peer therefore knows the private key).
+If N_claimed is contained in the nodes in
+<code>allowed_authenticating_clients</code>, determine the certificate
+C_registry by querying the registry for the TLS certificate of node
+with ID N_claimed, and if C_registry is equal to C_handshake,
+then the peer successfully authenticated as node N_claimed.
+Otherwise, step 2 is taken.</li>
+<li>Compare the root of the certificate chain that the peer presented
+during the handshake (and for which the peer therefore knows the
+private key of the chain's leaf certificate) to all the (explicitly
+allowed) certificates in <code>allowed_authenticating_clients</code>. If there
+is a match, then the peer represented by the chain's leaf certificate
+successfully authenticated.</li>
+</ol>
+<p>If client authentication is successful, the TLS stream together with the
+peer (<code>Peer::Authenticated</code>) that successfully authenticated is
+returned.</p>
+<h1 id="errors-1" class="section-header"><a href="#errors-1">Errors</a></h1>
+<ul>
+<li>TlsServerHandshakeError::RegistryError if the registry cannot be
+accessed.</li>
+<li>TlsServerHandshakeError::CertificateNotInRegistry if a certificate
+that is expected to be in the registry is not found.</li>
+<li>TlsServerHandshakeError::MalformedSelfCertificate if the node's own
+server certificate is malformed.</li>
+<li>TlsServerHandshakeError::MalformedClientCertificate if a client
+certificate corresponding to an client in
+<code>allowed_authenticating_clients</code> is malformed.</li>
+<li>TlsServerHandshakeError::CreateAcceptorError if there is a problem
+configuring the server for accepting connections from clients.</li>
+<li>TlsServerHandshakeError::HandshakeError if there is an error during
+the TLS handshake, or the handshake fails.</li>
+<li>TlsServerHandshakeError::ClientNotAllowed if the node_id in the
+subject CN of the client's certificate presented in the handshake is
+not in <code>allowed_authenticating_clients</code>, or if the client's
+certificate presented in the handshake does not exactly match the
+client's certificate in the registry.</li>
+</ul>
+<h1 id="panics-1" class="section-header"><a href="#panics-1">Panics</a></h1>
+<ul>
+<li>If the secret key corresponding to the server certificate cannot be
+found or is malformed in the server's secret key store. Note that this
+is an error in the setup of the node and registry.</li>
+</ul>
+</div><h3 id='tymethod.perform_tls_client_handshake' class='method'><code id='perform_tls_client_handshake.v'><span class="docblock attributes">#[must_use]</span>fn <a href='#tymethod.perform_tls_client_handshake' class='fnname'>perform_tls_client_handshake</a>&lt;'life0, 'async_trait&gt;(<br>&nbsp;&nbsp;&nbsp;&nbsp;&amp;'life0 self, <br>&nbsp;&nbsp;&nbsp;&nbsp;tcp_stream: <a class="struct" href="https://docs.rs/tokio/0.2.24/tokio/net/tcp/stream/struct.TcpStream.html" title="struct tokio::net::tcp::stream::TcpStream">TcpStream</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;server: <a class="type" href="../ic_base_types/type.NodeId.html" title="type ic_base_types::NodeId">NodeId</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;registry_version: <a class="type" href="../ic_base_types/type.RegistryVersion.html" title="type ic_base_types::RegistryVersion">RegistryVersion</a><br>) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/nightly/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="struct" href="../ic_crypto_tls_interfaces/struct.TlsStream.html" title="struct ic_crypto_tls_interfaces::TlsStream">TlsStream</a>, <a class="enum" href="../ic_crypto_tls_interfaces/enum.TlsClientHandshakeError.html" title="enum ic_crypto_tls_interfaces::TlsClientHandshakeError">TlsClientHandshakeError</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt; <span class="where fmt-newline">where<br>&nbsp;&nbsp;&nbsp;&nbsp;'life0: 'async_trait,<br>&nbsp;&nbsp;&nbsp;&nbsp;Self: 'async_trait,&nbsp;</span></code></h3><div class='docblock'><p>Transforms a TCP stream into a TLS stream by first performing a TLS
+client handshake and then verifying that the peer is the given <code>server</code>.</p>
+<p>For the handshake, the client uses the following configuration:</p>
+<ul>
+<li>Minimum protocol version: TLS 1.3</li>
+<li>Supported signature algorithms: ed25519</li>
+<li>Allowed cipher suites: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384</li>
+<li>Server authentication: mandatory, with ed25519 certificate</li>
+</ul>
+<p>To determine whether the peer (that successfully performed the
+handshake) is the <code>server</code>, the following steps are taken:</p>
+<ol>
+<li>Determine the peer's node ID N_claimed from the <em>subject name</em> of
+the certificate C_handshake that the peer presented during the
+handshake (and for which the peer therefore knows the private key).
+Return an error if N_claimed is not the <code>server</code>.</li>
+<li>Determine the certificate C_registry by querying the registry for the
+TLS certificate of node with ID N_claimed. Return an error if the
+C_registry does not equal C_handshake.</li>
+</ol>
+<p>The given <code>tcp_stream</code> is consumed. If an error is returned, the TCP
+connection is therefore dropped.</p>
+<h1 id="errors-2" class="section-header"><a href="#errors-2">Errors</a></h1>
+<ul>
+<li>TlsClientHandshakeError::RegistryError if the registry cannot be
+accessed.</li>
+<li>TlsClientHandshakeError::CertificateNotInRegistry if a certificate
+that is expected to be in the registry is not found.</li>
+<li>TlsClientHandshakeError::MalformedSelfCertificate if the node's own
+client certificate is malformed.</li>
+<li>TlsClientHandshakeError::MalformedServerCertificate if the server
+certificate obtained from the registry (as specified by <code>server)</code> is
+malformed.</li>
+<li>TlsClientHandshakeError::CreateConnectorError if there is a problem
+configuring the TLS client for connecting to the <code>server</code>.</li>
+<li>TlsServerHandshakeError::HandshakeError if there is an error during
+the TLS handshake, or the handshake fails.</li>
+<li>TlsClientHandshakeError::ServerNotAllowed if the node_id in the
+subject CN of the server's certificate presented in the handshake does
+not equal <code>server</code>, or if the server's certificate presented in the
+handshake does not exactly match the <code>server</code>'s certificate in the
+registry.</li>
+</ul>
+<h1 id="panics-2" class="section-header"><a href="#panics-2">Panics</a></h1>
+<ul>
+<li>If the secret key corresponding to the client certificate cannot be
+found or is malformed in the client's secret key store. Note that this
+is an error in the setup of the node and registry.</li>
+</ul>
+</div></div><span class='loading-content'>Loading content...</span>
+            <h2 id='implementors' class='small-section-header'>Implementors<a href='#implementors' class='anchor'></a></h2><div class='item-list' id='implementors-list'></div><span class='loading-content'>Loading content...</span><script type="text/javascript" src="../implementors/ic_crypto_tls_interfaces/trait.TlsHandshake.js" async></script></section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../";window.currentCrate = "ic_crypto_tls_interfaces";</script><script src="../main.js"></script><script defer src="../search-index.js"></script></body></html>

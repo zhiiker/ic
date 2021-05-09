@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["CspTlsClientHandshakeError","Errors occurring during a TLS handshake"],["CspTlsServerHandshakeError","TLS handshake failed (server side)"]],"struct":[["CspMalformedPeerCertificateError","The TLS peer certificate was malformed"]]});

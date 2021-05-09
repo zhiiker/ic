@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_system_api"] = [{"text":"impl&lt;A:&nbsp;<a class=\"trait\" href=\"ic_system_api/trait.SystemStateAccessor.html\" title=\"trait ic_system_api::SystemStateAccessor\">SystemStateAccessor</a>&gt; <a class=\"trait\" href=\"ic_interfaces/execution_environment/trait.SystemApi.html\" title=\"trait ic_interfaces::execution_environment::SystemApi\">SystemApi</a> for <a class=\"struct\" href=\"ic_system_api/struct.SystemApiImpl.html\" title=\"struct ic_system_api::SystemApiImpl\">SystemApiImpl</a>&lt;A&gt;","synthetic":false,"types":["ic_system_api::SystemApiImpl"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

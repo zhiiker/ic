@@ -1,0 +1,101 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `ic_p2p` crate."><meta name="keywords" content="rust, rustlang, rust-lang, ic_p2p"><title>ic_p2p - Rust</title><link rel="stylesheet" type="text/css" href="../normalize.css"><link rel="stylesheet" type="text/css" href="../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../dark.css"><link rel="stylesheet" type="text/css" href="../light.css" id="themeStyle"><script src="../storage.js"></script><noscript><link rel="stylesheet" href="../noscript.css"></noscript><link rel="shortcut icon" href="../favicon.ico"><style type="text/css">#crate-search{background-image:url("../down-arrow.svg");}</style></head><body class="rustdoc mod"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../ic_p2p/index.html'><div class='logo-container'><img src='../rust-logo.png' alt='logo'></div></a><p class='location'>Crate ic_p2p</p><div class="sidebar-elems"><a id='all-types' href='all.html'><p>See all ic_p2p's items</p></a><div class="block items"><ul><li><a href="#modules">Modules</a></li><li><a href="#macros">Macros</a></li></ul></div><p class='location'></p><script>window.sidebarCurrent = {name: 'ic_p2p', ty: 'mod', relpath: '../'};</script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../settings.html"><img src="../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../src/ic_p2p/lib.rs.html#1-190' title='goto source code'>[src]</a></span><span class='in-band'>Crate <a class="mod" href=''>ic_p2p</a></span></h1><div class='docblock'><h1>Overview</h1>
+<p>The peer-to-peer (P2P) component implements a gossiping mechanism for
+subnets and creates and validates ingress message payloads for the
+<em>Consensus</em> layer. It contains the following sub-components:</p>
+<ul>
+<li><em>Gossip</em>: Disseminate artifacts to other nodes in the same subnet. This is
+achieved by an advertise-request-response mechanism, taking priorities
+into account.</li>
+<li><em>Artifact Manager</em>: Store artifacts to be used by this and other nodes in
+the same subnet in the artifact pool. The artifact manager interacts with
+<em>Gossip</em> and its application components:
+<ul>
+<li><em>Consensus</em></li>
+<li><em>Distributed Key Generation</em></li>
+<li><em>Certification</em></li>
+<li><em>Ingress Manager</em></li>
+<li><em>State Sync</em></li>
+</ul>
+</li>
+<li><em>Ingress Manager</em>: Processes ingress messages, providing the following
+functionality:
+<ul>
+<li>Check ingress message validity of messages received from other nodes
+and broadcast valid ingress messages</li>
+<li>Select ingress message to form <em>Consensus</em> payloads</li>
+<li>Validate such payloads</li>
+</ul>
+</li>
+</ul>
+<h1>Bounded-time/Eventual Delivery</h1>
+<ul>
+<li>P2P guarantees that, up to a certain maximum volume, valid artifacts reach
+all nodes subject to constraints due to prioritisation and the
+applications' validation policies. More precisely, <em>Gossip</em> guarantees the
+delivery of artifacts of a bounded aggregate size within bounded
+time/eventually under certain network assumptions and provided that the
+rules and validity conditions specified by the application components are
+satisfied. Thus, valid artifacts that are of high priority for all nodes
+will reach all honest nodes in bounded time/eventually, despite attacks
+(under certain network assumptions). In other words, the priority function
+ensures that relevant valid artifacts reach enough nodes in the subnet,
+while artifacts that violate the policy or are of low priority may not
+reach all other nodes in the subnet.</li>
+<li>Eventual delivery differs from eventual consistency. Consistency models
+describe the contract between users and a system offering reading and
+writing to replicated state. Informally, eventual consistency guarantees
+that if no write occurs for a long time, all replicas return the same
+value for reads. <em>Consensus</em> does <strong>not</strong> require eventual consistency for
+the artifact pool: the priority function can drop adverts without
+requesting the artifact and different (valid) artifacts with the same
+identifier may exist in the system and <em>Consensus</em> often only needs at
+most one of them. Moreover, the offered guarantees are subject to
+bandwidth restrictions on all honest peers.</li>
+</ul>
+<h1>Performance</h1>
+<ul>
+<li>Low number of open connections: An overlay topology defines which nodes
+exchange artifacts directly with each other. Together with the
+bounded-time/eventual delivery guarantee mentioned above, the topology
+ensures that enough honest nodes receive artifacts to make progress. Since
+the overlay topology describes which connections are established and
+maintained, it enables the broadcast protocol to trade off bandwidth
+consumption with latency.</li>
+<li>High throughput and predictability: Bandwidth must not be wasted on
+sending/receiving the same artifact twice. The behavior under load must be
+predictable (memory/bandwidth/CPU guarantees for different peers and for
+different components using gossip).</li>
+<li>Prioritization: Different artifacts are transferred with different
+priorities, and priorities change over time.</li>
+</ul>
+<h1>Ingress Manager</h1>
+<ul>
+<li>Validity: ingress messages are broadcast to other peers only if they are
+valid.</li>
+<li>At-most-once semantics: an ingress message is selected to be in a
+<em>Consensus</em> payload at most once before its expiry time and only if it is
+valid (even if a node restarts).</li>
+</ul>
+<h1>Dependencies</h1>
+P2P relies on the following components:
+<ul>
+<li><em>Transport</em> for node-to-node communication.</li>
+<li><em>HTTP handler</em> to submit validated ingress messages.</li>
+<li><em>Consensus</em> to pass the Internet Computer time as well as finalized
+payloads and non-finalized payloads since the last executed height in the
+chain.</li>
+<li><em>Registry</em> to look up subnet IDs, node IDs, and configuration values.</li>
+<li><em>Crypto</em> to verify signatures in the <em>Ingress Manager</em>.</li>
+<li><em>Ingress History Reader</em> to prevent duplicate Ingress Messages in blocks</li>
+</ul>
+<h1>Component Diagram</h1>
+<p>The following diagram depicts the interfaces between the P2P components and
+other components. The interaction with the <em>Registry</em> is omitted for
+simplicity's sake as all components rely on it.</p>
+<div>
+<img src="../../../../../docs/assets/p2p.png" height="960"
+width="540"/> </div> <hr/></div><h2 id='modules' class='section-header'><a href="#modules">Modules</a></h2>
+<table><tr class='module-item'><td><a class="mod" href="p2p/index.html" title='ic_p2p::p2p mod'>p2p</a></td><td class='docblock-short'><p>The P2P module exposes the peer-to-peer functionality.</p>
+</td></tr></table><h2 id='macros' class='section-header'><a href="#macros">Macros</a></h2>
+<table><tr class='module-item'><td><a class="macro" href="macro.use_gossip_malicious_behavior_on_chunk_request.html" title='ic_p2p::use_gossip_malicious_behavior_on_chunk_request macro'>use_gossip_malicious_behavior_on_chunk_request</a></td><td class='docblock-short'><p>A macro to choose between running malicious code or the normal replica code.</p>
+</td></tr></table></section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../";window.currentCrate = "ic_p2p";</script><script src="../main.js"></script><script defer src="../search-index.js"></script></body></html>

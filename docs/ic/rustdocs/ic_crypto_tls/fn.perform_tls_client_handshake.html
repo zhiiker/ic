@@ -1,0 +1,31 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `perform_tls_client_handshake` fn in crate `ic_crypto_tls`."><meta name="keywords" content="rust, rustlang, rust-lang, perform_tls_client_handshake"><title>ic_crypto_tls::perform_tls_client_handshake - Rust</title><link rel="stylesheet" type="text/css" href="../normalize.css"><link rel="stylesheet" type="text/css" href="../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../dark.css"><link rel="stylesheet" type="text/css" href="../light.css" id="themeStyle"><script src="../storage.js"></script><noscript><link rel="stylesheet" href="../noscript.css"></noscript><link rel="shortcut icon" href="../favicon.ico"><style type="text/css">#crate-search{background-image:url("../down-arrow.svg");}</style></head><body class="rustdoc fn"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../ic_crypto_tls/index.html'><div class='logo-container'><img src='../rust-logo.png' alt='logo'></div></a><div class="sidebar-elems"><p class='location'><a href='index.html'>ic_crypto_tls</a></p><script>window.sidebarCurrent = {name: 'perform_tls_client_handshake', ty: 'fn', relpath: ''};</script><script defer src="sidebar-items.js"></script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../settings.html"><img src="../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../src/ic_crypto_tls/client_handshake.rs.html#39-57' title='goto source code'>[src]</a></span><span class='in-band'>Function <a href='index.html'>ic_crypto_tls</a>::<wbr><a class="fn" href=''>perform_tls_client_handshake</a></span></h1><pre class='rust fn'>pub async fn perform_tls_client_handshake(<br>&nbsp;&nbsp;&nbsp;&nbsp;tcp_stream: <a class="struct" href="https://docs.rs/tokio/0.2.24/tokio/net/tcp/stream/struct.TcpStream.html" title="struct tokio::net::tcp::stream::TcpStream">TcpStream</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;client_cert: <a class="struct" href="../ic_crypto_tls/struct.TlsPublicKeyCert.html" title="struct ic_crypto_tls::TlsPublicKeyCert">TlsPublicKeyCert</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;client_private_key: <a class="struct" href="../ic_crypto_tls/struct.TlsPrivateKey.html" title="struct ic_crypto_tls::TlsPrivateKey">TlsPrivateKey</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;trusted_server_cert: <a class="struct" href="../ic_crypto_tls/struct.TlsPublicKeyCert.html" title="struct ic_crypto_tls::TlsPublicKeyCert">TlsPublicKeyCert</a><br>) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;TlsStream, <a class="enum" href="../ic_crypto_tls/enum.TlsClientHandshakeError.html" title="enum ic_crypto_tls::TlsClientHandshakeError">TlsClientHandshakeError</a>&gt;</pre><div class='docblock'><p>Transforms a TCP stream into a TLS stream by performing a TLS client
+handshake.</p>
+<p>This client authenticates its connection using the <code>client_cert</code> and the
+corresponding <code>client_private_key</code>. The client only connects if the server
+presents <code>trusted_server_cert</code> as certificate during the handshake.</p>
+<p>For the handshake, the client uses the following configuration:</p>
+<ul>
+<li>Minimum protocol version: TLS 1.3</li>
+<li>Supported signature algorithms: ed25519</li>
+<li>Allowed cipher suites: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384</li>
+<li>Server authentication: mandatory, with ed25519 certificate</li>
+</ul>
+<p>The given <code>tcp_stream</code> is consumed. If an error is returned, the TCP
+connection is therefore dropped.</p>
+<h1 id="arguments" class="section-header"><a href="#arguments">Arguments</a></h1>
+<ul>
+<li><code>tcp_stream</code> is the TCP connection over which to run the TLS handshake</li>
+<li><code>client_cert</code> is the caller's X.509 certificate</li>
+<li><code>client_private_key</code> is the private key corresponding to <code>client_cert</code></li>
+<li><code>trusted_server_cert</code> is the X.509 certificate of the intended peer</li>
+</ul>
+<h1 id="returns" class="section-header"><a href="#returns">Returns</a></h1>
+<p><code>Ok(TlsStream)</code> if the handshake was successful,
+<code>TlsClientHandshakeError</code> otherwise</p>
+<h1 id="errors" class="section-header"><a href="#errors">Errors</a></h1>
+<ul>
+<li><code>TlsClientHandshakeError::CreateConnectorError</code> if the key or certs fail
+to parse or there is an error creating the configuration</li>
+<li><code>TlsClientHandshakeError::HandshakeError</code> if the handshake fails</li>
+</ul>
+</div></section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../";window.currentCrate = "ic_crypto_tls";</script><script src="../main.js"></script><script defer src="../search-index.js"></script></body></html>

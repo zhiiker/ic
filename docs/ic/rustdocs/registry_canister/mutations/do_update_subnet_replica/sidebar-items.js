@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["UpdateSubnetReplicaVersionPayload","The argument of a command to update the replica version of a single subnet to a specific version."]]});

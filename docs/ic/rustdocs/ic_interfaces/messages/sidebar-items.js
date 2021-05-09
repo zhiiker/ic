@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["CanisterInputMessage","A wrapper around ingress messages and canister requests/responses."],["RequestOrIngress","A wrapper around a canister request and an ingress message."]]});

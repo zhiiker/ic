@@ -1,0 +1,25 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `hashed` mod in crate `ic_types`."><meta name="keywords" content="rust, rustlang, rust-lang, hashed"><title>ic_types::consensus::hashed - Rust</title><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../dark.css"><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script src="../../../storage.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="shortcut icon" href="../../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../../down-arrow.svg");}</style></head><body class="rustdoc mod"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../../ic_types/index.html'><div class='logo-container'><img src='../../../rust-logo.png' alt='logo'></div></a><p class='location'>Module hashed</p><div class="sidebar-elems"><div class="block items"><ul><li><a href="#structs">Structs</a></li></ul></div><p class='location'><a href='../../index.html'>ic_types</a>::<wbr><a href='../index.html'>consensus</a></p><script>window.sidebarCurrent = {name: 'hashed', ty: 'mod', relpath: '../'};</script><script defer src="../sidebar-items.js"></script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../../settings.html"><img src="../../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../../../src/ic_types/consensus/hashed.rs.html#1-114' title='goto source code'>[src]</a></span><span class='in-band'>Module <a href='../../index.html'>ic_types</a>::<wbr><a href='../index.html'>consensus</a>::<wbr><a class="mod" href=''>hashed</a></span></h1><div class='docblock'><p>An object that is hashable can be bundled together with its hash, which
+becomes a <code>Hashed&lt;H, V&gt;</code> object parameterized by the actual hash type <code>H</code>
+and value type <code>V</code>. There are a number of benefits of doing this:</p>
+<ol>
+<li>
+<p>Equality check can be done just on the hash, which is often cheaper than
+traversing the object recursively.</p>
+</li>
+<li>
+<p>Computing hashes over <code>Hashed&lt;H, V&gt;</code> can also take a shortcut by just
+hashing the hash of type <code>H</code>, instead of the value of type <code>V</code>. Note that
+this does not lead to the same hash result as directly hashing the value.</p>
+</li>
+<li>
+<p>Using Hash also gives a strawman implementation of <code>Ord</code> if the order
+does not have to be consistent with the actual order of the object's value.</p>
+</li>
+</ol>
+<p>The serialization of <code>Hashed&lt;H, V&gt;</code> will serialize both the hash and the
+value.</p>
+</div><h2 id='structs' class='section-header'><a href="#structs">Structs</a></h2>
+<table><tr class='module-item'><td><a class="struct" href="struct.Hashed.html" title='ic_types::consensus::hashed::Hashed struct'>Hashed</a></td><td class='docblock-short'><p>Bundle of both a value and its hash. Once created it remains immutable,
+which is why both fields are only accessible through member functions, not
+as record fields.</p>
+</td></tr></table></section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../../../";window.currentCrate = "ic_types";</script><script src="../../../main.js"></script><script defer src="../../../search-index.js"></script></body></html>

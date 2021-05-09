@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["SubnetType","Defines the different types of subnets that can exist on the IC."]]});

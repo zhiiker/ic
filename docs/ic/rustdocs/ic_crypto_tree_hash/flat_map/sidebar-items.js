@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["FlatMap","A [`FlatMap`] is a sorted map with fast lookups and appends."],["IntoIter","An auxiliary struct for an implementation of iterators over [`FlatMap`]"]]});

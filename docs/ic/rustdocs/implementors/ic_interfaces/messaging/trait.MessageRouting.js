@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_messaging"] = [{"text":"impl <a class=\"trait\" href=\"ic_interfaces/messaging/trait.MessageRouting.html\" title=\"trait ic_interfaces::messaging::MessageRouting\">MessageRouting</a> for <a class=\"struct\" href=\"ic_messaging/struct.MessageRoutingImpl.html\" title=\"struct ic_messaging::MessageRoutingImpl\">MessageRoutingImpl</a>","synthetic":false,"types":["ic_messaging::message_routing::MessageRoutingImpl"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

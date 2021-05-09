@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_consensus"] = [{"text":"impl <a class=\"trait\" href=\"ic_interfaces/dkg/trait.DkgGossip.html\" title=\"trait ic_interfaces::dkg::DkgGossip\">DkgGossip</a> for <a class=\"struct\" href=\"ic_consensus/dkg/struct.DkgGossipImpl.html\" title=\"struct ic_consensus::dkg::DkgGossipImpl\">DkgGossipImpl</a>","synthetic":false,"types":["ic_consensus::dkg::DkgGossipImpl"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

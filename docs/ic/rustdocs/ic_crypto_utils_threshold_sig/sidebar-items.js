@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["parse_threshold_sig_key","Parse a PEM format threshold signature public key from a named file."],["verify_combined","Verify a combined threshold signature."]]});

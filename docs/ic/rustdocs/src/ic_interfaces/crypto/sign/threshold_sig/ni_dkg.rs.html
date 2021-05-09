@@ -1,0 +1,327 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source to the Rust file `interfaces/src/crypto/sign/threshold_sig/ni_dkg.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>ni_dkg.rs.html -- source</title><link rel="stylesheet" type="text/css" href="../../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../../dark.css"><link rel="stylesheet" type="text/css" href="../../../../../light.css" id="themeStyle"><script src="../../../../../storage.js"></script><noscript><link rel="stylesheet" href="../../../../../noscript.css"></noscript><link rel="shortcut icon" href="../../../../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../../../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../../../../ic_interfaces/index.html'><div class='logo-container'><img src='../../../../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../../../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../../../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../../../../settings.html"><img src="../../../../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1">  1</span>
+<span id="2">  2</span>
+<span id="3">  3</span>
+<span id="4">  4</span>
+<span id="5">  5</span>
+<span id="6">  6</span>
+<span id="7">  7</span>
+<span id="8">  8</span>
+<span id="9">  9</span>
+<span id="10"> 10</span>
+<span id="11"> 11</span>
+<span id="12"> 12</span>
+<span id="13"> 13</span>
+<span id="14"> 14</span>
+<span id="15"> 15</span>
+<span id="16"> 16</span>
+<span id="17"> 17</span>
+<span id="18"> 18</span>
+<span id="19"> 19</span>
+<span id="20"> 20</span>
+<span id="21"> 21</span>
+<span id="22"> 22</span>
+<span id="23"> 23</span>
+<span id="24"> 24</span>
+<span id="25"> 25</span>
+<span id="26"> 26</span>
+<span id="27"> 27</span>
+<span id="28"> 28</span>
+<span id="29"> 29</span>
+<span id="30"> 30</span>
+<span id="31"> 31</span>
+<span id="32"> 32</span>
+<span id="33"> 33</span>
+<span id="34"> 34</span>
+<span id="35"> 35</span>
+<span id="36"> 36</span>
+<span id="37"> 37</span>
+<span id="38"> 38</span>
+<span id="39"> 39</span>
+<span id="40"> 40</span>
+<span id="41"> 41</span>
+<span id="42"> 42</span>
+<span id="43"> 43</span>
+<span id="44"> 44</span>
+<span id="45"> 45</span>
+<span id="46"> 46</span>
+<span id="47"> 47</span>
+<span id="48"> 48</span>
+<span id="49"> 49</span>
+<span id="50"> 50</span>
+<span id="51"> 51</span>
+<span id="52"> 52</span>
+<span id="53"> 53</span>
+<span id="54"> 54</span>
+<span id="55"> 55</span>
+<span id="56"> 56</span>
+<span id="57"> 57</span>
+<span id="58"> 58</span>
+<span id="59"> 59</span>
+<span id="60"> 60</span>
+<span id="61"> 61</span>
+<span id="62"> 62</span>
+<span id="63"> 63</span>
+<span id="64"> 64</span>
+<span id="65"> 65</span>
+<span id="66"> 66</span>
+<span id="67"> 67</span>
+<span id="68"> 68</span>
+<span id="69"> 69</span>
+<span id="70"> 70</span>
+<span id="71"> 71</span>
+<span id="72"> 72</span>
+<span id="73"> 73</span>
+<span id="74"> 74</span>
+<span id="75"> 75</span>
+<span id="76"> 76</span>
+<span id="77"> 77</span>
+<span id="78"> 78</span>
+<span id="79"> 79</span>
+<span id="80"> 80</span>
+<span id="81"> 81</span>
+<span id="82"> 82</span>
+<span id="83"> 83</span>
+<span id="84"> 84</span>
+<span id="85"> 85</span>
+<span id="86"> 86</span>
+<span id="87"> 87</span>
+<span id="88"> 88</span>
+<span id="89"> 89</span>
+<span id="90"> 90</span>
+<span id="91"> 91</span>
+<span id="92"> 92</span>
+<span id="93"> 93</span>
+<span id="94"> 94</span>
+<span id="95"> 95</span>
+<span id="96"> 96</span>
+<span id="97"> 97</span>
+<span id="98"> 98</span>
+<span id="99"> 99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+</pre><div class="example-wrap"><pre class="rust ">
+<span class="kw">use</span> <span class="ident">ic_types</span>::<span class="ident">crypto</span>::<span class="ident">threshold_sig</span>::<span class="ident">ni_dkg</span>::<span class="ident">config</span>::<span class="ident">NiDkgConfig</span>;
+<span class="kw">use</span> <span class="ident">ic_types</span>::<span class="ident">crypto</span>::<span class="ident">threshold_sig</span>::<span class="ident">ni_dkg</span>::<span class="ident">errors</span>::<span class="ident">create_dealing_error</span>::<span class="ident">DkgCreateDealingError</span>;
+<span class="kw">use</span> <span class="ident">ic_types</span>::<span class="ident">crypto</span>::<span class="ident">threshold_sig</span>::<span class="ident">ni_dkg</span>::<span class="ident">errors</span>::<span class="ident">create_transcript_error</span>::<span class="ident">DkgCreateTranscriptError</span>;
+<span class="kw">use</span> <span class="ident">ic_types</span>::<span class="ident">crypto</span>::<span class="ident">threshold_sig</span>::<span class="ident">ni_dkg</span>::<span class="ident">errors</span>::<span class="ident">key_removal_error</span>::<span class="ident">DkgKeyRemovalError</span>;
+<span class="kw">use</span> <span class="ident">ic_types</span>::<span class="ident">crypto</span>::<span class="ident">threshold_sig</span>::<span class="ident">ni_dkg</span>::<span class="ident">errors</span>::<span class="ident">load_transcript_error</span>::<span class="ident">DkgLoadTranscriptError</span>;
+<span class="kw">use</span> <span class="ident">ic_types</span>::<span class="ident">crypto</span>::<span class="ident">threshold_sig</span>::<span class="ident">ni_dkg</span>::<span class="ident">errors</span>::<span class="ident">verify_dealing_error</span>::<span class="ident">DkgVerifyDealingError</span>;
+<span class="kw">use</span> <span class="ident">ic_types</span>::<span class="ident">crypto</span>::<span class="ident">threshold_sig</span>::<span class="ident">ni_dkg</span>::{<span class="ident">NiDkgDealing</span>, <span class="ident">NiDkgTranscript</span>};
+<span class="kw">use</span> <span class="ident">ic_types</span>::<span class="ident">NodeId</span>;
+<span class="kw">use</span> <span class="ident">std</span>::<span class="ident">collections</span>::{<span class="ident">BTreeMap</span>, <span class="ident">HashSet</span>};
+
+<span class="doccomment">/// The building blocks to perform non-interactive distributed key generation</span>
+<span class="doccomment">/// (DKG).</span>
+<span class="doccomment">///</span>
+<span class="doccomment">/// There are two variants of DKG that are supported:</span>
+<span class="doccomment">///</span>
+<span class="doccomment">/// # (Non-Resharing) DKG</span>
+<span class="doccomment">/// In the standard DKG, the group public key changes in every DKG epoch.</span>
+<span class="doccomment">///</span>
+<span class="doccomment">/// To run this variant of DKG, always use a `NiDkgConfig` that has</span>
+<span class="doccomment">/// `resharing_transcript = None`.</span>
+<span class="doccomment">///</span>
+<span class="doccomment">/// # Resharing DKG</span>
+<span class="doccomment">/// In resharing DKG, the group public key remains the same, as opposed to</span>
+<span class="doccomment">/// changing in every DKG epoch.</span>
+<span class="doccomment">///</span>
+<span class="doccomment">/// To run non-resharing DKG, proceed as follows:</span>
+<span class="doccomment">/// * In the first epoch, run (non-resharing) DKG using a `NiDkgConfig` that has</span>
+<span class="doccomment">///   `resharing_transcript = None`.</span>
+<span class="doccomment">/// * With the resulting `NiDkgTranscript`, re-sharing DKG can be run repeatedly</span>
+<span class="doccomment">///   by using a `NiDkgConfig` that has `resharing_transcript =</span>
+<span class="doccomment">///   Some(transcript)`, where transcript is the `NiDkgTranscript` from the</span>
+<span class="doccomment">///   previous DKG epoch.</span>
+<span class="doccomment">///</span>
+<span class="doccomment">/// # Preconditions</span>
+<span class="doccomment">/// * For a fixed `NiDkgId`, the `NiDkgConfig` must never change. That is, if</span>
+<span class="doccomment">///   two calls to methods of `NiDkgAlgorithm` are made with `NiDkgConfig`</span>
+<span class="doccomment">///   values `config1` and `config2` respectively, then if `config1.dkg_id ==</span>
+<span class="doccomment">///   config2.dkg_id`, we must have `config1 == config2`.</span>
+<span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">NiDkgAlgorithm</span> {
+    <span class="doccomment">/// Creates a non-interactive DKG dealing.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// # Errors</span>
+    <span class="doccomment">/// * `DkgCreateDealingError::InvalidTranscript` if the</span>
+    <span class="doccomment">///   `resharing_transcript` in the `config` cannot be parsed.</span>
+    <span class="doccomment">/// * `DkgCreateDealingError::NotADealer` if the `self.node_id` is not</span>
+    <span class="doccomment">///   contained in the `config`&#39;s dealers.</span>
+    <span class="doccomment">/// * `DkgCreateDealingError::FsEncryptionPublicKeyNotInRegistry` if a</span>
+    <span class="doccomment">///   forward secure encryption public key is not in the registry.</span>
+    <span class="doccomment">/// * `DkgCreateDealingError::Registry` if the registry client returns an</span>
+    <span class="doccomment">///   error, e.g. because the `registry_version` in the `config` is not</span>
+    <span class="doccomment">///   available.</span>
+    <span class="doccomment">/// * `DkgCreateDealingError::MalformedFsEncryptionPublicKey` if the</span>
+    <span class="doccomment">///   encryption public key fetched from the registry is malformed.</span>
+    <span class="doccomment">/// * `DkgCreateDealingError::FsDecryptionKeyNotInSecretKeyStore` if the</span>
+    <span class="doccomment">///   forward secure decryption key is not in the secret key store.</span>
+    <span class="kw">fn</span> <span class="ident">create_dealing</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">config</span>: <span class="kw-2">&amp;</span><span class="ident">NiDkgConfig</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">NiDkgDealing</span>, <span class="ident">DkgCreateDealingError</span><span class="op">&gt;</span>;
+
+    <span class="doccomment">/// Verifies a non-interactive DKG dealing.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// # Errors</span>
+    <span class="doccomment">/// * `DkgVerifyDealingError::InvalidDealingError` if the dealing is</span>
+    <span class="doccomment">///   invalid.</span>
+    <span class="doccomment">/// * `DkgVerifyDealingError::NotADealer` if the `dealer` is not contained</span>
+    <span class="doccomment">///   in the `config`&#39;s dealers.</span>
+    <span class="doccomment">/// * `DkgVerifyDealingError::FsEncryptionPublicKeyNotInRegistry` if a</span>
+    <span class="doccomment">///   forward secure encryption public key is not in the registry.</span>
+    <span class="doccomment">/// * `DkgVerifyDealingError::Registry` if the registry client returns an</span>
+    <span class="doccomment">///   error, e.g. because the `registry_version` in the `config` is not</span>
+    <span class="doccomment">///   available.</span>
+    <span class="doccomment">/// * `DkgVerifyDealingError::MalformedFsEncryptionPublicKey` if the</span>
+    <span class="doccomment">///   encryption public key fetched from the registry is malformed.</span>
+    <span class="doccomment">/// * `DkgVerifyDealingError::MalformedResharingTranscriptInConfig` if the</span>
+    <span class="doccomment">///   `resharing_transcript` in the `config` is malformed.</span>
+    <span class="kw">fn</span> <span class="ident">verify_dealing</span>(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="ident">config</span>: <span class="kw-2">&amp;</span><span class="ident">NiDkgConfig</span>,
+        <span class="ident">dealer</span>: <span class="ident">NodeId</span>,
+        <span class="ident">dealing</span>: <span class="kw-2">&amp;</span><span class="ident">NiDkgDealing</span>,
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">DkgVerifyDealingError</span><span class="op">&gt;</span>;
+
+    <span class="doccomment">/// Combines the dealings into a transcript.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// # Preconditions</span>
+    <span class="doccomment">/// * For each `(dealer, dealing)` in `verified_dealings`, it holds that</span>
+    <span class="doccomment">///   `verify_dealing(config, dealer, dealing).is_ok()`</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// # Errors</span>
+    <span class="doccomment">/// * `DkgCreateTranscriptError::InsufficientDealings` if</span>
+    <span class="doccomment">///   `verified_dealings` contains an insufficient number of dealings.</span>
+    <span class="doccomment">/// * `DkgCreateTranscriptError::MalformedResharingTranscriptInConfig` if</span>
+    <span class="doccomment">///   the `config` contains a malformed `resharing_transcript`.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// # Panics</span>
+    <span class="doccomment">/// * if a dealing is invalid. This is a precondition violation, see the</span>
+    <span class="doccomment">///   precondition above. Note that this method does not perform a complete</span>
+    <span class="doccomment">///   dealing validation as performed by &#39;verify_dealing&#39;.</span>
+    <span class="doccomment">/// * if there are dealings in `verified_dealings` for `NodeId`s that are</span>
+    <span class="doccomment">///   not in the `config`&#39;s dealers. As above, this is a precondition</span>
+    <span class="doccomment">///   violation since that dealing could not have been verified</span>
+    <span class="doccomment">///   successfully.</span>
+    <span class="kw">fn</span> <span class="ident">create_transcript</span>(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="ident">config</span>: <span class="kw-2">&amp;</span><span class="ident">NiDkgConfig</span>,
+        <span class="ident">verified_dealings</span>: <span class="kw-2">&amp;</span><span class="ident">BTreeMap</span><span class="op">&lt;</span><span class="ident">NodeId</span>, <span class="ident">NiDkgDealing</span><span class="op">&gt;</span>,
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">NiDkgTranscript</span>, <span class="ident">DkgCreateTranscriptError</span><span class="op">&gt;</span>;
+
+    <span class="doccomment">/// Loads the transcript. This ensures that</span>
+    <span class="doccomment">/// * the (group&#39;s) public threshold signing key is available for the</span>
+    <span class="doccomment">///   methods of the `ThresholdSigVerifier` trait, and</span>
+    <span class="doccomment">/// * the individual nodes&#39; public threshold signing keys are available for</span>
+    <span class="doccomment">///   the methods of the `ThresholdSigVerifier` trait, and</span>
+    <span class="doccomment">/// * if the node is a receiver and the node&#39;s forward secure decryption key</span>
+    <span class="doccomment">///   is present in the secret key store, the node&#39;s secret threshold</span>
+    <span class="doccomment">///   signing key is available for the methods of the `ThresholdSigner`</span>
+    <span class="doccomment">///   trait for the DKG instance identified by the DKG ID contained in the</span>
+    <span class="doccomment">///   transcript.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// # Errors</span>
+    <span class="doccomment">/// * `DkgLoadTranscriptError::FsEncryptionPublicKeyNotInRegistry` if a</span>
+    <span class="doccomment">///   forward secure encryption public key is not in the registry.</span>
+    <span class="doccomment">/// * `DkgLoadTranscriptError::MalformedFsEncryptionPublicKey` if a</span>
+    <span class="doccomment">///   encryption public key fetched from the registry is malformed.</span>
+    <span class="doccomment">/// * `DkgLoadTranscriptError::Registry` if the registry client returns an</span>
+    <span class="doccomment">///   error, e.g. because the registry version is not available.</span>
+    <span class="doccomment">/// * `DkgLoadTranscriptError::InvalidTranscript` if the transcript could</span>
+    <span class="doccomment">///   not be parsed.</span>
+    <span class="kw">fn</span> <span class="ident">load_transcript</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">transcript</span>: <span class="kw-2">&amp;</span><span class="ident">NiDkgTranscript</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">DkgLoadTranscriptError</span><span class="op">&gt;</span>;
+
+    <span class="doccomment">/// Retains only keys for the given `transcripts`.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// This ensures that any other keys are no longer stored in the Secret Key</span>
+    <span class="doccomment">/// Store. It ensures the following:</span>
+    <span class="doccomment">/// * The only threshold signing keys in the store are the ones for</span>
+    <span class="doccomment">///   `transcript.dkg_id` for any `transcript` in `transcripts`.</span>
+    <span class="doccomment">/// * The decryption key of the FS encryption keys is updated to the epoch</span>
+    <span class="doccomment">///   `epoch:= min{transcript.registry_version: for transcript in</span>
+    <span class="doccomment">///   transcripts}`. Decryption can no longer be performed on earlier</span>
+    <span class="doccomment">///   epochs. This means that it is still possible to decrypt the signing</span>
+    <span class="doccomment">///   keys for any transcript in `transcript`.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// Keys are only retained if the keys corresponding to the transcript are</span>
+    <span class="doccomment">/// present in the secret key store. If keys are not present in the secret</span>
+    <span class="doccomment">/// key store, this is a no-op.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// # Errors:</span>
+    <span class="doccomment">/// * `DkgKeyRemovalError::InputValidationError`: if any of the invariants</span>
+    <span class="doccomment">///   of the constructor of `TranscriptsToRetain` fails.</span>
+    <span class="doccomment">/// * `DkgKeyRemovalError::FsEncryptionPublicKeyNotInRegistry`,</span>
+    <span class="doccomment">///   `DkgKeyRemovalError::MalformedFsEncryptionPublicKey`, or</span>
+    <span class="doccomment">///   `DkgKeyRemovalError::Registry`: If the FS encryption public key stored</span>
+    <span class="doccomment">///   for the node in the registry at version</span>
+    <span class="doccomment">///   `version=min{transcript.registry_version: for transcript in</span>
+    <span class="doccomment">///   transcripts}` cannot be obtained or is malformed. In this case the FS</span>
+    <span class="doccomment">///   decryption key is not updated, but the removal of threshold signing</span>
+    <span class="doccomment">///   keys is still ensured.</span>
+    <span class="doccomment">/// * `FsKeyNotInSecretKeyStoreError::FsKeyNotInSecretKeyStoreError`: If the</span>
+    <span class="doccomment">///   forward secure key to be updated is not found in the secret key store.</span>
+    <span class="kw">fn</span> <span class="ident">retain_only_active_keys</span>(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="ident">transcripts</span>: <span class="ident">HashSet</span><span class="op">&lt;</span><span class="ident">NiDkgTranscript</span><span class="op">&gt;</span>,
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">DkgKeyRemovalError</span><span class="op">&gt;</span>;
+}
+</pre></div>
+</section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../../../../../";window.currentCrate = "ic_interfaces";</script><script src="../../../../../main.js"></script><script src="../../../../../source-script.js"></script><script src="../../../../../source-files.js"></script><script defer src="../../../../../search-index.js"></script></body></html>

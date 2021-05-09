@@ -1,0 +1,111 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `HashTreeBuilder` trait in crate `ic_crypto_tree_hash`."><meta name="keywords" content="rust, rustlang, rust-lang, HashTreeBuilder"><title>ic_crypto_tree_hash::HashTreeBuilder - Rust</title><link rel="stylesheet" type="text/css" href="../normalize.css"><link rel="stylesheet" type="text/css" href="../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../dark.css"><link rel="stylesheet" type="text/css" href="../light.css" id="themeStyle"><script src="../storage.js"></script><noscript><link rel="stylesheet" href="../noscript.css"></noscript><link rel="shortcut icon" href="../favicon.ico"><style type="text/css">#crate-search{background-image:url("../down-arrow.svg");}</style></head><body class="rustdoc trait"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../ic_crypto_tree_hash/index.html'><div class='logo-container'><img src='../rust-logo.png' alt='logo'></div></a><p class='location'>Trait HashTreeBuilder</p><div class="sidebar-elems"><div class="block items"><a class="sidebar-title" href="#associated-types">Associated Types</a><div class="sidebar-links"><a href="#associatedtype.WitnessGenerator">WitnessGenerator</a></div><a class="sidebar-title" href="#required-methods">Required Methods</a><div class="sidebar-links"><a href="#tymethod.finish_leaf">finish_leaf</a><a href="#tymethod.finish_subtree">finish_subtree</a><a href="#tymethod.new_edge">new_edge</a><a href="#tymethod.start_leaf">start_leaf</a><a href="#tymethod.start_subtree">start_subtree</a><a href="#tymethod.witness_generator">witness_generator</a><a href="#tymethod.write_leaf">write_leaf</a></div><a class="sidebar-title" href="#implementors">Implementors</a></div><p class='location'><a href='index.html'>ic_crypto_tree_hash</a></p><script>window.sidebarCurrent = {name: 'HashTreeBuilder', ty: 'trait', relpath: ''};</script><script defer src="sidebar-items.js"></script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../settings.html"><img src="../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../src/ic_crypto_tree_hash/lib.rs.html#741-808' title='goto source code'>[src]</a></span><span class='in-band'>Trait <a href='index.html'>ic_crypto_tree_hash</a>::<wbr><a class="trait" href=''>HashTreeBuilder</a></span></h1><div class="docblock type-decl hidden-by-usual-hider"><pre class='rust trait'>pub trait HashTreeBuilder {
+    type <a href='#associatedtype.WitnessGenerator' class="type">WitnessGenerator</a>;
+    fn <a href='#tymethod.start_leaf' class='fnname'>start_leaf</a>(&amp;mut self);
+<div class='item-spacer'></div>    fn <a href='#tymethod.write_leaf' class='fnname'>write_leaf</a>&lt;T:&nbsp;<a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.AsRef.html" title="trait core::convert::AsRef">AsRef</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">[</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">]</a>&gt;&gt;(&amp;mut self, bytes: T);
+<div class='item-spacer'></div>    fn <a href='#tymethod.finish_leaf' class='fnname'>finish_leaf</a>(&amp;mut self);
+<div class='item-spacer'></div>    fn <a href='#tymethod.start_subtree' class='fnname'>start_subtree</a>(&amp;mut self);
+<div class='item-spacer'></div>    fn <a href='#tymethod.new_edge' class='fnname'>new_edge</a>&lt;T:&nbsp;<a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html" title="trait core::convert::Into">Into</a>&lt;<a class="struct" href="../ic_crypto_tree_hash/struct.Label.html" title="struct ic_crypto_tree_hash::Label">Label</a>&gt;&gt;(&amp;mut self, label: T);
+<div class='item-spacer'></div>    fn <a href='#tymethod.finish_subtree' class='fnname'>finish_subtree</a>(&amp;mut self);
+<div class='item-spacer'></div>    fn <a href='#tymethod.witness_generator' class='fnname'>witness_generator</a>(&amp;self) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;Self::<a class="type" href="../ic_crypto_tree_hash/trait.HashTreeBuilder.html#associatedtype.WitnessGenerator" title="type ic_crypto_tree_hash::HashTreeBuilder::WitnessGenerator">WitnessGenerator</a>&gt;;
+}</pre></div><div class='docblock'><p><code>HashTreeBuilder</code> enables an iterative construction of a <a href="../ic_crypto_tree_hash/enum.LabeledTree.html" title="`LabeledTree`"><code>LabeledTree</code></a>,
+which can also be accessed in form of a <a href="../ic_crypto_tree_hash/enum.HashTree.html" title="`HashTree`"><code>HashTree</code></a>.
+The constructed <a href="../ic_crypto_tree_hash/enum.LabeledTree.html" title="`LabeledTree`"><code>LabeledTree</code></a> is a part of the state of the Builder,
+and is build successively by adding leaves and subtrees.
+During the construction, the builder maintains an auxiliary state
+that describes the current position in the <a href="../ic_crypto_tree_hash/enum.LabeledTree.html" title="`LabeledTree`"><code>LabeledTree</code></a> under
+construction. The auxiliary state is a list of nodes that corresponds to the
+path in the tree from the root to the current node being constructed.
+An example code to build the following labeled tree with a sub-tree and
+three leaves:</p>
+<pre><code class="language-text">            root
+            /  \
+           /    \
+     label_A    label_B
+        /         \
+       /           \
+    &quot;node A&quot;       /\
+                  /  \
+                 /    \
+            label_C   label_D
+               /        \
+              /          \
+          &quot;node C&quot;     &quot;node D is longer&quot;
+</code></pre>
+
+<div class='information'><div class='tooltip ignore'>ⓘ<span class='tooltiptext'>This example is not tested</span></div></div><div class="example-wrap"><pre class="rust rust-example-rendered ignore">
+<span class="kw">let</span> <span class="ident">builder</span> <span class="op">=</span> <span class="ident">HashTreeBuilderImpl</span>::<span class="ident">new</span>();
+
+<span class="ident">builder</span>.<span class="ident">start_subtree</span>(); <span class="comment">// start root</span>
+
+<span class="ident">builder</span>.<span class="ident">new_edge</span>(<span class="string">&quot;label_A&quot;</span>);
+<span class="ident">builder</span>.<span class="ident">start_leaf</span>();
+<span class="ident">builder</span>.<span class="ident">write_leaf</span>(<span class="string">&quot;node A&quot;</span>);
+<span class="ident">builder</span>.<span class="ident">finish_leaf</span>();
+
+<span class="ident">builder</span>.<span class="ident">new_edge</span>(<span class="string">&quot;label_B&quot;</span>);
+
+<span class="ident">builder</span>.<span class="ident">start_subtree</span>(); <span class="comment">// start subtree (C, D)</span>
+
+<span class="ident">builder</span>.<span class="ident">new_edge</span>(<span class="string">&quot;label_C&quot;</span>);
+<span class="ident">builder</span>.<span class="ident">start_leaf</span>();
+<span class="ident">builder</span>.<span class="ident">write_leaf</span>(<span class="string">&quot;node C&quot;</span>);
+<span class="ident">builder</span>.<span class="ident">finish_leaf</span>();
+
+<span class="ident">builder</span>.<span class="ident">new_edge</span>(<span class="string">&quot;label_D&quot;</span>);
+<span class="ident">builder</span>.<span class="ident">start_leaf</span>();
+<span class="ident">builder</span>.<span class="ident">write_leaf</span>(<span class="string">&quot;node D&quot;</span>);
+<span class="ident">builder</span>.<span class="ident">write_leaf</span>(<span class="string">&quot; is longer&quot;</span>);
+<span class="ident">builder</span>.<span class="ident">finish_leaf</span>();
+
+<span class="ident">builder</span>.<span class="ident">finish_subtree</span>(); <span class="comment">// end subtree (C, D)</span>
+<span class="ident">builder</span>.<span class="ident">finish_subtree</span>(); <span class="comment">// end root</span></pre></div>
+</div>
+            <h2 id='associated-types' class='small-section-header'>Associated Types<a href='#associated-types' class='anchor'></a></h2><div class='methods'><h3 id='associatedtype.WitnessGenerator' class='method'><code id='WitnessGenerator.t'>type <a href='#associatedtype.WitnessGenerator' class="type">WitnessGenerator</a></code></h3></div><span class='loading-content'>Loading content...</span>
+            <h2 id='required-methods' class='small-section-header'>Required methods<a href='#required-methods' class='anchor'></a></h2><div class='methods'><h3 id='tymethod.start_leaf' class='method'><code id='start_leaf.v'>fn <a href='#tymethod.start_leaf' class='fnname'>start_leaf</a>(&amp;mut self)</code></h3><div class='docblock'><p>Starts a new leaf at the current position in the tree.
+Does not change the current position in the tree.</p>
+<h1 id="panics" class="section-header"><a href="#panics">Panics</a></h1>
+<p><code>panics!</code> if the current position is not an <code>Undefined</code>-node,
+i.e. if this builder is not in the initial state,
+or if the previous call was not <code>new_edge()</code>.</p>
+</div><h3 id='tymethod.write_leaf' class='method'><code id='write_leaf.v'>fn <a href='#tymethod.write_leaf' class='fnname'>write_leaf</a>&lt;T:&nbsp;<a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.AsRef.html" title="trait core::convert::AsRef">AsRef</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">[</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">]</a>&gt;&gt;(&amp;mut self, bytes: T)</code></h3><div class='docblock'><p>Adds bytes to the content of the current leaf.
+Does not change the current position in the tree.</p>
+<h1 id="panics-1" class="section-header"><a href="#panics-1">Panics</a></h1>
+<p><code>panics!</code> if the current position is not a <code>Leaf</code>-node,
+i.e. if the previous call was neither <code>start_leaf()</code>,
+nor <code>write_leaf()</code>.</p>
+</div><h3 id='tymethod.finish_leaf' class='method'><code id='finish_leaf.v'>fn <a href='#tymethod.finish_leaf' class='fnname'>finish_leaf</a>(&amp;mut self)</code></h3><div class='docblock'><p>Finishes the current leaf.  Changes the current position
+in the tree to the parent of the finished leaf (if any).</p>
+<h1 id="panics-2" class="section-header"><a href="#panics-2">Panics</a></h1>
+<p><code>panics!</code> if the current position is not a <code>Leaf</code>-node,
+i.e. if the previous call was neither <code>start_leaf()</code>,
+nor <code>write_leaf()</code>.</p>
+</div><h3 id='tymethod.start_subtree' class='method'><code id='start_subtree.v'>fn <a href='#tymethod.start_subtree' class='fnname'>start_subtree</a>(&amp;mut self)</code></h3><div class='docblock'><p>Starts a new subtree at the current position in the tree.
+Does not change the current position in the tree.</p>
+<h1 id="panics-3" class="section-header"><a href="#panics-3">Panics</a></h1>
+<p><code>panics!</code> if the current position is not an <code>Undefined</code>-node,
+i.e. if this builder is not in the initial state,
+or if the previous call was not <code>new_edge()</code>.</p>
+</div><h3 id='tymethod.new_edge' class='method'><code id='new_edge.v'>fn <a href='#tymethod.new_edge' class='fnname'>new_edge</a>&lt;T:&nbsp;<a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html" title="trait core::convert::Into">Into</a>&lt;<a class="struct" href="../ic_crypto_tree_hash/struct.Label.html" title="struct ic_crypto_tree_hash::Label">Label</a>&gt;&gt;(&amp;mut self, label: T)</code></h3><div class='docblock'><p>Adds a new edge to the current subtree, and creates a new
+<code>Undefined</code>-node, to which the new edge leads.
+Changes the current position to the newly created node.</p>
+<h1 id="panics-4" class="section-header"><a href="#panics-4">Panics</a></h1>
+<ul>
+<li><code>panics!</code> if the current position is not a <code>SubTree</code>-node, i.e. if the
+previous call was neither <code>start_subtree()</code>, nor one of
+<code>finish_leaf()</code> or <code>finish_subtree()</code> that updated the current
+position to a parent that is a <code>SubTree</code>-node.</li>
+<li><code>panics!</code> if the current <code>SubTree</code>-node contains already an edge with
+the specified label.</li>
+</ul>
+</div><h3 id='tymethod.finish_subtree' class='method'><code id='finish_subtree.v'>fn <a href='#tymethod.finish_subtree' class='fnname'>finish_subtree</a>(&amp;mut self)</code></h3><div class='docblock'><p>Finishes the current subtree.  Changes the current position
+in the tree to the parent of the finished subtree (if any).</p>
+<h1 id="panics-5" class="section-header"><a href="#panics-5">Panics</a></h1>
+<p><code>panics!</code> if the current position is not a <code>SubTree</code>-node,
+i.e. if the previous call was neither <code>start_subtree()</code>,
+nor one of <code>finish_leaf()</code> or <code>finish_subtree()</code> that updated
+the current position to a parent that is a <code>SubTree</code>-node.</p>
+</div><h3 id='tymethod.witness_generator' class='method'><code id='witness_generator.v'>fn <a href='#tymethod.witness_generator' class='fnname'>witness_generator</a>(&amp;self) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;Self::<a class="type" href="../ic_crypto_tree_hash/trait.HashTreeBuilder.html#associatedtype.WitnessGenerator" title="type ic_crypto_tree_hash::HashTreeBuilder::WitnessGenerator">WitnessGenerator</a>&gt;</code></h3><div class='docblock'><p>Returns a <code>WitnessGenerator</code> for the constructed tree
+if the construction is complete, and <code>None</code> otherwise.</p>
+<p>Does not <code>panic!</code>.</p>
+</div></div><span class='loading-content'>Loading content...</span>
+            <h2 id='implementors' class='small-section-header'>Implementors<a href='#implementors' class='anchor'></a></h2><div class='item-list' id='implementors-list'><h3 id='impl-HashTreeBuilder' class='impl'><code class='in-band'>impl HashTreeBuilder for <a class="struct" href="../ic_crypto_tree_hash/struct.HashTreeBuilderImpl.html" title="struct ic_crypto_tree_hash::HashTreeBuilderImpl">HashTreeBuilderImpl</a></code><a href='#impl-HashTreeBuilder' class='anchor'></a><a class='srclink' href='../src/ic_crypto_tree_hash/tree_hash.rs.html#1007-1170' title='goto source code'>[src]</a></h3><div class='impl-items'><h4 id='associatedtype.WitnessGenerator-1' class="type"><code id='WitnessGenerator.t-1'>type <a href='#associatedtype.WitnessGenerator-1' class="type">WitnessGenerator</a> = <a class="struct" href="../ic_crypto_tree_hash/struct.WitnessGeneratorImpl.html" title="struct ic_crypto_tree_hash::WitnessGeneratorImpl">WitnessGeneratorImpl</a></code></h4><h4 id='method.start_leaf' class="method hidden"><code id='start_leaf.v-1'>fn <a href='#method.start_leaf' class='fnname'>start_leaf</a>(&amp;mut self)</code><a class='srclink' href='../src/ic_crypto_tree_hash/tree_hash.rs.html#1010-1021' title='goto source code'>[src]</a></h4><h4 id='method.write_leaf' class="method hidden"><code id='write_leaf.v-1'>fn <a href='#method.write_leaf' class='fnname'>write_leaf</a>&lt;T:&nbsp;<a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.AsRef.html" title="trait core::convert::AsRef">AsRef</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">[</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">]</a>&gt;&gt;(&amp;mut self, bytes: T)</code><a class='srclink' href='../src/ic_crypto_tree_hash/tree_hash.rs.html#1023-1033' title='goto source code'>[src]</a></h4><h4 id='method.finish_leaf' class="method hidden"><code id='finish_leaf.v-1'>fn <a href='#method.finish_leaf' class='fnname'>finish_leaf</a>(&amp;mut self)</code><a class='srclink' href='../src/ic_crypto_tree_hash/tree_hash.rs.html#1035-1073' title='goto source code'>[src]</a></h4><h4 id='method.start_subtree' class="method hidden"><code id='start_subtree.v-1'>fn <a href='#method.start_subtree' class='fnname'>start_subtree</a>(&amp;mut self)</code><a class='srclink' href='../src/ic_crypto_tree_hash/tree_hash.rs.html#1075-1087' title='goto source code'>[src]</a></h4><h4 id='method.new_edge' class="method hidden"><code id='new_edge.v-1'>fn <a href='#method.new_edge' class='fnname'>new_edge</a>&lt;T:&nbsp;<a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html" title="trait core::convert::Into">Into</a>&lt;<a class="struct" href="../ic_crypto_tree_hash/struct.Label.html" title="struct ic_crypto_tree_hash::Label">Label</a>&gt;&gt;(&amp;mut self, edge_label: T)</code><a class='srclink' href='../src/ic_crypto_tree_hash/tree_hash.rs.html#1089-1108' title='goto source code'>[src]</a></h4><h4 id='method.finish_subtree' class="method hidden"><code id='finish_subtree.v-1'>fn <a href='#method.finish_subtree' class='fnname'>finish_subtree</a>(&amp;mut self)</code><a class='srclink' href='../src/ic_crypto_tree_hash/tree_hash.rs.html#1110-1159' title='goto source code'>[src]</a></h4><h4 id='method.witness_generator' class="method hidden"><code id='witness_generator.v-1'>fn <a href='#method.witness_generator' class='fnname'>witness_generator</a>(&amp;self) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;Self::<a class="type" href="../ic_crypto_tree_hash/trait.HashTreeBuilder.html#associatedtype.WitnessGenerator" title="type ic_crypto_tree_hash::HashTreeBuilder::WitnessGenerator">WitnessGenerator</a>&gt;</code><a class='srclink' href='../src/ic_crypto_tree_hash/tree_hash.rs.html#1161-1169' title='goto source code'>[src]</a></h4></div></div><span class='loading-content'>Loading content...</span><script type="text/javascript" src="../implementors/ic_crypto_tree_hash/trait.HashTreeBuilder.js" async></script></section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../";window.currentCrate = "ic_crypto_tree_hash";</script><script src="../main.js"></script><script defer src="../search-index.js"></script></body></html>

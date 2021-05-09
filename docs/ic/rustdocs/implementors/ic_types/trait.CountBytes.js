@@ -1,0 +1,4 @@
+(function() {var implementors = {};
+implementors["ic_interfaces"] = [{"text":"impl <a class=\"trait\" href=\"ic_types/trait.CountBytes.html\" title=\"trait ic_types::CountBytes\">CountBytes</a> for <a class=\"struct\" href=\"ic_interfaces/ingress_pool/struct.IngressPoolObject.html\" title=\"struct ic_interfaces::ingress_pool::IngressPoolObject\">IngressPoolObject</a>","synthetic":false,"types":["ic_interfaces::ingress_pool::IngressPoolObject"]}];
+implementors["ic_types"] = [];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

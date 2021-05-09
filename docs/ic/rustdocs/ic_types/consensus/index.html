@@ -1,0 +1,95 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `consensus` mod in crate `ic_types`."><meta name="keywords" content="rust, rustlang, rust-lang, consensus"><title>ic_types::consensus - Rust</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="shortcut icon" href="../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../down-arrow.svg");}</style></head><body class="rustdoc mod"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../ic_types/index.html'><div class='logo-container'><img src='../../rust-logo.png' alt='logo'></div></a><p class='location'>Module consensus</p><div class="sidebar-elems"><div class="block items"><ul><li><a href="#reexports">Re-exports</a></li><li><a href="#modules">Modules</a></li><li><a href="#structs">Structs</a></li><li><a href="#enums">Enums</a></li><li><a href="#traits">Traits</a></li><li><a href="#functions">Functions</a></li><li><a href="#types">Type Definitions</a></li></ul></div><p class='location'><a href='../index.html'>ic_types</a></p><script>window.sidebarCurrent = {name: 'consensus', ty: 'mod', relpath: '../'};</script><script defer src="../sidebar-items.js"></script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../../src/ic_types/consensus.rs.html#1-1278' title='goto source code'>[src]</a></span><span class='in-band'>Module <a href='../index.html'>ic_types</a>::<wbr><a class="mod" href=''>consensus</a></span></h1><div class='docblock'><p>Defines types used internally by consensus components.</p>
+</div><h2 id='reexports' class='section-header'><a href="#reexports">Re-exports</a></h2>
+<table><tr><td><code>pub use <a class="mod" href="../../ic_types/consensus/catchup/index.html" title="mod ic_types::consensus::catchup">catchup</a>::*;</code></td></tr></table><h2 id='modules' class='section-header'><a href="#modules">Modules</a></h2>
+<table><tr class='module-item'><td><a class="mod" href="catchup/index.html" title='ic_types::consensus::catchup mod'>catchup</a></td><td class='docblock-short'><p>Defines types that allow outdated replicas to catch up to the latest state.</p>
+</td></tr><tr class='module-item'><td><a class="mod" href="certification/index.html" title='ic_types::consensus::certification mod'>certification</a></td><td class='docblock-short'><p>Defines types used for certification.</p>
+</td></tr><tr class='module-item'><td><a class="mod" href="dkg/index.html" title='ic_types::consensus::dkg mod'>dkg</a></td><td class='docblock-short'><p>Defines types used for distributed key generation.</p>
+</td></tr><tr class='module-item'><td><a class="mod" href="hashed/index.html" title='ic_types::consensus::hashed mod'>hashed</a></td><td class='docblock-short'><p>An object that is hashable can be bundled together with its hash, which
+becomes a <code>Hashed&lt;H, V&gt;</code> object parameterized by the actual hash type <code>H</code>
+and value type <code>V</code>. There are a number of benefits of doing this:</p>
+</td></tr><tr class='module-item'><td><a class="mod" href="thunk/index.html" title='ic_types::consensus::thunk mod'>thunk</a></td><td class='docblock-short'><p>A <code>Thunk&lt;T&gt;</code> represents delayed initialization of a value of type <code>T</code>.
+That is, an initialization function of type <code>FnOnce() -&gt; T</code> can be used
+to create a <code>Thunk&lt;T&gt;</code> object, and only called once when the thunk is
+evaluated. Evaluating the same thunk more than once will return the
+same value as its first evaluation, but will not result in calling
+the initialization function more than once.</p>
+</td></tr></table><h2 id='structs' class='section-header'><a href="#structs">Structs</a></h2>
+<table><tr class='module-item'><td><a class="struct" href="struct.BasicSignature.html" title='ic_types::consensus::BasicSignature struct'>BasicSignature</a></td><td class='docblock-short'><p>BasicSignature captures basic signature on a value and the identity of the
+replica that signed it</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.Block.html" title='ic_types::consensus::Block struct'>Block</a></td><td class='docblock-short'><p>Block is the type that is used to create blocks out of which we build a
+block chain</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.FinalizationContent.html" title='ic_types::consensus::FinalizationContent struct'>FinalizationContent</a></td><td class='docblock-short'><p>FinalizationContent holds the values that are signed in a finalization</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.MultiSignature.html" title='ic_types::consensus::MultiSignature struct'>MultiSignature</a></td><td class='docblock-short'><p>MultiSignature captures a cryptographic multi-signature, which is one
+message signed by multiple signers</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.MultiSignatureShare.html" title='ic_types::consensus::MultiSignatureShare struct'>MultiSignatureShare</a></td><td class='docblock-short'><p>MultiSignatureShare is a signature from one replica. Multiple shares can be
+aggregated into a MultiSignature.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.NotarizationContent.html" title='ic_types::consensus::NotarizationContent struct'>NotarizationContent</a></td><td class='docblock-short'><p>NotarizationContent holds the values that are signed in a notarization</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.Payload.html" title='ic_types::consensus::Payload struct'>Payload</a></td><td class='docblock-short'><p>A lazily loaded <code>BlockPayload</code> that is also internally shared via an <code>Arc</code>
+pointer so that it is cheap to clone.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.RandomBeaconContent.html" title='ic_types::consensus::RandomBeaconContent struct'>RandomBeaconContent</a></td><td class='docblock-short'><p>RandomBeaconContent holds the content that is signed in the random beacon,
+which is the previous random beacon, the height, and the replica version
+used to create the random beacon.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.RandomTapeContent.html" title='ic_types::consensus::RandomTapeContent struct'>RandomTapeContent</a></td><td class='docblock-short'><p>RandomTapeContent holds the content that is signed in the random tape,
+which is the height and the replica version used to create the random
+tape.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.Rank.html" title='ic_types::consensus::Rank struct'>Rank</a></td><td class='docblock-short'><p>Rank is used to indicate the priority of a block maker, where 0 indicates
+the highest priority.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.ThresholdSignature.html" title='ic_types::consensus::ThresholdSignature struct'>ThresholdSignature</a></td><td class='docblock-short'><p>ThresholdSignature captures a threshold signature on a value and the
+DKG id of the threshold key material used to sign</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.ThresholdSignatureShare.html" title='ic_types::consensus::ThresholdSignatureShare struct'>ThresholdSignatureShare</a></td><td class='docblock-short'><p>ThresholdSignatureShare captures a share of a threshold signature on a value
+and the identity of the replica that signed</p>
+</td></tr></table><h2 id='enums' class='section-header'><a href="#enums">Enums</a></h2>
+<table><tr class='module-item'><td><a class="enum" href="enum.BlockPayload.html" title='ic_types::consensus::BlockPayload enum'>BlockPayload</a></td><td class='docblock-short'><p>Block payload is either DKG summary or (BatchPayload, DKG Dealings).</p>
+</td></tr><tr class='module-item'><td><a class="enum" href="enum.Committee.html" title='ic_types::consensus::Committee enum'>Committee</a></td><td class='docblock-short'><p>Indicates one of the consensus committees that are responsible for creating
+signature shares on various types of artifacts</p>
+</td></tr><tr class='module-item'><td><a class="enum" href="enum.ConsensusMessage.html" title='ic_types::consensus::ConsensusMessage enum'>ConsensusMessage</a></td><td class='docblock-short'><p>The enum encompassing all of the consensus artifacts exchanged between
+replicas.</p>
+</td></tr><tr class='module-item'><td><a class="enum" href="enum.ConsensusMessageAttribute.html" title='ic_types::consensus::ConsensusMessageAttribute enum'>ConsensusMessageAttribute</a></td><td class='docblock-short'><p>ConsensusMessageAttribute has the same variants as <a href="../../ic_types/consensus/enum.ConsensusMessage.html" title="ConsensusMessage">ConsensusMessage</a>, but
+contains only the attributes for each variant. The attributes are the values
+that are used in the p2p layer to determine whether an artifact is
+interesting to a replica before fetching the full artifact.</p>
+</td></tr><tr class='module-item'><td><a class="enum" href="enum.ConsensusMessageHash.html" title='ic_types::consensus::ConsensusMessageHash enum'>ConsensusMessageHash</a></td><td class='docblock-short'><p>ConsensusMessageHash has the same variants as <a href="../../ic_types/consensus/enum.ConsensusMessage.html" title="ConsensusMessage">ConsensusMessage</a>, but
+contains only a hash instead of the full message in each variant.</p>
+</td></tr></table><h2 id='traits' class='section-header'><a href="#traits">Traits</a></h2>
+<table><tr class='module-item'><td><a class="trait" href="trait.ContentEq.html" title='ic_types::consensus::ContentEq trait'>ContentEq</a></td><td class='docblock-short'><p>Useful to compare equality by content, for example Signed&lt;C,S&gt; can be
+compared by equality on C.</p>
+</td></tr><tr class='module-item'><td><a class="trait" href="trait.HasBlockHash.html" title='ic_types::consensus::HasBlockHash trait'>HasBlockHash</a></td><td class='docblock-short'><p>Abstract messages with block hash</p>
+</td></tr><tr class='module-item'><td><a class="trait" href="trait.HasCommittee.html" title='ic_types::consensus::HasCommittee trait'>HasCommittee</a></td><td class='docblock-short'><p>Abstract messages with committee attribute</p>
+</td></tr><tr class='module-item'><td><a class="trait" href="trait.HasHeight.html" title='ic_types::consensus::HasHeight trait'>HasHeight</a></td><td class='docblock-short'><p>Abstract messages with height attribute</p>
+</td></tr><tr class='module-item'><td><a class="trait" href="trait.HasRank.html" title='ic_types::consensus::HasRank trait'>HasRank</a></td><td class='docblock-short'><p>Abstract messages with rank attribute</p>
+</td></tr><tr class='module-item'><td><a class="trait" href="trait.HasVersion.html" title='ic_types::consensus::HasVersion trait'>HasVersion</a></td><td class='docblock-short'><p>Abstract messages with version attribute</p>
+</td></tr></table><h2 id='functions' class='section-header'><a href="#functions">Functions</a></h2>
+<table><tr class='module-item'><td><a class="fn" href="fn.get_committee_size.html" title='ic_types::consensus::get_committee_size fn'>get_committee_size</a></td><td class='docblock-short'><p>Compute the size of the committee given the total amount of nodes on the
+subnet</p>
+</td></tr><tr class='module-item'><td><a class="fn" href="fn.get_faults_tolerated.html" title='ic_types::consensus::get_faults_tolerated fn'>get_faults_tolerated</a></td><td class='docblock-short'><p>Returns the upper limit of faulty participants for <code>n</code> participants.</p>
+</td></tr></table><h2 id='types' class='section-header'><a href="#types">Type Definitions</a></h2>
+<table><tr class='module-item'><td><a class="type" href="type.BasicSigned.html" title='ic_types::consensus::BasicSigned type'>BasicSigned</a></td><td class='docblock-short'><p>BasicSigned<T> captures a value of type T and a BasicSignature on it</p>
+</td></tr><tr class='module-item'><td><a class="type" href="type.BlockProposal.html" title='ic_types::consensus::BlockProposal type'>BlockProposal</a></td><td class='docblock-short'><p>A BlockProposal is a HashedBlock that is signed by the block maker.</p>
+</td></tr><tr class='module-item'><td><a class="type" href="type.Finalization.html" title='ic_types::consensus::Finalization type'>Finalization</a></td><td class='docblock-short'><p>A finalization is a multi-signature on a FinalizationContent. A finalization
+proves that the block identified by the block hash in the finalization
+content (and the block chain it implies) is agreed upon.</p>
+</td></tr><tr class='module-item'><td><a class="type" href="type.FinalizationShare.html" title='ic_types::consensus::FinalizationShare type'>FinalizationShare</a></td><td class='docblock-short'><p>A finalization share is a multi-signature share on a finalization content.
+If sufficiently many replicas create finalization shares, the shares can be
+aggregated into a full finalization.</p>
+</td></tr><tr class='module-item'><td><a class="type" href="type.HashedBlock.html" title='ic_types::consensus::HashedBlock type'>HashedBlock</a></td><td class='docblock-short'><p>HashedBlock contains a Block together with its hash</p>
+</td></tr><tr class='module-item'><td><a class="type" href="type.HashedRandomBeacon.html" title='ic_types::consensus::HashedRandomBeacon type'>HashedRandomBeacon</a></td><td class='docblock-short'><p>HashedRandomBeacon holds a RandomBeacon and its hash</p>
+</td></tr><tr class='module-item'><td><a class="type" href="type.Notarization.html" title='ic_types::consensus::Notarization type'>Notarization</a></td><td class='docblock-short'><p>A notarization is a multi-signature on a NotarizationContent</p>
+</td></tr><tr class='module-item'><td><a class="type" href="type.NotarizationShare.html" title='ic_types::consensus::NotarizationShare type'>NotarizationShare</a></td><td class='docblock-short'><p>A notarization share is a multi-signature share on a notarization content.
+If sufficiently many replicas create notarization shares, the shares can be
+aggregated into a full notarization.</p>
+</td></tr><tr class='module-item'><td><a class="type" href="type.RandomBeacon.html" title='ic_types::consensus::RandomBeacon type'>RandomBeacon</a></td><td class='docblock-short'><p>A RandomBeacon is a RandomBeaconContent signed using a threshold signature.
+The RandomBeacon provides pseudo-randomness to the consensus protocol that
+is used to assign ranks to block makers and determine which replicas are
+notaries.</p>
+</td></tr><tr class='module-item'><td><a class="type" href="type.RandomBeaconShare.html" title='ic_types::consensus::RandomBeaconShare type'>RandomBeaconShare</a></td><td class='docblock-short'><p>RandomBeaconShare is a threshold signature share on a RandomBeaconContent.
+If sufficiently many replicas create random beacon shares, the shares can be
+aggregated into a RandomBeacon.</p>
+</td></tr><tr class='module-item'><td><a class="type" href="type.RandomTape.html" title='ic_types::consensus::RandomTape type'>RandomTape</a></td><td class='docblock-short'><p>A RandomTape is a RandomTapeContent signed using a threshold signature.
+The RandomTape provides pseudo-randomness for executing the messages ordered
+by consensus.</p>
+</td></tr><tr class='module-item'><td><a class="type" href="type.RandomTapeShare.html" title='ic_types::consensus::RandomTapeShare type'>RandomTapeShare</a></td><td class='docblock-short'><p>RandomTapeShare is a threshold signature share on a RandomTapeContent. If
+sufficiently many replicas create random tape shares, the shares can be
+aggregated into a RandomTape.</p>
+</td></tr><tr class='module-item'><td><a class="type" href="type.Threshold.html" title='ic_types::consensus::Threshold type'>Threshold</a></td><td class='docblock-short'><p>Threshold indicates how many replicas of a committee need to create a
+signature share in order to create a signature on behalf of the committee</p>
+</td></tr></table></section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../../";window.currentCrate = "ic_types";</script><script src="../../main.js"></script><script defer src="../../search-index.js"></script></body></html>

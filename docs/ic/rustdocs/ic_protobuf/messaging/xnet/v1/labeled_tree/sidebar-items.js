@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["NodeEnum",""]],"struct":[["Child","A `SubTree`'s labeled child."],["SubTree","Inner node with zero or more ordered, labeled children."]]});

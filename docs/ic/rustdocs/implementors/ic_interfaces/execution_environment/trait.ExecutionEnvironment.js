@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_execution_environment"] = [{"text":"impl <a class=\"trait\" href=\"ic_interfaces/execution_environment/trait.ExecutionEnvironment.html\" title=\"trait ic_interfaces::execution_environment::ExecutionEnvironment\">ExecutionEnvironment</a> for <a class=\"struct\" href=\"ic_execution_environment/struct.ExecutionEnvironmentImpl.html\" title=\"struct ic_execution_environment::ExecutionEnvironmentImpl\">ExecutionEnvironmentImpl</a>","synthetic":false,"types":["ic_execution_environment::execution_environment::ExecutionEnvironmentImpl"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["DkgPoolImpl","The DkgPool is used to store messages that are exchanged between replicas in the process of executing DKG."]]});

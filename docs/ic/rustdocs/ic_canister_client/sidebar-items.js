@@ -1,0 +1,1 @@
+initSidebarItems({"mod":[["agent","An agent to talk to the Internet Computer through the public endpoints."],["cbor","Asynchronous method to interact with canisters."]],"struct":[["HttpClient","An HTTP Client to communicate with a replica."],["HttpStatusCode","An HTTP status code (`status-code` in RFC 7230 et al.)."]]});

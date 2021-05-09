@@ -1,0 +1,1 @@
+initSidebarItems({"trait":[["FirewallRegistry","A trait that allows access to `FirewallConfig`.  The expectation for the forseeable future is that the `FirewallConfig` will remain small enough so that we can simply return the entire struct here."]]});

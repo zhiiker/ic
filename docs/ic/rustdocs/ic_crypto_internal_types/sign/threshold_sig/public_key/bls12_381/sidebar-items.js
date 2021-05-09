@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["ThresholdSigPublicKeyBytesConversionError","Converting a threshold signature public key to bytes failed."]],"struct":[["PublicKeyBytes","A BLS12-381 public key as bytes."]]});

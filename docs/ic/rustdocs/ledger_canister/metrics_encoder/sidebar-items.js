@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["MetricsEncoder","`MetricsEncoder` provides methods to encode metrics in a text format that can be understood by Prometheus."]]});

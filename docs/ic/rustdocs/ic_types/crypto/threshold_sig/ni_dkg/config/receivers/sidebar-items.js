@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["NiDkgReceivers","A set of receivers for non-interactive DKG. Satisfies invariants, see `NiDkgReceivers::new`."]]});

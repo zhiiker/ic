@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["CreateSubnetPayload","The payload of a proposal to create a new subnet."]]});

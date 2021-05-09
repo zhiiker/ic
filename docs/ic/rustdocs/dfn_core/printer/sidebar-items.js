@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["_print",""],["hook","Sets stdout, stderr, and a custom panic hook"],["set_panic_hook","Sets a custom panic hook, uses debug.trace"],["set_stdout","Sets a line-buffered stdout, uses debug.trace"]]});

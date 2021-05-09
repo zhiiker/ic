@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Thunk","A lazily initialized value of type `T` that is only initialized upon first evaluation."]]});

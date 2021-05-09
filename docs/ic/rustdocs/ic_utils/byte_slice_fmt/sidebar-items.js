@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["truncate_and_format","Formats the first `max_bytes_to_format` bytes of a byte slice as hexadecimal."]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["PublicKeyBytes","A wrapper for Ed25519 public key bytes."],["SecretKeyBytes","A wrapper for Ed25519 secret key bytes."],["SignatureBytes","A wrapper for Ed25519 signature bytes."]]});

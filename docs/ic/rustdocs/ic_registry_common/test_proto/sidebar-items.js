@@ -1,0 +1,1 @@
+initSidebarItems({"trait":[["TestProtoHelper","Provides functionality to get values of type TestProto from the registry."]]});

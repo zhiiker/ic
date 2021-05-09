@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Config","The config struct for the replica.  Just consists of `Config`s for the components."],["ConfigOptional","Mirrors the Config struct except that fields are made optional. This is meant for use with config_parser, where sections can be omitted."]]});

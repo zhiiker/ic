@@ -1,0 +1,1 @@
+initSidebarItems({"mod":[["request_or_response","Nested message and enum types in `RequestOrResponse`."],["response","Nested message and enum types in `Response`."]],"struct":[["CanisterQueues",""],["Cycles",""],["Funds",""],["InputOutputQueue",""],["QueueEntry",""],["RejectContext",""],["Request",""],["RequestOrResponse",""],["Response",""],["Stream",""],["StreamEntry",""]]});

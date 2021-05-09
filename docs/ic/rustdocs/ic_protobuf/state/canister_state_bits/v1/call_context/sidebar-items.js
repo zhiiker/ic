@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["CallOrigin",""]],"struct":[["CanisterUpdateOrQuery",""],["Heartbeat",""],["Ingress",""]]});

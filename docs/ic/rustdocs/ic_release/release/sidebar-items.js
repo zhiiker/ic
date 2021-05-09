@@ -1,0 +1,1 @@
+initSidebarItems({"constant":[["NODEMANAGER_KEY",""],["REPLICA_KEY",""]],"struct":[["ReleaseContent","The content of a release is defined by a set of named octet-streams:"],["ReleaseIdentifier",""],["ReleasePackage","A release package is a file containing the release content."]]});

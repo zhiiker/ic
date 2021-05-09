@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["make_genesis","Return the genesis BlockProposal and RandomBeacon made for the given height."]],"trait":[["ConsensusMessageHashable",""]]});

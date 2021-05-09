@@ -1,0 +1,1 @@
+initSidebarItems({"constant":[["MINUS_ONE",""],["MODULUS",""],["MODULUS_MINUS_ONE",""],["MODULUS_PLUS_ONE",""],["ONE",""],["POSITIVE_NUMBERS","Positive numbers: `1,2,3,4,...`"],["POWERS_OF_2","Positive numbers: `1,2,4,8,16,...`"],["ZERO",""]]});

@@ -1,0 +1,4 @@
+(function() {var implementors = {};
+implementors["ic_artifact_manager"] = [{"text":"impl&lt;Artifact:&nbsp;<a class=\"trait\" href=\"ic_types/artifact/trait.ArtifactKind.html\" title=\"trait ic_types::artifact::ArtifactKind\">ArtifactKind</a> + 'static&gt; Actor for <a class=\"struct\" href=\"ic_artifact_manager/actors/struct.ClientActor.html\" title=\"struct ic_artifact_manager::actors::ClientActor\">ClientActor</a>&lt;Artifact&gt;","synthetic":false,"types":["ic_artifact_manager::actors::ClientActor"]}];
+implementors["ic_messaging"] = [{"text":"impl Actor for <a class=\"struct\" href=\"ic_messaging/struct.MessageRoutingImpl.html\" title=\"struct ic_messaging::MessageRoutingImpl\">MessageRoutingImpl</a>","synthetic":false,"types":["ic_messaging::message_routing::MessageRoutingImpl"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

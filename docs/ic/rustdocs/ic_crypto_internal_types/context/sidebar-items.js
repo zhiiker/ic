@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["DomainSeparationContext","A domain separation context based on a `String` to separate domains when hashing."]],"trait":[["Context","A domain separation context that can be represented as bytes."]]});

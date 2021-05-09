@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["CertificationArtifact","The `ArtifactKind` of certification messages."],["ConsensusArtifact","The `ArtifactKind` of Consensus messages."],["DkgArtifact","The `ArtifactKind` of DKG messages."],["IngressArtifact","The `ArtifactKind` of ingress message."]]});

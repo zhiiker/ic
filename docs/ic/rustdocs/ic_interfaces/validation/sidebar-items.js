@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["ValidationError","Validation errors can be either permanent (invalid) or transient."]],"type":[["ValidationResult","Validation result is result type where `Ok(())` means valid, and `Err(err)` means error, which is of the parameter type."]]});

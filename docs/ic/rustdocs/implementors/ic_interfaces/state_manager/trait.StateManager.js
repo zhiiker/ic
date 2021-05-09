@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_state_manager"] = [{"text":"impl <a class=\"trait\" href=\"ic_interfaces/state_manager/trait.StateManager.html\" title=\"trait ic_interfaces::state_manager::StateManager\">StateManager</a> for <a class=\"struct\" href=\"ic_state_manager/struct.StateManagerImpl.html\" title=\"struct ic_state_manager::StateManagerImpl\">StateManagerImpl</a>","synthetic":false,"types":["ic_state_manager::StateManagerImpl"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

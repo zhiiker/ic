@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["NodeOperatorRecord","A record for a node operator. Each node operator is associated with a unique principal id, a.k.a. NOID."]]});

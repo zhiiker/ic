@@ -1,0 +1,1 @@
+initSidebarItems({"mod":[["encryption_key_pop","Generating and verifying Proofs of Possession (PoP)"],["forward_secure","Methods for forward secure encryption"],["nizk_chunking","Proofs of correct chunking"],["nizk_sharing","Proofs of correct sharing"],["random_oracles","Hashing to group elements (fields, curves)"],["utils","Utility functions for the NI-DKG code"]]});

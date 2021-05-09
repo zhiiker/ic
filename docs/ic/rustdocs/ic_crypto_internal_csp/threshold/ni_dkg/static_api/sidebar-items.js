@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["create_resharing_transcript","Create a CSP transcript from CSP dealings"],["create_transcript","Create a CSP transcript from CSP dealings"],["verify_dealing","Verifies a CSP dealing"],["verify_forward_secure_key","Verifies that a forward secure public key and PoP are valid."],["verify_resharing_dealing","Verifies a CSP resharing"]]});

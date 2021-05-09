@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["Error","`Error` describes error conditions that can happen when deserializing a tree into a data structure."]],"mod":[["types",""]],"struct":[["LabeledTreeDeserializer","`LabeledTreeDeserializer` is a deserializer that decodes a labeled tree into a data structure implementing serde::Deserialize."]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["PayloadBuilderImpl","Implementation of PayloadBuilder."]],"trait":[["PayloadBuilder","The PayloadBuilder is responsible for creating and validating payload that is included in consensus blocks."]]});

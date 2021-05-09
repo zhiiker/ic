@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["create_transport","Creates a new instance of `TransportImpl`."]]});

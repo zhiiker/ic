@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["CertificateValidationError","Describes an error that occurred during parsing and validation of the result of a `RegistryCanister::get_certified_changes_since()` method call."]],"fn":[["verify_certificate","Checks if the specified certificate verifies the certified data of specified canister."]]});

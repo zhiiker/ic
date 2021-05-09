@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_execution_environment"] = [{"text":"impl <a class=\"trait\" href=\"ic_interfaces/execution_environment/trait.IngressHistoryReader.html\" title=\"trait ic_interfaces::execution_environment::IngressHistoryReader\">IngressHistoryReader</a> for <a class=\"struct\" href=\"ic_execution_environment/struct.IngressHistoryReaderImpl.html\" title=\"struct ic_execution_environment::IngressHistoryReaderImpl\">IngressHistoryReaderImpl</a>","synthetic":false,"types":["ic_execution_environment::history::IngressHistoryReaderImpl"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

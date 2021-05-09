@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_artifact_pool"] = [{"text":"impl <a class=\"trait\" href=\"ic_interfaces/consensus_pool/trait.ConsensusPoolCache.html\" title=\"trait ic_interfaces::consensus_pool::ConsensusPoolCache\">ConsensusPoolCache</a> for <a class=\"struct\" href=\"ic_artifact_pool/consensus_pool/struct.UncachedConsensusPoolImpl.html\" title=\"struct ic_artifact_pool::consensus_pool::UncachedConsensusPoolImpl\">UncachedConsensusPoolImpl</a>","synthetic":false,"types":["ic_artifact_pool::consensus_pool::UncachedConsensusPoolImpl"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

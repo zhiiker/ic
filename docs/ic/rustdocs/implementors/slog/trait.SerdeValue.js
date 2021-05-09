@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_protobuf"] = [{"text":"impl SerdeValue for <a class=\"struct\" href=\"ic_protobuf/log/log_entry/v1/struct.LogEntry.html\" title=\"struct ic_protobuf::log::log_entry::v1::LogEntry\">LogEntry</a>","synthetic":false,"types":["ic_protobuf::log::log_entry::v1::LogEntry"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

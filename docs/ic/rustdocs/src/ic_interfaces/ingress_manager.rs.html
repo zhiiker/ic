@@ -1,0 +1,521 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source to the Rust file `interfaces/src/ingress_manager.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>ingress_manager.rs.html -- source</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="shortcut icon" href="../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../ic_interfaces/index.html'><div class='logo-container'><img src='../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1">  1</span>
+<span id="2">  2</span>
+<span id="3">  3</span>
+<span id="4">  4</span>
+<span id="5">  5</span>
+<span id="6">  6</span>
+<span id="7">  7</span>
+<span id="8">  8</span>
+<span id="9">  9</span>
+<span id="10"> 10</span>
+<span id="11"> 11</span>
+<span id="12"> 12</span>
+<span id="13"> 13</span>
+<span id="14"> 14</span>
+<span id="15"> 15</span>
+<span id="16"> 16</span>
+<span id="17"> 17</span>
+<span id="18"> 18</span>
+<span id="19"> 19</span>
+<span id="20"> 20</span>
+<span id="21"> 21</span>
+<span id="22"> 22</span>
+<span id="23"> 23</span>
+<span id="24"> 24</span>
+<span id="25"> 25</span>
+<span id="26"> 26</span>
+<span id="27"> 27</span>
+<span id="28"> 28</span>
+<span id="29"> 29</span>
+<span id="30"> 30</span>
+<span id="31"> 31</span>
+<span id="32"> 32</span>
+<span id="33"> 33</span>
+<span id="34"> 34</span>
+<span id="35"> 35</span>
+<span id="36"> 36</span>
+<span id="37"> 37</span>
+<span id="38"> 38</span>
+<span id="39"> 39</span>
+<span id="40"> 40</span>
+<span id="41"> 41</span>
+<span id="42"> 42</span>
+<span id="43"> 43</span>
+<span id="44"> 44</span>
+<span id="45"> 45</span>
+<span id="46"> 46</span>
+<span id="47"> 47</span>
+<span id="48"> 48</span>
+<span id="49"> 49</span>
+<span id="50"> 50</span>
+<span id="51"> 51</span>
+<span id="52"> 52</span>
+<span id="53"> 53</span>
+<span id="54"> 54</span>
+<span id="55"> 55</span>
+<span id="56"> 56</span>
+<span id="57"> 57</span>
+<span id="58"> 58</span>
+<span id="59"> 59</span>
+<span id="60"> 60</span>
+<span id="61"> 61</span>
+<span id="62"> 62</span>
+<span id="63"> 63</span>
+<span id="64"> 64</span>
+<span id="65"> 65</span>
+<span id="66"> 66</span>
+<span id="67"> 67</span>
+<span id="68"> 68</span>
+<span id="69"> 69</span>
+<span id="70"> 70</span>
+<span id="71"> 71</span>
+<span id="72"> 72</span>
+<span id="73"> 73</span>
+<span id="74"> 74</span>
+<span id="75"> 75</span>
+<span id="76"> 76</span>
+<span id="77"> 77</span>
+<span id="78"> 78</span>
+<span id="79"> 79</span>
+<span id="80"> 80</span>
+<span id="81"> 81</span>
+<span id="82"> 82</span>
+<span id="83"> 83</span>
+<span id="84"> 84</span>
+<span id="85"> 85</span>
+<span id="86"> 86</span>
+<span id="87"> 87</span>
+<span id="88"> 88</span>
+<span id="89"> 89</span>
+<span id="90"> 90</span>
+<span id="91"> 91</span>
+<span id="92"> 92</span>
+<span id="93"> 93</span>
+<span id="94"> 94</span>
+<span id="95"> 95</span>
+<span id="96"> 96</span>
+<span id="97"> 97</span>
+<span id="98"> 98</span>
+<span id="99"> 99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+</pre><div class="example-wrap"><pre class="rust ">
+<span class="doccomment">//! The ingress manager public interface.</span>
+<span class="kw">use</span> <span class="kw">crate</span>::{
+    <span class="ident">execution_environment</span>::<span class="ident">IngressHistoryError</span>,
+    <span class="ident">ingress_pool</span>::{<span class="ident">ChangeSet</span>, <span class="ident">IngressPool</span>, <span class="ident">IngressPoolSelect</span>},
+    <span class="ident">state_manager</span>::<span class="ident">StateManagerError</span>,
+    <span class="ident">validation</span>::{<span class="ident">ValidationError</span>, <span class="ident">ValidationResult</span>},
+};
+<span class="kw">use</span> <span class="ident">ic_types</span>::{
+    <span class="ident">artifact</span>::<span class="ident">IngressMessageId</span>,
+    <span class="ident">batch</span>::{<span class="ident">IngressPayload</span>, <span class="ident">IngressPayloadError</span>, <span class="ident">ValidationContext</span>},
+    <span class="ident">crypto</span>::<span class="ident">CryptoError</span>,
+    <span class="ident">messages</span>::<span class="ident">MessageId</span>,
+    <span class="ident">time</span>::{<span class="ident">Time</span>, <span class="ident">UNIX_EPOCH</span>},
+    <span class="ident">CanisterId</span>,
+};
+<span class="kw">use</span> <span class="ident">std</span>::<span class="ident">collections</span>::<span class="ident">HashSet</span>;
+
+<span class="doccomment">/// An generic interface that allows checking ingress existence.</span>
+<span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">IngressSetQuery</span> {
+    <span class="doccomment">/// Return True if the given msg_id exists in the set.</span>
+    <span class="kw">fn</span> <span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">msg_id</span>: <span class="kw-2">&amp;</span><span class="ident">IngressMessageId</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span>;
+
+    <span class="doccomment">/// Return the lower bound of expiry time that this set covers.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// Note that this is not necessarily the minimum of the expiry</span>
+    <span class="doccomment">/// of all IngressMessageIds in the set.</span>
+    <span class="kw">fn</span> <span class="ident">get_expiry_lower_bound</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Time</span>;
+}
+
+<span class="doccomment">/// HashSet&lt;MessageId&gt; implements IngressSetQuery.</span>
+<span class="kw">impl</span> <span class="ident">IngressSetQuery</span> <span class="kw">for</span> <span class="ident">HashSet</span><span class="op">&lt;</span><span class="ident">IngressMessageId</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">msg_id</span>: <span class="kw-2">&amp;</span><span class="ident">IngressMessageId</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">bool</span> {
+        <span class="ident">HashSet</span>::<span class="ident">contains</span>(<span class="self">self</span>, <span class="ident">msg_id</span>)
+    }
+    <span class="kw">fn</span> <span class="ident">get_expiry_lower_bound</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Time</span> {
+        <span class="self">self</span>.<span class="ident">iter</span>()
+            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">ingress_id</span><span class="op">|</span> <span class="ident">ingress_id</span>.<span class="ident">expiry</span>())
+            .<span class="ident">min</span>()
+            .<span class="ident">unwrap_or</span>(<span class="ident">UNIX_EPOCH</span>)
+    }
+}
+
+<span class="doccomment">/// Permanent errors returned by the Ingress Selector.</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
+<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">IngressPermanentError</span> {
+    <span class="ident">CryptoError</span>(<span class="ident">CryptoError</span>),
+    <span class="ident">StateManagerError</span>(<span class="ident">StateManagerError</span>),
+    <span class="ident">IngressValidationError</span>(<span class="ident">MessageId</span>, <span class="ident">String</span>),
+    <span class="ident">IngressBucketError</span>(<span class="ident">MessageId</span>),
+    <span class="ident">IngressHistoryError</span>(<span class="ident">IngressHistoryError</span>),
+    <span class="ident">IngressPayloadError</span>(<span class="ident">IngressPayloadError</span>),
+    <span class="ident">IngressExpired</span>(<span class="ident">MessageId</span>, <span class="ident">String</span>),
+    <span class="ident">IngressMessageTooBig</span>(<span class="ident">usize</span>, <span class="ident">usize</span>),
+    <span class="ident">IngressPayloadTooBig</span>(<span class="ident">usize</span>, <span class="ident">usize</span>),
+    <span class="ident">IngressPayloadTooManyMessages</span>(<span class="ident">usize</span>, <span class="ident">usize</span>),
+    <span class="ident">DuplicatedIngressMessage</span>(<span class="ident">MessageId</span>),
+    <span class="ident">InsufficientCycles</span>(<span class="ident">CanisterId</span>),
+    <span class="ident">CanisterNotFound</span>(<span class="ident">CanisterId</span>),
+    <span class="ident">InvalidManagementMessage</span>,
+}
+
+<span class="doccomment">/// Transient errors returned by the Ingress Selector.</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
+<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">IngressTransientError</span> {
+    <span class="ident">CryptoError</span>(<span class="ident">CryptoError</span>),
+    <span class="ident">StateManagerError</span>(<span class="ident">StateManagerError</span>),
+}
+
+<span class="kw">pub</span> <span class="kw">type</span> <span class="ident">IngressPayloadValidationError</span> <span class="op">=</span>
+    <span class="ident">ValidationError</span><span class="op">&lt;</span><span class="ident">IngressPermanentError</span>, <span class="ident">IngressTransientError</span><span class="op">&gt;</span>;
+
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">CryptoError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">IngressTransientError</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">err</span>: <span class="ident">CryptoError</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">IngressTransientError</span> {
+        <span class="ident">IngressTransientError</span>::<span class="ident">CryptoError</span>(<span class="ident">err</span>)
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">CryptoError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">IngressPermanentError</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">err</span>: <span class="ident">CryptoError</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">IngressPermanentError</span> {
+        <span class="ident">IngressPermanentError</span>::<span class="ident">CryptoError</span>(<span class="ident">err</span>)
+    }
+}
+
+<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">IngressPermanentError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ValidationError</span><span class="op">&lt;</span><span class="ident">IngressPermanentError</span>, <span class="ident">T</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">err</span>: <span class="ident">IngressPermanentError</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">ValidationError</span><span class="op">&lt;</span><span class="ident">IngressPermanentError</span>, <span class="ident">T</span><span class="op">&gt;</span> {
+        <span class="ident">ValidationError</span>::<span class="ident">Permanent</span>(<span class="ident">err</span>)
+    }
+}
+
+<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">P</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">IngressTransientError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ValidationError</span><span class="op">&lt;</span><span class="ident">P</span>, <span class="ident">IngressTransientError</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">err</span>: <span class="ident">IngressTransientError</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">ValidationError</span><span class="op">&lt;</span><span class="ident">P</span>, <span class="ident">IngressTransientError</span><span class="op">&gt;</span> {
+        <span class="ident">ValidationError</span>::<span class="ident">Transient</span>(<span class="ident">err</span>)
+    }
+}
+
+<span class="doccomment">/// Processes Ingress messages received from peers or HttpHandler.</span>
+<span class="doccomment">///</span>
+<span class="doccomment">/// Its main role is to determine whether the message should be relayed to other</span>
+<span class="doccomment">/// nodes or not and to remove expired messages. This interface is used by</span>
+<span class="doccomment">/// ArtifactManager when a new ingress message is inserted in the unvalidated</span>
+<span class="doccomment">/// pool.</span>
+<span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">IngressHandler</span> {
+    <span class="doccomment">/// Inspect the input [IngressPool] to build a [ChangeSet] of</span>
+    <span class="doccomment">/// actions to be executed. The caller is then expected to apply the</span>
+    <span class="doccomment">/// returned [ChangeSet] to the input of this call, namely</span>
+    <span class="doccomment">/// [IngressPool].</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// #Input</span>
+    <span class="doccomment">/// [IngressPool] which is passed as a read-only reference.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// #Returns</span>
+    <span class="doccomment">/// [ChangeSet] that describes which Ingress Messages are added, moved or</span>
+    <span class="doccomment">/// removed from their current part of the artifact pool</span>
+    <span class="kw">fn</span> <span class="ident">on_state_change</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">pool</span>: <span class="kw-2">&amp;</span><span class="kw">dyn</span> <span class="ident">IngressPool</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">ChangeSet</span>;
+}
+
+<span class="doccomment">/// A component used by Consensus to build and validate a payload.</span>
+<span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">IngressSelector</span>: <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Sync</span> {
+    <span class="doccomment">/// Returns a new ingress payload containing valid Signed Ingress Messages</span>
+    <span class="doccomment">/// to Consensus.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// #Input</span>
+    <span class="doccomment">/// [IngressPool] passed as a read-only reference. It&#39;s the trait object to</span>
+    <span class="doccomment">/// read validated messages from the IngressPool.</span>
+    <span class="doccomment">/// [past_ingress] allows querying if an ingress message exists in past</span>
+    <span class="doccomment">/// blocks. It is used for deduplication purpose.</span>
+    <span class="doccomment">/// [ValidationContext] contains registry_version that allows to validate</span>
+    <span class="doccomment">/// messages against the correct registry entries, execution_height which is</span>
+    <span class="doccomment">/// used as parameter for the valid set rule check run to select a valid</span>
+    <span class="doccomment">/// set of messages.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// #Returns</span>
+    <span class="doccomment">/// [IngressPayload] which is a collection of valid ingress messages</span>
+    <span class="kw">fn</span> <span class="ident">get_ingress_payload</span>(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="ident">ingress_pool</span>: <span class="kw-2">&amp;</span><span class="kw">dyn</span> <span class="ident">IngressPoolSelect</span>,
+        <span class="ident">past_ingress</span>: <span class="kw-2">&amp;</span><span class="kw">dyn</span> <span class="ident">IngressSetQuery</span>,
+        <span class="ident">context</span>: <span class="kw-2">&amp;</span><span class="ident">ValidationContext</span>,
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">IngressPayload</span>;
+
+    <span class="doccomment">/// Validates an IngressPayload against the past payloads and</span>
+    <span class="doccomment">/// ValidationContext. The size of the payload is derived from registry.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// #Input</span>
+    <span class="doccomment">/// [IngressPayload] is the payload to be validated.</span>
+    <span class="doccomment">/// [past_ingress] allows querying if an ingress message exists in past</span>
+    <span class="doccomment">/// blocks. It is used for deduplication purpose.</span>
+    <span class="doccomment">/// [ValidationContext] Refers to the validation context which contains</span>
+    <span class="doccomment">/// registry_version, execution_height to be used as a parameter for the</span>
+    <span class="doccomment">/// valid set rule check run to select a valid set of messages</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// #Returns</span>
+    <span class="doccomment">/// `ValidationResult::Valid`: if the payload is valid</span>
+    <span class="doccomment">/// `ValidationResult::Invalid`: if the payload is invalid</span>
+    <span class="doccomment">/// `ValidationResult::Error`: a transient error occured during the</span>
+    <span class="doccomment">/// validation.</span>
+    <span class="kw">fn</span> <span class="ident">validate_ingress_payload</span>(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="ident">payload</span>: <span class="kw-2">&amp;</span><span class="ident">IngressPayload</span>,
+        <span class="ident">past_ingress</span>: <span class="kw-2">&amp;</span><span class="kw">dyn</span> <span class="ident">IngressSetQuery</span>,
+        <span class="ident">context</span>: <span class="kw-2">&amp;</span><span class="ident">ValidationContext</span>,
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">ValidationResult</span><span class="op">&lt;</span><span class="ident">IngressPayloadValidationError</span><span class="op">&gt;</span>;
+
+    <span class="doccomment">/// Request purge of the given ingress messages from the pool when</span>
+    <span class="doccomment">/// they have already been included in finalized blocks.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// The actual purge is not required to happen immediately.</span>
+    <span class="kw">fn</span> <span class="ident">request_purge_finalized_messages</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">message_ids</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">IngressMessageId</span><span class="op">&gt;</span>);
+}
+
+<span class="comment">/*
+A past ingress set contains past messages, and can be used for
+deduplication purposes.  The following property of past ingress
+set and its lowerbound must hold:
+
+  A past ingress set contains (but may not only contain) ALL
+  past messages whose expiry is greater than or equal to its
+  lowerbound + MAX_INGRESS_TTL.
+
+Explanation:
+
+We assume each block&#39;s payload covers a certain expiry interval:
+
+ P1 |---------|
+    P2 |---------|
+       P3 |---------|
+          P4 |---------|
+             P5 |---------|
+
+In this diagram we know that we don&#39;t have to look into P1
+when deduplicating ingress messages to be included in P5 because
+their expiry domains do not overlap.
+
+Suppose we accumulate past ingress into a set S, and use S(n) to
+deduplicate messages to be included in P(n+1).
+
+ P1 |---------|               S1 = P1
+    P2 |---------|            S2 = S1 + P2 = P1 + P2
+       P3 |---------|         S3 = S2 + P3 = P1 + P2 + P3
+          P4 |---------|      S4 = S3 + P4 = P1 + P2 + P3 + P4
+             P5 |---------|   ...
+
+This works fine if P1 is the block after genesis. However, for a
+replica joining the network from a CUP block (say P3), the situation
+may look like this:
+
+ P1 |---------|
+    P2 |---------|
+       P3 |---------|         S3 = P3
+          P4 |---------|      S4 = S3 + P4 = P3 + P4
+             P5 |---------|   ...
+
+It has no knowledge of P1 and P2 because such blocks do not exist
+locally. Apparently, checking only S4 when making P5 is insufficient.
+To fix this problem, we need to look into the executed set E, i.e.
+the IngressHistoryReader at P3.
+
+Therefore, when making P5, we need to deduplicate against E + S4.
+The question is, when can we safely stop looking into E?
+
+ P1 |---------|
+    P2 |---------|
+       P3 |---------|             S3 = P3
+          P4 |---------|          S4 = S3 + P4 = P3 + P4
+             P5 |---------|       S5 = S4 + P5 = P3 + P4 + P5
+                P6 |---------|    S6 = S5 + P6 = P3 + P4 + P5 + P6
+                   P7 |---------|
+
+When we make P7, We know for sure that payloads &lt;= P3 no longer
+have to be consulted, because the P3 and P7 do not overlap in
+their expiry domain. So if we just look at the domain of S:
+
+       S3 |---------|             S3 = P3
+       S4 |------------|          S4 = S3 + P4 = P3 + P4
+       S5 |---------------|       S5 = S4 + P5 = P3 + P4 + P5
+       S6 |---------+--------|    S6 = S5 + P6 = P3 + P4 + P5 + P6
+
+We can conclude that S6 includes ALL messages whose expiry are
+greater than or equal to (lowerbound of S6 + MAX_INGRESS_TTL).
+In fact this property holds true for every set we compute.
+
+We can also start purging these sets to keep their size bounded.
+If we look at just S6, P6 and P7:
+
+       S6 |---------+--------|    S6 = S5 + P6 = P3 + P4 + P5 + P6
+                P6 |---------|
+                   P7 |---------|
+
+Anything older than P6&#39;s start expiry can be safely purged from
+S6, because P7 can only have a start expiry &gt;= P6&#39;s.
+
+       S6 |        -+--------|    S6 = S5 + P6 = P3 + P4 + P5 + P6
+                P6 |---------|
+
+However it is important to keep the original lowerbound, or set it
+as follows in order to maintain our property:
+
+  lowerbound := max(lowerbound, purge point - MAX_INGRESS_TTL)
+*/</span>
+</pre></div>
+</section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../../";window.currentCrate = "ic_interfaces";</script><script src="../../main.js"></script><script src="../../source-script.js"></script><script src="../../source-files.js"></script><script defer src="../../search-index.js"></script></body></html>

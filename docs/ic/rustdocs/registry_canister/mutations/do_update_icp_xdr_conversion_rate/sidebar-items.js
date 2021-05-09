@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["UpdateIcpXdrConversionRatePayload","The payload of a proposal to update the ICP/XDR conversion rate."]]});

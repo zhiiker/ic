@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_logger"] = [{"text":"impl <a class=\"trait\" href=\"ic_context_logger/trait.Logger.html\" title=\"trait ic_context_logger::Logger\">Logger</a>&lt;<a class=\"struct\" href=\"ic_protobuf/log/log_entry/v1/struct.LogEntry.html\" title=\"struct ic_protobuf::log::log_entry::v1::LogEntry\">LogEntry</a>&gt; for <a class=\"struct\" href=\"ic_logger/replica_logger/struct.LogEntryLogger.html\" title=\"struct ic_logger::replica_logger::LogEntryLogger\">LogEntryLogger</a>","synthetic":false,"types":["ic_logger::replica_logger::LogEntryLogger"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

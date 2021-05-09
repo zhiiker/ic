@@ -1,0 +1,211 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source to the Rust file `interfaces/src/messaging.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>messaging.rs.html -- source</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="shortcut icon" href="../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../ic_interfaces/index.html'><div class='logo-container'><img src='../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1">  1</span>
+<span id="2">  2</span>
+<span id="3">  3</span>
+<span id="4">  4</span>
+<span id="5">  5</span>
+<span id="6">  6</span>
+<span id="7">  7</span>
+<span id="8">  8</span>
+<span id="9">  9</span>
+<span id="10"> 10</span>
+<span id="11"> 11</span>
+<span id="12"> 12</span>
+<span id="13"> 13</span>
+<span id="14"> 14</span>
+<span id="15"> 15</span>
+<span id="16"> 16</span>
+<span id="17"> 17</span>
+<span id="18"> 18</span>
+<span id="19"> 19</span>
+<span id="20"> 20</span>
+<span id="21"> 21</span>
+<span id="22"> 22</span>
+<span id="23"> 23</span>
+<span id="24"> 24</span>
+<span id="25"> 25</span>
+<span id="26"> 26</span>
+<span id="27"> 27</span>
+<span id="28"> 28</span>
+<span id="29"> 29</span>
+<span id="30"> 30</span>
+<span id="31"> 31</span>
+<span id="32"> 32</span>
+<span id="33"> 33</span>
+<span id="34"> 34</span>
+<span id="35"> 35</span>
+<span id="36"> 36</span>
+<span id="37"> 37</span>
+<span id="38"> 38</span>
+<span id="39"> 39</span>
+<span id="40"> 40</span>
+<span id="41"> 41</span>
+<span id="42"> 42</span>
+<span id="43"> 43</span>
+<span id="44"> 44</span>
+<span id="45"> 45</span>
+<span id="46"> 46</span>
+<span id="47"> 47</span>
+<span id="48"> 48</span>
+<span id="49"> 49</span>
+<span id="50"> 50</span>
+<span id="51"> 51</span>
+<span id="52"> 52</span>
+<span id="53"> 53</span>
+<span id="54"> 54</span>
+<span id="55"> 55</span>
+<span id="56"> 56</span>
+<span id="57"> 57</span>
+<span id="58"> 58</span>
+<span id="59"> 59</span>
+<span id="60"> 60</span>
+<span id="61"> 61</span>
+<span id="62"> 62</span>
+<span id="63"> 63</span>
+<span id="64"> 64</span>
+<span id="65"> 65</span>
+<span id="66"> 66</span>
+<span id="67"> 67</span>
+<span id="68"> 68</span>
+<span id="69"> 69</span>
+<span id="70"> 70</span>
+<span id="71"> 71</span>
+<span id="72"> 72</span>
+<span id="73"> 73</span>
+<span id="74"> 74</span>
+<span id="75"> 75</span>
+<span id="76"> 76</span>
+<span id="77"> 77</span>
+<span id="78"> 78</span>
+<span id="79"> 79</span>
+<span id="80"> 80</span>
+<span id="81"> 81</span>
+<span id="82"> 82</span>
+<span id="83"> 83</span>
+<span id="84"> 84</span>
+<span id="85"> 85</span>
+<span id="86"> 86</span>
+<span id="87"> 87</span>
+<span id="88"> 88</span>
+<span id="89"> 89</span>
+<span id="90"> 90</span>
+<span id="91"> 91</span>
+<span id="92"> 92</span>
+<span id="93"> 93</span>
+<span id="94"> 94</span>
+<span id="95"> 95</span>
+<span id="96"> 96</span>
+<span id="97"> 97</span>
+<span id="98"> 98</span>
+<span id="99"> 99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+</pre><div class="example-wrap"><pre class="rust ">
+<span class="doccomment">//! Message Routing public interfaces.</span>
+<span class="kw">use</span> <span class="kw">crate</span>::<span class="ident">validation</span>::{<span class="ident">ValidationError</span>, <span class="ident">ValidationResult</span>};
+<span class="kw">use</span> <span class="ident">ic_types</span>::{
+    <span class="ident">batch</span>::{<span class="ident">Batch</span>, <span class="ident">ValidationContext</span>, <span class="ident">XNetPayload</span>},
+    <span class="ident">Height</span>, <span class="ident">NumBytes</span>,
+};
+
+<span class="doccomment">/// Errors that `MessageRouting` may return.</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>)]</span>
+<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">MessageRoutingError</span> {
+    <span class="doccomment">/// The batch was not delivered because the batch queue is full.</span>
+    <span class="ident">QueueIsFull</span>,
+    <span class="doccomment">/// The batch is ignored because its number is not the one we</span>
+    <span class="doccomment">/// expected.</span>
+    <span class="ident">Ignored</span> {
+        <span class="ident">expected_height</span>: <span class="ident">Height</span>,
+        <span class="ident">actual_height</span>: <span class="ident">Height</span>,
+    },
+}
+
+<span class="doccomment">/// XNet payload validation error details.</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
+<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">InvalidXNetPayload</span> {
+    <span class="ident">InvalidSlice</span>(<span class="ident">String</span>),
+    <span class="ident">StateRemoved</span>(<span class="ident">Height</span>),
+}
+
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
+<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">XNetTransientValidationError</span> {
+    <span class="ident">StateNotCommittedYet</span>(<span class="ident">Height</span>),
+}
+
+<span class="kw">pub</span> <span class="kw">type</span> <span class="ident">XNetPayloadValidationError</span> <span class="op">=</span>
+    <span class="ident">ValidationError</span><span class="op">&lt;</span><span class="ident">InvalidXNetPayload</span>, <span class="ident">XNetTransientValidationError</span><span class="op">&gt;</span>;
+
+<span class="doccomment">/// The public interface for the MessageRouting layer.</span>
+<span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">MessageRouting</span>: <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Sync</span> {
+    <span class="doccomment">/// Delivers a finalized `Batch` for deterministic processing.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// Repeated calls with the same batch result in</span>
+    <span class="doccomment">/// `MessageRoutingError::Ignored`.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// This function is asynchronous: it returns immediately after enqueuing</span>
+    <span class="doccomment">/// the batch for processing and doesn&#39;t wait for execution of the batch to</span>
+    <span class="doccomment">/// complete.</span>
+    <span class="kw">fn</span> <span class="ident">deliver_batch</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">b</span>: <span class="ident">Batch</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">MessageRoutingError</span><span class="op">&gt;</span>;
+
+    <span class="doccomment">/// Returns the height of the next expected batch.</span>
+    <span class="kw">fn</span> <span class="ident">expected_batch_height</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Height</span>;
+}
+
+<span class="doccomment">/// Interface for selecting `Streams` for inclusion into a `Payload`.</span>
+<span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">XNetPayloadBuilder</span>: <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Sync</span> {
+    <span class="doccomment">/// Produces an `XNetPayload` of maximum byte size `byte_limit` that is</span>
+    <span class="doccomment">/// valid given a `ValidationContext` (certified height plus registry</span>
+    <span class="doccomment">/// version) and `past_payloads` (the `XNetPayloads` from all blocks</span>
+    <span class="doccomment">/// above the certified height, in descending block height order).</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// With the current implementation, if no valid XNetPayload of size</span>
+    <span class="doccomment">/// &#39;byte_limit&#39; exists, then the function returns the smallest</span>
+    <span class="doccomment">/// XNetPayload which is valid. For practical parameters,</span>
+    <span class="doccomment">/// for the current implementation XNetPayload will no be more than</span>
+    <span class="doccomment">/// byte_limit+2kB. More details here:</span>
+    <span class="doccomment">/// https://docs.google.com/document/d/1cC1-U000cts3GHiEf9OUNhp4clKt2XCG08Zxo35xoWw/edit#</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// Because payload takes time to make, and this function should not block</span>
+    <span class="doccomment">/// its caller, An implementation can return `Pending` so that the</span>
+    <span class="doccomment">/// caller knows to poll again in the future.</span>
+    <span class="kw">fn</span> <span class="ident">get_xnet_payload</span>(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="ident">height</span>: <span class="ident">Height</span>,
+        <span class="ident">validation_context</span>: <span class="kw-2">&amp;</span><span class="ident">ValidationContext</span>,
+        <span class="ident">past_payloads</span>: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span><span class="ident">XNetPayload</span>],
+        <span class="ident">byte_limit</span>: <span class="ident">NumBytes</span>,
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">XNetPayload</span>, <span class="ident">XNetPayloadError</span><span class="op">&gt;</span>;
+
+    <span class="doccomment">/// Checks whether the provided `XNetPayload` is valid given a</span>
+    <span class="doccomment">/// `ValidationContext` (certified height and registry version) and</span>
+    <span class="doccomment">/// `past_payloads` (the `XNetPayloads` from all blocks above the certified</span>
+    <span class="doccomment">/// height, in descending block height order); and whether its size in bytes</span>
+    <span class="doccomment">/// does not exceed `byte_limit`.</span>
+    <span class="kw">fn</span> <span class="ident">validate_xnet_payload</span>(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="ident">payload</span>: <span class="kw-2">&amp;</span><span class="ident">XNetPayload</span>,
+        <span class="ident">validation_context</span>: <span class="kw-2">&amp;</span><span class="ident">ValidationContext</span>,
+        <span class="ident">past_payloads</span>: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span><span class="ident">XNetPayload</span>],
+        <span class="ident">byte_limit</span>: <span class="ident">NumBytes</span>,
+    ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">ValidationResult</span><span class="op">&lt;</span><span class="ident">XNetPayloadValidationError</span><span class="op">&gt;</span>;
+}
+
+<span class="doccomment">/// Possible errors in making XNetPayload.</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>)]</span>
+<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">XNetPayloadError</span> {
+    <span class="doccomment">/// Payload making has started, but the result is not ready yet.</span>
+    <span class="ident">Pending</span>,
+}
+
+<span class="kw">impl</span> <span class="ident">std</span>::<span class="ident">fmt</span>::<span class="ident">Display</span> <span class="kw">for</span> <span class="ident">XNetPayloadError</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">std</span>::<span class="ident">fmt</span>::<span class="ident">Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">std</span>::<span class="ident">fmt</span>::<span class="prelude-ty">Result</span> {
+        <span class="macro">write</span><span class="macro">!</span>(<span class="ident">f</span>, <span class="string">&quot;{:?}&quot;</span>, <span class="self">self</span>)
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">std</span>::<span class="ident">error</span>::<span class="ident">Error</span> <span class="kw">for</span> <span class="ident">XNetPayloadError</span> {}
+</pre></div>
+</section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../../";window.currentCrate = "ic_interfaces";</script><script src="../../main.js"></script><script src="../../source-script.js"></script><script src="../../source-files.js"></script><script defer src="../../search-index.js"></script></body></html>

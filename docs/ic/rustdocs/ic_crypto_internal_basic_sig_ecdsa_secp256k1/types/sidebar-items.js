@@ -1,0 +1,1 @@
+initSidebarItems({"constant":[["FIELD_SIZE","The size of the secp256k1 field (256 bits, 32 bytes)"]],"struct":[["PublicKeyBytes","ECDSA secp256k1 public key bytes, in uncompressed format"],["SecretKeyBytes","ECDSA secp256k1 secret key bytes."],["SignatureBytes","ECDSA secp256k1 signature"]]});

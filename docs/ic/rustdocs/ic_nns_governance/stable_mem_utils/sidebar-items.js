@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["BufferedStableMemReader","An implementation of `Buf` that reads from stable memory in chunks. Chunk size is specified on initialization, in `BufferedStableReader::new`."],["BufferedStableMemWriter","An implementation of `BufMut` that writes to stable memory in chunks. Chunk size is specified on initialization, in `BufferedStableMemWriter::new`."]]});

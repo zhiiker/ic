@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["NnsCanisterRecord","Information about an NNS canister."],["NnsCanisterRecords","All of the post-genesis NNS canisters."]]});

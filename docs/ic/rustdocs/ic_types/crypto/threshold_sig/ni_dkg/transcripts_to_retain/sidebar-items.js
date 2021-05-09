@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["TranscriptsToRetain","Transcripts that should be retained when using `NiDkgAlgorithm::retain_only_active_keys`. See the invariants in `TranscriptsToRetain::new`."]]});

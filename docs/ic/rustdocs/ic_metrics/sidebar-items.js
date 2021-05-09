@@ -1,0 +1,1 @@
+initSidebarItems({"mod":[["buckets","Various bucketing schemes to use when defining histograms."],["registry",""]],"struct":[["Timer","A timer to be used with `HistogramVec`, when the labels are not known ahead of time (e.g. when observing request durations by response status)."]]});

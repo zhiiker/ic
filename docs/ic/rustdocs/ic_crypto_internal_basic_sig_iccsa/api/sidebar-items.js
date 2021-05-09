@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["public_key_bytes_from_der","Parse `pk_der` as DER-encoded public key with OID 1.3.6.1.4.1.56387.1.2, and returns the unwrapped public key bytes. See * https://sdk.dfinity.org/docs/interface-spec/index.html#canister-signatures * https://tools.ietf.org/html/rfc8410#section-4"],["verify","Verify a canister signature"]]});

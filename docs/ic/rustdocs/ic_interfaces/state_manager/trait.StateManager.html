@@ -1,0 +1,162 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `StateManager` trait in crate `ic_interfaces`."><meta name="keywords" content="rust, rustlang, rust-lang, StateManager"><title>ic_interfaces::state_manager::StateManager - Rust</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="shortcut icon" href="../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../down-arrow.svg");}</style></head><body class="rustdoc trait"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../ic_interfaces/index.html'><div class='logo-container'><img src='../../rust-logo.png' alt='logo'></div></a><p class='location'>Trait StateManager</p><div class="sidebar-elems"><div class="block items"><a class="sidebar-title" href="#required-methods">Required Methods</a><div class="sidebar-links"><a href="#tymethod.commit_and_certify">commit_and_certify</a><a href="#tymethod.deliver_state_certification">deliver_state_certification</a><a href="#tymethod.fetch_state">fetch_state</a><a href="#tymethod.get_state_hash_at">get_state_hash_at</a><a href="#tymethod.list_state_hashes_to_certify">list_state_hashes_to_certify</a><a href="#tymethod.list_state_heights">list_state_heights</a><a href="#tymethod.remove_states_below">remove_states_below</a><a href="#tymethod.report_diverged_state">report_diverged_state</a><a href="#tymethod.take_tip">take_tip</a><a href="#tymethod.take_tip_at">take_tip_at</a></div><a class="sidebar-title" href="#implementors">Implementors</a></div><p class='location'><a href='../index.html'>ic_interfaces</a>::<wbr><a href='index.html'>state_manager</a></p><script>window.sidebarCurrent = {name: 'StateManager', ty: 'trait', relpath: ''};</script><script defer src="sidebar-items.js"></script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../../src/ic_interfaces/state_manager.rs.html#88-265' title='goto source code'>[src]</a></span><span class='in-band'>Trait <a href='../index.html'>ic_interfaces</a>::<wbr><a href='index.html'>state_manager</a>::<wbr><a class="trait" href=''>StateManager</a></span></h1><div class="docblock type-decl hidden-by-usual-hider"><pre class='rust trait'>pub trait StateManager: <a class="trait" href="../../ic_interfaces/state_manager/trait.StateReader.html" title="trait ic_interfaces::state_manager::StateReader">StateReader</a> {
+    fn <a href='#tymethod.list_state_hashes_to_certify' class='fnname'>list_state_hashes_to_certify</a>(<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&amp;self<br>&nbsp;&nbsp;&nbsp;&nbsp;) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">(</a><a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a>, <a class="type" href="../../ic_types/type.CryptoHashOfPartialState.html" title="type ic_types::CryptoHashOfPartialState">CryptoHashOfPartialState</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">)</a>&gt;;
+<div class='item-spacer'></div>    fn <a href='#tymethod.deliver_state_certification' class='fnname'>deliver_state_certification</a>(&amp;self, certification: <a class="struct" href="../../ic_types/consensus/certification/struct.Certification.html" title="struct ic_types::consensus::certification::Certification">Certification</a>);
+<div class='item-spacer'></div>    fn <a href='#tymethod.get_state_hash_at' class='fnname'>get_state_hash_at</a>(<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&amp;self, <br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;height: <a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a><br>&nbsp;&nbsp;&nbsp;&nbsp;) -&gt; <a class="type" href="../../ic_interfaces/state_manager/type.StateManagerResult.html" title="type ic_interfaces::state_manager::StateManagerResult">StateManagerResult</a>&lt;<a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="type" href="../../ic_types/type.CryptoHashOfState.html" title="type ic_types::CryptoHashOfState">CryptoHashOfState</a>&gt;&gt;;
+<div class='item-spacer'></div>    fn <a href='#tymethod.fetch_state' class='fnname'>fetch_state</a>(&amp;self, height: <a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a>, root_hash: <a class="type" href="../../ic_types/type.CryptoHashOfState.html" title="type ic_types::CryptoHashOfState">CryptoHashOfState</a>);
+<div class='item-spacer'></div>    fn <a href='#tymethod.list_state_heights' class='fnname'>list_state_heights</a>(&amp;self, cert_mask: <a class="type" href="../../ic_interfaces/state_manager/type.CertificationMask.html" title="type ic_interfaces::state_manager::CertificationMask">CertificationMask</a>) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a>&gt;;
+<div class='item-spacer'></div>    fn <a href='#tymethod.remove_states_below' class='fnname'>remove_states_below</a>(&amp;self, height: <a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a>);
+<div class='item-spacer'></div>    fn <a href='#tymethod.commit_and_certify' class='fnname'>commit_and_certify</a>(<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&amp;self, <br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;state: Self::<a class="type" href="../../ic_interfaces/state_manager/trait.StateReader.html#associatedtype.State" title="type ic_interfaces::state_manager::StateReader::State">State</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;height: <a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;scope: <a class="enum" href="../../ic_interfaces/state_manager/enum.CertificationScope.html" title="enum ic_interfaces::state_manager::CertificationScope">CertificationScope</a><br>&nbsp;&nbsp;&nbsp;&nbsp;);
+<div class='item-spacer'></div>    fn <a href='#tymethod.take_tip' class='fnname'>take_tip</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">(</a><a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a>, Self::<a class="type" href="../../ic_interfaces/state_manager/trait.StateReader.html#associatedtype.State" title="type ic_interfaces::state_manager::StateReader::State">State</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">)</a>;
+<div class='item-spacer'></div>    fn <a href='#tymethod.take_tip_at' class='fnname'>take_tip_at</a>(&amp;self, height: <a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a>) -&gt; <a class="type" href="../../ic_interfaces/state_manager/type.StateManagerResult.html" title="type ic_interfaces::state_manager::StateManagerResult">StateManagerResult</a>&lt;Self::<a class="type" href="../../ic_interfaces/state_manager/trait.StateReader.html#associatedtype.State" title="type ic_interfaces::state_manager::StateReader::State">State</a>&gt;;
+<div class='item-spacer'></div>    fn <a href='#tymethod.report_diverged_state' class='fnname'>report_diverged_state</a>(&amp;self, height: <a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a>);
+}</pre></div><div class='docblock'><p>APIs related to fetching and certifying the state.</p>
+</div>
+            <h2 id='required-methods' class='small-section-header'>Required methods<a href='#required-methods' class='anchor'></a></h2><div class='methods'><h3 id='tymethod.list_state_hashes_to_certify' class='method'><code id='list_state_hashes_to_certify.v'>fn <a href='#tymethod.list_state_hashes_to_certify' class='fnname'>list_state_hashes_to_certify</a>(<br>&nbsp;&nbsp;&nbsp;&nbsp;&amp;self<br>) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">(</a><a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a>, <a class="type" href="../../ic_types/type.CryptoHashOfPartialState.html" title="type ic_types::CryptoHashOfPartialState">CryptoHashOfPartialState</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">)</a>&gt;</code></h3><div class='docblock'><p>Returns a snapshot of the list of state hashes that need to be
+certified (&quot;the list&quot; below).</p>
+<p>The actual list is maintained by the StateManager.  The
+following operations can modify the list:</p>
+<ul>
+<li>
+<p>A call to <code>commit_and_certify</code> starts a potentially asynchronous
+computation that adds an entry to the list.  This implies that the
+list will contain every height at some point, unless the state is
+removed before its hash is computed.</p>
+</li>
+<li>
+<p>A call to <code>deliver_state_certification</code> with a certification of some
+height removes the corresponding entry from the list.</p>
+</li>
+<li>
+<p>A call to one of the <code>remove_state*</code> methods removes the corresponding
+entry from the list.</p>
+</li>
+</ul>
+<p>Since the hash computation can be asynchronous, the order in
+which heights appear in the list can differ from the order in
+which states are committed.  E.g., the following outcome is
+possible:</p>
+<pre><code class="language-text">sm.commit_and_certify(state_1, h_1, scope_1)
+sm.commit_and_certify(state_1, h_2, scope_1)
+sm.list_state_hashes_to_certify() = [(h_2, H_2)]
+sm.list_state_hashes_to_certify() = [(h_1, H_1), (h_2, H_2)]
+</code></pre>
+<h1 id="properties" class="section-header"><a href="#properties">Properties</a></h1>
+<ul>
+<li>
+<p>The entries in the list are unique and sorted by height.</p>
+<pre><code class="language-text">let l = state_manager.list_state_hashes_to_certify()
+∀ i, j ∈ indices(l): i &lt; j ⇒ l[i].height &lt; l[j].height
+</code></pre>
+</li>
+<li>
+<p>The hash associated with a height is guaranteed not to change.</p>
+<pre><code class="language-text">let l_1 = state_manager.list_state_hashes_to_certify()
+...
+let l_2 = state_manager.list_state_hashes_to_certify()
+∀ (h_1, H_1) ∈ l_1, (h_2, H_2) ∈ l_2: h_1 = h_2 ⇒ H_1 = H_2
+</code></pre>
+</li>
+</ul>
+</div><h3 id='tymethod.deliver_state_certification' class='method'><code id='deliver_state_certification.v'>fn <a href='#tymethod.deliver_state_certification' class='fnname'>deliver_state_certification</a>(&amp;self, certification: <a class="struct" href="../../ic_types/consensus/certification/struct.Certification.html" title="struct ic_types::consensus::certification::Certification">Certification</a>)</code></h3><div class='docblock'><p>Delivers a <code>certification</code> corresponding to some state hash / height
+pair.</p>
+<p>Does nothing if another certification for the same state has
+already been delivered.</p>
+<h2 id="post-conditions" class="section-header"><a href="#post-conditions">Post-conditions</a></h2>
+<p><code>(height, ·) ∉ state_manager.list_state_hashes_to_certify()</code></p>
+<h2 id="panics" class="section-header"><a href="#panics">Panics</a></h2>
+<p>Panics if certification.content.hash is not equal to the hash computed
+from the state at height certification.content.height.</p>
+</div><h3 id='tymethod.get_state_hash_at' class='method'><code id='get_state_hash_at.v'>fn <a href='#tymethod.get_state_hash_at' class='fnname'>get_state_hash_at</a>(<br>&nbsp;&nbsp;&nbsp;&nbsp;&amp;self, <br>&nbsp;&nbsp;&nbsp;&nbsp;height: <a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a><br>) -&gt; <a class="type" href="../../ic_interfaces/state_manager/type.StateManagerResult.html" title="type ic_interfaces::state_manager::StateManagerResult">StateManagerResult</a>&lt;<a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="type" href="../../ic_types/type.CryptoHashOfState.html" title="type ic_types::CryptoHashOfState">CryptoHashOfState</a>&gt;&gt;</code></h3><div class='docblock'><p>Returns the hash of the state at the specified <code>height</code>.</p>
+<p>The state hash can be computed asynchronously.  If the state itself is
+available, but the hash is not computed yet, this method returns
+<code>Ok(None)</code>.</p>
+<h1 id="errors" class="section-header"><a href="#errors">Errors</a></h1>
+<ul>
+<li>
+<p>If the state at <code>height</code> was already removed, the <code>StateRemoved</code> error
+is returned.</p>
+</li>
+<li>
+<p>If the state at <code>height</code> is not committed yet, the
+<code>StateNotCommittedYet</code> error is returned.</p>
+</li>
+</ul>
+</div><h3 id='tymethod.fetch_state' class='method'><code id='fetch_state.v'>fn <a href='#tymethod.fetch_state' class='fnname'>fetch_state</a>(&amp;self, height: <a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a>, root_hash: <a class="type" href="../../ic_types/type.CryptoHashOfState.html" title="type ic_types::CryptoHashOfState">CryptoHashOfState</a>)</code></h3><div class='docblock'><p>Initiates asynchronous procedure of state synchronization with the
+target state specified by its height and root hash.</p>
+<p>Does nothing if <code>self.latest_state_height() &gt;= height</code>.</p>
+<p>Note that there is no explicit notification (or callback) indicating
+that the fetch is complete.  The caller is supposed to poll
+<code>self.latest_state_height()</code> periodically to learn that the state became
+available.</p>
+<h1 id="panics-1" class="section-header"><a href="#panics-1">Panics</a></h1>
+<p>Panics if the state is already known and its root_hash differs, i.e.
+<code>self.get_state_hash_at(height) = Ok(Some(h)) ∧ h ≠ root_hash</code></p>
+</div><h3 id='tymethod.list_state_heights' class='method'><code id='list_state_heights.v'>fn <a href='#tymethod.list_state_heights' class='fnname'>list_state_heights</a>(&amp;self, cert_mask: <a class="type" href="../../ic_interfaces/state_manager/type.CertificationMask.html" title="type ic_interfaces::state_manager::CertificationMask">CertificationMask</a>) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a>&gt;</code></h3><div class='docblock'><p>Returns the list of heights corresponding to accessible states matching
+the mask.  E.g. <code>list_state_heights(CERT_ANY)</code> will return all
+accessible states.</p>
+<p>Note that the initial state at height 0 is considered uncertified from
+the State Manager point of view.  This is because the protocol requires
+each replica to individually obtain the initial state using some
+out-of-band mechanism (i.e., not state sync).  Also note that the
+authenticity of this initial state will be verified by some protocol
+external to this component.</p>
+<p>The list of heights is guaranteed to be</p>
+<ul>
+<li>Non-empty if <code>cert_mask = CERT_ANY</code> as it will contain at least height
+0 even if no states were committed yet.</li>
+<li>Sorted in ascending order.</li>
+</ul>
+</div><h3 id='tymethod.remove_states_below' class='method'><code id='remove_states_below.v'>fn <a href='#tymethod.remove_states_below' class='fnname'>remove_states_below</a>(&amp;self, height: <a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a>)</code></h3><div class='docblock'><p>Notify this state manager that states with heights strictly less than
+the specified <code>height</code> can be removed.</p>
+<p>Note that:</p>
+<ul>
+<li>The initial state (height = 0) cannot be removed.</li>
+<li>Some states matching the removal criteria might be kept alive.  For
+example, the last fully persisted state might be preserved to
+optimize future operations.</li>
+</ul>
+</div><h3 id='tymethod.commit_and_certify' class='method'><code id='commit_and_certify.v'>fn <a href='#tymethod.commit_and_certify' class='fnname'>commit_and_certify</a>(<br>&nbsp;&nbsp;&nbsp;&nbsp;&amp;self, <br>&nbsp;&nbsp;&nbsp;&nbsp;state: Self::<a class="type" href="../../ic_interfaces/state_manager/trait.StateReader.html#associatedtype.State" title="type ic_interfaces::state_manager::StateReader::State">State</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;height: <a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;scope: <a class="enum" href="../../ic_interfaces/state_manager/enum.CertificationScope.html" title="enum ic_interfaces::state_manager::CertificationScope">CertificationScope</a><br>)</code></h3><div class='docblock'><p>Commits the <code>state</code> at given <code>height</code>, limits the certification to
+<code>scope</code>. The <code>state</code> must be the mutable state obtained via a call to
+<code>take_tip</code>.</p>
+<p>Does nothing if <code>height ≤ state_manager.latest_state_height()</code>.</p>
+<h1 id="panics-2" class="section-header"><a href="#panics-2">Panics</a></h1>
+<p>Panics if the state at <code>height</code> has already been committed before but
+has a different hash.</p>
+</div><h3 id='tymethod.take_tip' class='method'><code id='take_tip.v'>fn <a href='#tymethod.take_tip' class='fnname'>take_tip</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">(</a><a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a>, Self::<a class="type" href="../../ic_interfaces/state_manager/trait.StateReader.html#associatedtype.State" title="type ic_interfaces::state_manager::StateReader::State">State</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">)</a></code></h3><div class='docblock'><p>Returns the version of the state that can be modified in-place and the
+height of that state.</p>
+<p>This function transfers the ownership of the mutable state from
+StateManager to the caller.</p>
+<h1 id="panics-3" class="section-header"><a href="#panics-3">Panics</a></h1>
+<ul>
+<li>This function panics if StateManager doesn't own the mutable state.
+That means that <code>take_tip</code> cannot be called twice in a row, every
+invocation of <code>take_tip</code> must be balanced by a call to
+<code>commit_and_certify</code>.</li>
+</ul>
+</div><h3 id='tymethod.take_tip_at' class='method'><code id='take_tip_at.v'>fn <a href='#tymethod.take_tip_at' class='fnname'>take_tip_at</a>(&amp;self, height: <a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a>) -&gt; <a class="type" href="../../ic_interfaces/state_manager/type.StateManagerResult.html" title="type ic_interfaces::state_manager::StateManagerResult">StateManagerResult</a>&lt;Self::<a class="type" href="../../ic_interfaces/state_manager/trait.StateReader.html#associatedtype.State" title="type ic_interfaces::state_manager::StateReader::State">State</a>&gt;</code></h3><div class='docblock'><p>Returns the version of the state that can be modified in-place (TIP) if
+the requested height matches height(TIP).</p>
+<h1 id="errors-1" class="section-header"><a href="#errors-1">Errors</a></h1>
+<ul>
+<li>
+<p>If the height &lt; height(TIP), returns <code>StateRemoved</code>.</p>
+</li>
+<li>
+<p>If the height(TIP) &lt; height, returns <code>StateNotCommittedYet</code>.</p>
+</li>
+</ul>
+<h1 id="panics-4" class="section-header"><a href="#panics-4">Panics</a></h1>
+<ul>
+<li>This function panics if StateManager doesn't own the TIP. See
+<code>take_tip</code> for more details.</li>
+</ul>
+</div><h3 id='tymethod.report_diverged_state' class='method'><code id='report_diverged_state.v'>fn <a href='#tymethod.report_diverged_state' class='fnname'>report_diverged_state</a>(&amp;self, height: <a class="type" href="../../ic_types/type.Height.html" title="type ic_types::Height">Height</a>)</code></h3><div class='docblock'><p>Reports that the given <code>height</code> diverged, i.e., consensus agreed on the
+hash of state at <code>height</code>, and this was not the state produced by this
+state manager.</p>
+<p>This function triggers non-determinism recovery procedure, which
+involves pruning all the states that might be diverged as well.</p>
+<h1 id="panics-5" class="section-header"><a href="#panics-5">Panics</a></h1>
+<p>This function always panics because there is no point in continuing the
+normal operation.  We rely on node manager restarting the replica, which
+in turn will initiate the normal recovery procedure.</p>
+</div></div><span class='loading-content'>Loading content...</span>
+            <h2 id='implementors' class='small-section-header'>Implementors<a href='#implementors' class='anchor'></a></h2><div class='item-list' id='implementors-list'></div><span class='loading-content'>Loading content...</span><script type="text/javascript" src="../../implementors/ic_interfaces/state_manager/trait.StateManager.js" async></script></section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../../";window.currentCrate = "ic_interfaces";</script><script src="../../main.js"></script><script defer src="../../search-index.js"></script></body></html>

@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["find_file_on_path","Finds the `file` in the directories listed in the `PATH` environment variable."],["is_file_on_path","Tests whether `file` exists in any of the directories listed in the `PATH` environment variable."]]});

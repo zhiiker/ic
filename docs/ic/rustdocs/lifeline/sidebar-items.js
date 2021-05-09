@@ -1,0 +1,1 @@
+initSidebarItems({"constant":[["LIFELINE_CANISTER_WASM",""]]});

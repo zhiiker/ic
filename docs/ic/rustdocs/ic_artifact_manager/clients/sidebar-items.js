@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["CertificationClient","The certification `ArtifactClient` to be managed by the `ArtifactManager`."],["ConsensusClient","The Consensus `ArtifactClient` to be managed by the `ArtifactManager`."],["DkgClient","The DKG client."],["IngressClient","The ingress `ArtifactClient` to be managed by the `ArtifactManager`."]]});

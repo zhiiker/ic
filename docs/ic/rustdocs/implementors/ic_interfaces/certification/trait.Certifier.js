@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_consensus"] = [{"text":"impl <a class=\"trait\" href=\"ic_interfaces/certification/trait.Certifier.html\" title=\"trait ic_interfaces::certification::Certifier\">Certifier</a> for <a class=\"struct\" href=\"ic_consensus/certification/struct.CertifierImpl.html\" title=\"struct ic_consensus::certification::CertifierImpl\">CertifierImpl</a>","synthetic":false,"types":["ic_consensus::certification::certifier::CertifierImpl"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["canister_status",""],["do_add_nns_canister",""],["do_change_nns_canister",""],["stop_or_start_nns_canister",""],["update_authz",""]]});

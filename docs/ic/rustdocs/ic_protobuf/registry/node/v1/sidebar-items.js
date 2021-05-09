@@ -1,0 +1,1 @@
+initSidebarItems({"mod":[["connection_endpoint","Nested message and enum types in `ConnectionEndpoint`."]],"struct":[["ConnectionEndpoint","A connection endpoint."],["FlowEndpoint",""],["NodeRecord","A node: one machine running a replica instance."]]});

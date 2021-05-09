@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_types"] = [{"text":"impl&lt;H, T&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html\" title=\"trait core::borrow::Borrow\">Borrow</a>&lt;H&gt; for <a class=\"struct\" href=\"ic_types/consensus/hashed/struct.Hashed.html\" title=\"struct ic_types::consensus::hashed::Hashed\">Hashed</a>&lt;H, T&gt;","synthetic":false,"types":["ic_types::consensus::hashed::Hashed"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

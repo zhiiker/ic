@@ -1,0 +1,231 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source to the Rust file `registry/canister/src/mutations/do_bless_replica_version.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>do_bless_replica_version.rs.html -- source</title><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../dark.css"><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script src="../../../storage.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="shortcut icon" href="../../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../../registry_canister/index.html'><div class='logo-container'><img src='../../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../../settings.html"><img src="../../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1">  1</span>
+<span id="2">  2</span>
+<span id="3">  3</span>
+<span id="4">  4</span>
+<span id="5">  5</span>
+<span id="6">  6</span>
+<span id="7">  7</span>
+<span id="8">  8</span>
+<span id="9">  9</span>
+<span id="10"> 10</span>
+<span id="11"> 11</span>
+<span id="12"> 12</span>
+<span id="13"> 13</span>
+<span id="14"> 14</span>
+<span id="15"> 15</span>
+<span id="16"> 16</span>
+<span id="17"> 17</span>
+<span id="18"> 18</span>
+<span id="19"> 19</span>
+<span id="20"> 20</span>
+<span id="21"> 21</span>
+<span id="22"> 22</span>
+<span id="23"> 23</span>
+<span id="24"> 24</span>
+<span id="25"> 25</span>
+<span id="26"> 26</span>
+<span id="27"> 27</span>
+<span id="28"> 28</span>
+<span id="29"> 29</span>
+<span id="30"> 30</span>
+<span id="31"> 31</span>
+<span id="32"> 32</span>
+<span id="33"> 33</span>
+<span id="34"> 34</span>
+<span id="35"> 35</span>
+<span id="36"> 36</span>
+<span id="37"> 37</span>
+<span id="38"> 38</span>
+<span id="39"> 39</span>
+<span id="40"> 40</span>
+<span id="41"> 41</span>
+<span id="42"> 42</span>
+<span id="43"> 43</span>
+<span id="44"> 44</span>
+<span id="45"> 45</span>
+<span id="46"> 46</span>
+<span id="47"> 47</span>
+<span id="48"> 48</span>
+<span id="49"> 49</span>
+<span id="50"> 50</span>
+<span id="51"> 51</span>
+<span id="52"> 52</span>
+<span id="53"> 53</span>
+<span id="54"> 54</span>
+<span id="55"> 55</span>
+<span id="56"> 56</span>
+<span id="57"> 57</span>
+<span id="58"> 58</span>
+<span id="59"> 59</span>
+<span id="60"> 60</span>
+<span id="61"> 61</span>
+<span id="62"> 62</span>
+<span id="63"> 63</span>
+<span id="64"> 64</span>
+<span id="65"> 65</span>
+<span id="66"> 66</span>
+<span id="67"> 67</span>
+<span id="68"> 68</span>
+<span id="69"> 69</span>
+<span id="70"> 70</span>
+<span id="71"> 71</span>
+<span id="72"> 72</span>
+<span id="73"> 73</span>
+<span id="74"> 74</span>
+<span id="75"> 75</span>
+<span id="76"> 76</span>
+<span id="77"> 77</span>
+<span id="78"> 78</span>
+<span id="79"> 79</span>
+<span id="80"> 80</span>
+<span id="81"> 81</span>
+<span id="82"> 82</span>
+<span id="83"> 83</span>
+<span id="84"> 84</span>
+<span id="85"> 85</span>
+<span id="86"> 86</span>
+<span id="87"> 87</span>
+<span id="88"> 88</span>
+<span id="89"> 89</span>
+<span id="90"> 90</span>
+<span id="91"> 91</span>
+<span id="92"> 92</span>
+<span id="93"> 93</span>
+<span id="94"> 94</span>
+<span id="95"> 95</span>
+<span id="96"> 96</span>
+<span id="97"> 97</span>
+<span id="98"> 98</span>
+<span id="99"> 99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+</pre><div class="example-wrap"><pre class="rust ">
+<span class="kw">use</span> <span class="kw">crate</span>::{
+    <span class="ident">common</span>::<span class="ident">LOG_PREFIX</span>,
+    <span class="ident">mutations</span>::<span class="ident">common</span>::{<span class="ident">decode_registry_value</span>, <span class="ident">encode_or_panic</span>},
+    <span class="ident">registry</span>::<span class="ident">Registry</span>,
+};
+
+<span class="kw">use</span> <span class="ident">candid</span>::{<span class="ident">CandidType</span>, <span class="ident">Deserialize</span>};
+<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">target_arch</span> <span class="op">=</span> <span class="string">&quot;wasm32&quot;</span>)]</span>
+<span class="kw">use</span> <span class="ident">dfn_core</span>::<span class="ident">println</span>;
+
+<span class="kw">use</span> <span class="ident">ic_protobuf</span>::<span class="ident">registry</span>::<span class="ident">replica_version</span>::<span class="ident">v1</span>::{<span class="ident">BlessedReplicaVersions</span>, <span class="ident">ReplicaVersionRecord</span>};
+<span class="kw">use</span> <span class="ident">ic_registry_keys</span>::{<span class="ident">make_blessed_replica_version_key</span>, <span class="ident">make_replica_version_key</span>};
+<span class="kw">use</span> <span class="ident">ic_registry_transport</span>::<span class="ident">pb</span>::<span class="ident">v1</span>::{<span class="ident">registry_mutation</span>, <span class="ident">RegistryMutation</span>};
+
+<span class="kw">impl</span> <span class="ident">Registry</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">do_bless_replica_version</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">payload</span>: <span class="ident">BlessReplicaVersionPayload</span>) {
+        <span class="macro">println</span><span class="macro">!</span>(<span class="string">&quot;{}do_bless_replica_version: {:?}&quot;</span>, <span class="ident">LOG_PREFIX</span>, <span class="ident">payload</span>);
+
+        <span class="kw">let</span> <span class="ident">version</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">latest_version</span>();
+        <span class="comment">// Get the current list</span>
+        <span class="kw">let</span> <span class="ident">blessed_key</span> <span class="op">=</span> <span class="ident">make_blessed_replica_version_key</span>();
+        <span class="kw">let</span> <span class="ident">before_append</span> <span class="op">=</span> <span class="kw">match</span> <span class="self">self</span>.<span class="ident">get</span>(<span class="ident">blessed_key</span>.<span class="ident">as_bytes</span>(), <span class="ident">version</span>) {
+            <span class="prelude-val">Some</span>(<span class="ident">old_blessed_replica_version</span>) <span class="op">=</span><span class="op">&gt;</span> {
+                <span class="ident">decode_registry_value</span>::<span class="op">&lt;</span><span class="ident">BlessedReplicaVersions</span><span class="op">&gt;</span>(
+                    <span class="ident">old_blessed_replica_version</span>.<span class="ident">value</span>.<span class="ident">clone</span>(),
+                )
+                .<span class="ident">blessed_version_ids</span>
+            }
+            <span class="prelude-val">None</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">vec</span><span class="macro">!</span>[],
+        };
+
+        <span class="kw">let</span> <span class="ident">after_append</span> <span class="op">=</span> {
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">copy</span> <span class="op">=</span> <span class="ident">before_append</span>.<span class="ident">clone</span>();
+            <span class="ident">copy</span>.<span class="ident">push</span>(<span class="ident">payload</span>.<span class="ident">replica_version_id</span>.<span class="ident">clone</span>());
+            <span class="ident">copy</span>
+        };
+        <span class="macro">println</span><span class="macro">!</span>(
+            <span class="string">&quot;{}Blessed version before: {:?} and after: {:?}&quot;</span>,
+            <span class="ident">LOG_PREFIX</span>, <span class="ident">before_append</span>, <span class="ident">after_append</span>
+        );
+
+        <span class="kw">let</span> <span class="ident">mutations</span> <span class="op">=</span> <span class="macro">vec</span><span class="macro">!</span>[
+            <span class="comment">// Register the new version (that is, insert the new ReplicaVersionRecord)</span>
+            <span class="ident">RegistryMutation</span> {
+                <span class="ident">mutation_type</span>: <span class="ident">registry_mutation</span>::<span class="ident">Type</span>::<span class="ident">Insert</span> <span class="kw">as</span> <span class="ident">i32</span>,
+                <span class="ident">key</span>: <span class="ident">make_replica_version_key</span>(<span class="kw-2">&amp;</span><span class="ident">payload</span>.<span class="ident">replica_version_id</span>)
+                    .<span class="ident">as_bytes</span>()
+                    .<span class="ident">to_vec</span>(),
+                <span class="ident">value</span>: <span class="ident">encode_or_panic</span>(<span class="kw-2">&amp;</span><span class="ident">ReplicaVersionRecord</span> {
+                    <span class="ident">binary_url</span>: <span class="ident">payload</span>.<span class="ident">binary_url</span>.<span class="ident">clone</span>(),
+                    <span class="ident">sha256_hex</span>: <span class="ident">payload</span>.<span class="ident">sha256_hex</span>.<span class="ident">clone</span>(),
+                    <span class="ident">node_manager_binary_url</span>: <span class="ident">payload</span>.<span class="ident">node_manager_binary_url</span>.<span class="ident">clone</span>(),
+                    <span class="ident">node_manager_sha256_hex</span>: <span class="ident">payload</span>.<span class="ident">node_manager_sha256_hex</span>.<span class="ident">clone</span>(),
+                    <span class="ident">release_package_url</span>: <span class="ident">payload</span>.<span class="ident">release_package_url</span>.<span class="ident">clone</span>(),
+                    <span class="ident">release_package_sha256_hex</span>: <span class="ident">payload</span>.<span class="ident">release_package_sha256_hex</span>,
+                }),
+            },
+            <span class="comment">// Bless the new version (that is, update the list of blessed versions)</span>
+            <span class="ident">RegistryMutation</span> {
+                <span class="ident">mutation_type</span>: <span class="ident">registry_mutation</span>::<span class="ident">Type</span>::<span class="ident">Upsert</span> <span class="kw">as</span> <span class="ident">i32</span>,
+                <span class="ident">key</span>: <span class="ident">blessed_key</span>.<span class="ident">as_bytes</span>().<span class="ident">to_vec</span>(),
+                <span class="ident">value</span>: <span class="ident">encode_or_panic</span>(<span class="kw-2">&amp;</span><span class="ident">BlessedReplicaVersions</span> {
+                    <span class="ident">blessed_version_ids</span>: <span class="ident">after_append</span>,
+                }),
+            },
+        ];
+
+        <span class="comment">// Check invariants before applying mutations</span>
+        <span class="self">self</span>.<span class="ident">maybe_apply_mutation_internal</span>(<span class="ident">mutations</span>);
+    }
+}
+
+<span class="doccomment">/// The payload of a proposal to bless a given replica version.</span>
+<span class="doccomment">///</span>
+<span class="doccomment">/// To decouple proposal payload and registry content, this does not directly</span>
+<span class="doccomment">/// import any part of the registry schema. However it is required that, from a</span>
+<span class="doccomment">/// BlessingProposalPayload, it is possible to construct a ReplicaVersionRecord</span>
+<span class="doccomment">/// from a BlessingProposalPayload.</span>
+<span class="doccomment">///</span>
+<span class="doccomment">/// See /rs/protobuf/def/registry/replica_version/v1/replica_version.proto</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">CandidType</span>, <span class="ident">Deserialize</span>, <span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>)]</span>
+<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">BlessReplicaVersionPayload</span> {
+    <span class="doccomment">/// Version ID. This can be anything, it has not semantics. The reason it is</span>
+    <span class="doccomment">/// part of the payload is that it will be needed in the subsequent step</span>
+    <span class="doccomment">/// of upgrading individual subnets.</span>
+    <span class="kw">pub</span> <span class="ident">replica_version_id</span>: <span class="ident">String</span>,
+
+    <span class="doccomment">/// The URL against which a HTTP GET request will return a replica binary</span>
+    <span class="doccomment">/// that corresponds to this version</span>
+    <span class="kw">pub</span> <span class="ident">binary_url</span>: <span class="ident">String</span>,
+
+    <span class="doccomment">/// The hex-formatted SHA-256 hash of the binary served by &#39;binary_url&#39;</span>
+    <span class="kw">pub</span> <span class="ident">sha256_hex</span>: <span class="ident">String</span>,
+
+    <span class="doccomment">/// The URL against which a HTTP GET request will return a node manager</span>
+    <span class="doccomment">/// binary that corresponds to this version</span>
+    <span class="kw">pub</span> <span class="ident">node_manager_binary_url</span>: <span class="ident">String</span>,
+
+    <span class="doccomment">/// The hex-formatted SHA-256 hash of the binary served by</span>
+    <span class="doccomment">/// &#39;node_manager_binary_url&#39;</span>
+    <span class="kw">pub</span> <span class="ident">node_manager_sha256_hex</span>: <span class="ident">String</span>,
+
+    <span class="doccomment">/// The URL against which a HTTP GET request will return a release package</span>
+    <span class="doccomment">/// that corresponds to this version</span>
+    <span class="kw">pub</span> <span class="ident">release_package_url</span>: <span class="ident">String</span>,
+
+    <span class="doccomment">/// The hex-formatted SHA-256 hash of the archive file served by</span>
+    <span class="doccomment">/// &#39;release_package_url&#39;</span>
+    <span class="kw">pub</span> <span class="ident">release_package_sha256_hex</span>: <span class="ident">String</span>,
+}
+
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">blessed_versions_to_string</span>(<span class="ident">blessed</span>: <span class="kw-2">&amp;</span><span class="ident">BlessedReplicaVersions</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">String</span> {
+    <span class="macro">format</span><span class="macro">!</span>(<span class="string">&quot;[{}]&quot;</span>, <span class="ident">blessed</span>.<span class="ident">blessed_version_ids</span>.<span class="ident">join</span>(<span class="string">&quot;, &quot;</span>))
+}
+</pre></div>
+</section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../../../";window.currentCrate = "registry_canister";</script><script src="../../../main.js"></script><script src="../../../source-script.js"></script><script src="../../../source-files.js"></script><script defer src="../../../search-index.js"></script></body></html>

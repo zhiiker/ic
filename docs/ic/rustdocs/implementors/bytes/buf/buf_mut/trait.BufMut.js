@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_nns_governance"] = [{"text":"impl <a class=\"trait\" href=\"https://docs.rs/bytes/1.0.1/bytes/buf/buf_mut/trait.BufMut.html\" title=\"trait bytes::buf::buf_mut::BufMut\">BufMut</a> for <a class=\"struct\" href=\"ic_nns_governance/stable_mem_utils/struct.BufferedStableMemWriter.html\" title=\"struct ic_nns_governance::stable_mem_utils::BufferedStableMemWriter\">BufferedStableMemWriter</a>","synthetic":false,"types":["ic_nns_governance::stable_mem_utils::BufferedStableMemWriter"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

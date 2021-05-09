@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["add_nns_canister",""],["canister_init",""],["canister_post_upgrade",""],["canister_pre_upgrade",""],["canister_status","Returns the status of the canister specified in the input."],["change_nns_canister","Executes a proposal to change an NNS canister."],["main",""],["stop_or_start_nns_canister",""],["submit_change_nns_canister_proposal",""]]});

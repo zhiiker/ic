@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["initial_ni_dkg_transcript_from_registry_record",""]],"struct":[["DkgTranscripts","Contains initial DKG transcripts used to bootstrap a subnet."]],"trait":[["CryptoRegistry",""]]});

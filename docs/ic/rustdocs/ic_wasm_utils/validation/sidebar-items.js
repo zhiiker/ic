@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["validate_wasm_binary","Validates a Wasm binary against the requirements of the interface spec defined in https://sdk.dfinity.org/docs/interface-spec/index.html."]],"struct":[["WasmValidationLimits","Controls how many globals and functions are allowed in a Wasm module on the Internet Computer."]]});

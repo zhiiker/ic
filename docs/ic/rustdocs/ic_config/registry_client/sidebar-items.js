@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["DataProviderConfig",""]],"struct":[["Config","Eventually, the replica will only read registry data from the local store and the node manager will both read from and write to the registry local store."]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Registry","The main struct for the Registry."]],"type":[["RegistryMap","The type for the registry map."],["Version",""]]});

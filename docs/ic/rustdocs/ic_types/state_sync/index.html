@@ -1,0 +1,63 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `state_sync` mod in crate `ic_types`."><meta name="keywords" content="rust, rustlang, rust-lang, state_sync"><title>ic_types::state_sync - Rust</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="shortcut icon" href="../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../down-arrow.svg");}</style></head><body class="rustdoc mod"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../ic_types/index.html'><div class='logo-container'><img src='../../rust-logo.png' alt='logo'></div></a><p class='location'>Module state_sync</p><div class="sidebar-elems"><div class="block items"><ul><li><a href="#modules">Modules</a></li><li><a href="#structs">Structs</a></li><li><a href="#constants">Constants</a></li><li><a href="#functions">Functions</a></li></ul></div><p class='location'><a href='../index.html'>ic_types</a></p><script>window.sidebarCurrent = {name: 'state_sync', ty: 'mod', relpath: '../'};</script><script defer src="../sidebar-items.js"></script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../../src/ic_types/state_sync.rs.html#1-228' title='goto source code'>[src]</a></span><span class='in-band'>Module <a href='../index.html'>ic_types</a>::<wbr><a class="mod" href=''>state_sync</a></span></h1><div class='docblock'><p>State sync types.</p>
+<h1 id="note-manifest-hash" class="section-header"><a href="#note-manifest-hash">Note [Manifest Hash]</a></h1>
+<p>This note describes how hashes included into the manifest are computed.</p>
+<p>All integers are hashed using their Big-Endian representation.  E.g., u64
+occupies 8 bytes and 1 is encoded as 0000_0000_0000_0001, and u32 occupies 4
+bytes and 1 is encoded as 0000_0001.</p>
+<p>All the variable-size values (paths, arrays) are prefixed with their length
+to get a unique encoding. If it wasn't the case, it would be possible to
+interpret 2 file table entries</p>
+<pre><code class="language-text">[ &quot;path1&quot; size1 hash1 ]
+[ &quot;path2&quot; size2 hash2 ]
+</code></pre>
+<p>as a single file table entry:</p>
+<pre><code class="language-text">[ &quot;path1 size1 hash1 path2&quot; size2 hash2 ]
+</code></pre>
+<p>and get the same manifest hash.</p>
+<p>Below are the rules for computing hashes of table entries and the root hash
+of a manifest:</p>
+<ul>
+<li>The hash in the chunk table is simply the hash of the raw chunk content.</li>
+</ul>
+<pre><code class="language-text">  chunk_hash := hash(dsep(&quot;ic-state-chunk&quot;) · file[offset:offset + size_bytes])
+</code></pre>
+<ul>
+<li>The hash in the file table is the hash of the slice of the chunk table
+corresponding to this file:</li>
+</ul>
+<pre><code class="language-text">  file_hash   := hash(dsep(&quot;ic-state-file&quot;) · len(slice) as u32 · chunk_entry*)
+  chunk_entry := file_index as u32
+                 · size_bytes as u32
+                 · offset as u64
+                 · chunk_hash
+</code></pre>
+<ul>
+<li>The hash of the whole manifest is computed by hashing the file table:</li>
+</ul>
+<pre><code class="language-text">  manifest_hash := hash(dsep(&quot;ic-state-manifest&quot;)
+                   · version as u32
+                   · len(file_table) as u32
+                   · file_entry*
+                   · len(chunk_table) as u32
+                   · chunk_entry*
+                   )
+  file_entry    := len(relative_path) as u32
+                   · relative_path
+                   · size_bytes as u64
+                   · file_hash
+</code></pre>
+<p>where</p>
+<pre><code class="language-text">dsep(seq) = byte(len(seq)) · seq
+``</code></pre>
+</div><h2 id='modules' class='section-header'><a href="#modules">Modules</a></h2>
+<table><tr class='module-item'><td><a class="mod" href="proto/index.html" title='ic_types::state_sync::proto mod'>proto</a></td><td class='docblock-short'><p>Conversions from Rust to proto structs and back for <code>StateSync</code>.</p>
+</td></tr></table><h2 id='structs' class='section-header'><a href="#structs">Structs</a></h2>
+<table><tr class='module-item'><td><a class="struct" href="struct.ChunkInfo.html" title='ic_types::state_sync::ChunkInfo struct'>ChunkInfo</a></td><td class='docblock-short'><p>An entry of the chunk table.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.FileInfo.html" title='ic_types::state_sync::FileInfo struct'>FileInfo</a></td><td class='docblock-short'><p>An entry of the file table.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.Manifest.html" title='ic_types::state_sync::Manifest struct'>Manifest</a></td><td class='docblock-short'><p>Manifest is a short description of the checkpoint contents.</p>
+</td></tr></table><h2 id='constants' class='section-header'><a href="#constants">Constants</a></h2>
+<table><tr class='module-item'><td><a class="constant" href="constant.MANIFEST_CHUNK.html" title='ic_types::state_sync::MANIFEST_CHUNK constant'>MANIFEST_CHUNK</a></td><td class='docblock-short'><p>Id of the manifest chunk in StateSync artifact.</p>
+</td></tr></table><h2 id='functions' class='section-header'><a href="#functions">Functions</a></h2>
+<table><tr class='module-item'><td><a class="fn" href="fn.decode_manifest.html" title='ic_types::state_sync::decode_manifest fn'>decode_manifest</a></td><td class='docblock-short'><p>Deserializes the manifest from a byte array.</p>
+</td></tr><tr class='module-item'><td><a class="fn" href="fn.encode_manifest.html" title='ic_types::state_sync::encode_manifest fn'>encode_manifest</a></td><td class='docblock-short'><p>Serializes the manifest into a byte array.</p>
+</td></tr></table></section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../../";window.currentCrate = "ic_types";</script><script src="../../main.js"></script><script defer src="../../search-index.js"></script></body></html>

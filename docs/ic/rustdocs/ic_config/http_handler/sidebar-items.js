@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["PortConfig","The port configuration. Defaults to using port 8080."]],"struct":[["Config","The internal configuration -- any historical warts from the external configuration are removed. Anything using this struct can trust that it has been validated."],["ExternalConfig","The external configuration that can be loaded from a configuration file."]]});

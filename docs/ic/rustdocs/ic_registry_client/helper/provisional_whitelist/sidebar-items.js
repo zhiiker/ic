@@ -1,0 +1,1 @@
+initSidebarItems({"trait":[["ProvisionalWhitelistRegistry","A trait that allows access to `ProvisionalWhitelist`."]]});

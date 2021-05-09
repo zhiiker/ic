@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Config","We assume pre-agreed values when interacting with the USB HSM. The purpose of this configuration is to override one or more of the default values if necessary."]]});

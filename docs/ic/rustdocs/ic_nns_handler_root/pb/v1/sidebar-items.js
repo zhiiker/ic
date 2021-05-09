@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["RootCanisterStableStorage","A container for the what gets written to stable storage, from the root canister."]]});

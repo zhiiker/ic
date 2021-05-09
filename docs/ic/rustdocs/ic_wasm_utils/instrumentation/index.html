@@ -1,0 +1,76 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `instrumentation` mod in crate `ic_wasm_utils`."><meta name="keywords" content="rust, rustlang, rust-lang, instrumentation"><title>ic_wasm_utils::instrumentation - Rust</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="shortcut icon" href="../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../down-arrow.svg");}</style></head><body class="rustdoc mod"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../ic_wasm_utils/index.html'><div class='logo-container'><img src='../../rust-logo.png' alt='logo'></div></a><p class='location'>Module instrumentation</p><div class="sidebar-elems"><div class="block items"><ul><li><a href="#structs">Structs</a></li><li><a href="#functions">Functions</a></li></ul></div><p class='location'><a href='../index.html'>ic_wasm_utils</a></p><script>window.sidebarCurrent = {name: 'instrumentation', ty: 'mod', relpath: '../'};</script><script defer src="../sidebar-items.js"></script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../../src/ic_wasm_utils/instrumentation.rs.html#1-771' title='goto source code'>[src]</a></span><span class='in-band'>Module <a href='../index.html'>ic_wasm_utils</a>::<wbr><a class="mod" href=''>instrumentation</a></span></h1><div class='docblock'><p>This module is responsible for instrumenting wasm binaries on the Internet
+Computer.</p>
+<p>It exports the function <a href="../../ic_wasm_utils/instrumentation/fn.instrument.html" title="`instrument`"><code>instrument</code></a> which takes a Wasm binary and
+injects some instrumentation that allows to:</p>
+<ul>
+<li>Quantify the amount of execution every function of that module conducts.
+This quantity is approximated by the sum of cost of instructions executed
+on the taken execution path.</li>
+<li>Verify that no successful <code>memory.grow</code> results in exceeding the
+available memory allocated to the canister.</li>
+</ul>
+<p>Moreover, it exports the function referred to by the <code>start</code> section under
+the name <code>canister_start</code> and removes the section. (This is needed so that
+we can run the initialization after we have set the instructions counter to
+some value).</p>
+<p>After the instrumentation, exported functions <code>canister counter_set</code> and
+<code>canister counter_get</code> can be used to set/get the counter value. Any other
+function of that module will only be able to execute as long as at every
+reentrant basic block of its execution path, the counter is verified to be
+above zero. Otherwise, the function will trap (via calling a special system
+API call). If the function returns before the counter overflows, the value
+of the counter is the initial value minus the sum of cost of all
+executed instructions.</p>
+<p>In more details, first, it inserts two System API functions:</p>
+<pre><code class="language-wasm">(import &quot;__&quot; &quot;out_of_instructions&quot; (func (;0;) (func)))
+(import &quot;__&quot; &quot;update_available_memory&quot; (func (;1;) ((param i32 i32) (result i32))))
+</code></pre>
+<p>It then inserts a global mutable counter:</p>
+<pre><code class="language-wasm">(global (mut i64) (i64.const 0))
+</code></pre>
+<p>and two exported functions setting and reading the instructions value:</p>
+<pre><code class="language-wasm">(func (;2;) (type 1) (param i64)
+  local.get 0
+  global.set 1)
+(func (;3;) (type 2) (result i64)
+  global.get 1)
+(export &quot;canister counter_set&quot; (func 2))
+(export &quot;canister counter_get&quot; (func 3))
+</code></pre>
+<p>The function <code>canister counter_set</code> should be called before the execution of
+the instrumented code. After the execution, the counter can be read using
+the exported function <code>canister counter_get</code>.</p>
+<p>Moreover, it injects a decrementation of the instructions counter (by the
+sum of cost of all instructions inside this block) at the beginning of every
+non-reentrant block:</p>
+<pre><code class="language-wasm">global.get 0
+i64.const 2
+i64.sub
+global.set 0
+</code></pre>
+<p>and a decrementation with a counter overflow check at the beginning of every
+reentrant block (a function or a loop body):</p>
+<pre><code class="language-wasm">global.get 0
+i64.const 8
+i64.sub
+global.set 0
+global.get 0
+i64.const 0
+i64.lt_s
+if  ;; label = @1
+  (call x)
+end
+</code></pre>
+<p>Note that we omit checking for the counter overflow at the non-reentrant
+blocks to optimize for performance. The maximal overflow in that case is
+bound by the length of the longest execution path consisting of
+non-reentrant basic blocks.</p>
+</div><h2 id='structs' class='section-header'><a href="#structs">Structs</a></h2>
+<table><tr class='module-item'><td><a class="struct" href="struct.InstructionCostTable.html" title='ic_wasm_utils::instrumentation::InstructionCostTable struct'>InstructionCostTable</a></td><td class='docblock-short'><p>The metering can be configured by providing a cost-per-instruction table and
+the default cost for an instruction in case it's not present in the cost
+table.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.InstrumentationOutput.html" title='ic_wasm_utils::instrumentation::InstrumentationOutput struct'>InstrumentationOutput</a></td><td class='docblock-short'></td></tr><tr class='module-item'><td><a class="struct" href="struct.Segments.html" title='ic_wasm_utils::instrumentation::Segments struct'>Segments</a></td><td class='docblock-short'><p>Vector of heap data chunks with their offsets.</p>
+</td></tr></table><h2 id='functions' class='section-header'><a href="#functions">Functions</a></h2>
+<table><tr class='module-item'><td><a class="fn" href="fn.instrument.html" title='ic_wasm_utils::instrumentation::instrument fn'>instrument</a></td><td class='docblock-short'><p>Takes a Wasm binary and inserts the instructions metering and memory grow
+instrumentation.</p>
+</td></tr></table></section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../../";window.currentCrate = "ic_wasm_utils";</script><script src="../../main.js"></script><script defer src="../../search-index.js"></script></body></html>

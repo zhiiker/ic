@@ -1,0 +1,1 @@
+initSidebarItems({"mod":[["groth20_bls12_381","Non-interactive Distributed Key Generation using Groth20 with BLS12-381."],["types","Types used by all implementations of NiDKG methods."]]});

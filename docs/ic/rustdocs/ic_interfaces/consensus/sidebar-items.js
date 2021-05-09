@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["PayloadPermanentError",""],["PayloadTransientError",""]],"trait":[["Consensus","Consensus artifact processing interface."],["ConsensusGossip","Consensus to gossip interface."]],"type":[["PayloadValidationError","Payload validation error"]]});

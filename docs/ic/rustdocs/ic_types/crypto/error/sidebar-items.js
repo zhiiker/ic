@@ -1,0 +1,1 @@
+initSidebarItems({"mod":[["conversions","Convert error types"]],"struct":[["InvalidArgumentError","Occurs if an argument is invalid."],["KeyNotFoundError","The secret key was not found in the secret key store."],["MalformedDataError","Malformed X for other types of X."],["MalformedPublicKeyError","Occurs if a public key is malformed."]]});

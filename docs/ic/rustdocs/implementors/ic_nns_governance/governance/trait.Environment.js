@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["governance_canister"] = [{"text":"impl <a class=\"trait\" href=\"ic_nns_governance/governance/trait.Environment.html\" title=\"trait ic_nns_governance::governance::Environment\">Environment</a> for <a class=\"struct\" href=\"governance_canister/struct.CanisterEnv.html\" title=\"struct governance_canister::CanisterEnv\">CanisterEnv</a>","synthetic":false,"types":["governance_canister::CanisterEnv"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

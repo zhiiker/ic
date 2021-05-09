@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["SetFirewallConfigPayload","The payload of a proposal to set the firewall configuration"]]});

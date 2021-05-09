@@ -1,0 +1,4 @@
+(function() {var implementors = {};
+implementors["ic_error_types"] = [{"text":"impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html\" title=\"trait alloc::string::ToString\">ToString</a> for <a class=\"enum\" href=\"ic_error_types/enum.RejectCode.html\" title=\"enum ic_error_types::RejectCode\">RejectCode</a>","synthetic":false,"types":["ic_error_types::RejectCode"]}];
+implementors["ic_ic00_types"] = [{"text":"impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html\" title=\"trait alloc::string::ToString\">ToString</a> for <a class=\"enum\" href=\"ic_ic00_types/enum.Method.html\" title=\"enum ic_ic00_types::Method\">Method</a>","synthetic":false,"types":["ic_ic00_types::Method"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["BlessedReplicaVersions","A list of blessed versions of the IC Replica"],["ReplicaVersionRecord","Information about a Replica version"]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Archive",""],["ArchiveOptions",""],["FailedToArchiveBlocks","This error type should only be returned in the case where an await has been passed but we do not think that the archive canister has recieved the blocks"]]});

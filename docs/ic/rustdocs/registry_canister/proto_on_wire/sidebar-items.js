@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["protobuf","This function simplifies implementation of and communication with canisters that talk protobuf."]],"struct":[["Protobuf","Auxiliary type required for `protobuf` function below to work."]]});

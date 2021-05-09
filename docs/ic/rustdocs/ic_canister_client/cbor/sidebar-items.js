@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["parse_read_state_response","Given a CBOR response from a `read_state` and a `request_id` extracts the `RequestStatus` if available."]],"struct":[["CanisterCallResponse",""],["RequestStatus",""]]});

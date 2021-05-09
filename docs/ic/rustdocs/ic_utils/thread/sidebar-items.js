@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["JoinOnDrop","An object that joins a thread when it's dropped. Mostly helpful to implement graceful shutdowns."]]});

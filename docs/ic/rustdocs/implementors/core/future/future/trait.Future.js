@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["dfn_core"] = [{"text":"impl&lt;O, T:&nbsp;<a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/future/future/trait.Future.html\" title=\"trait core::future::future::Future\">Future</a>&lt;Output = O&gt;&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/future/future/trait.Future.html\" title=\"trait core::future::future::Future\">Future</a> for <a class=\"struct\" href=\"dfn_core/api/futures/struct.RefCounted.html\" title=\"struct dfn_core::api::futures::RefCounted\">RefCounted</a>&lt;T&gt;","synthetic":false,"types":["dfn_core::api::futures::RefCounted"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

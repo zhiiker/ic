@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ic_registry_client"] = [{"text":"impl <a class=\"trait\" href=\"ic_registry_client/client/trait.RegistryDataProvider.html\" title=\"trait ic_registry_client::client::RegistryDataProvider\">RegistryDataProvider</a> for <a class=\"struct\" href=\"ic_registry_client/client/struct.EmptyRegistryDataProvider.html\" title=\"struct ic_registry_client::client::EmptyRegistryDataProvider\">EmptyRegistryDataProvider</a>","synthetic":false,"types":["ic_registry_client::client::EmptyRegistryDataProvider"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

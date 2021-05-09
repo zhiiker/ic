@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["get","Gets the contents of the stable memory"],["length",""],["read","Reads `len` bytes from `offset` in stable memory"],["set","Sets the contents of the stable memory"],["write","Writes `content` to the given offset in the stable memory"]]});

@@ -1,0 +1,53 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `proxy` mod in crate `ic_protobuf`."><meta name="keywords" content="rust, rustlang, rust-lang, proxy"><title>ic_protobuf::proxy - Rust</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="shortcut icon" href="../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../down-arrow.svg");}</style></head><body class="rustdoc mod"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../ic_protobuf/index.html'><div class='logo-container'><img src='../../rust-logo.png' alt='logo'></div></a><p class='location'>Module proxy</p><div class="sidebar-elems"><div class="block items"><ul><li><a href="#enums">Enums</a></li><li><a href="#traits">Traits</a></li><li><a href="#functions">Functions</a></li></ul></div><p class='location'><a href='../index.html'>ic_protobuf</a></p><script>window.sidebarCurrent = {name: 'proxy', ty: 'mod', relpath: '../'};</script><script defer src="../sidebar-items.js"></script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../../src/ic_protobuf/proxy.rs.html#1-209' title='goto source code'>[src]</a></span><span class='in-band'>Module <a href='../index.html'>ic_protobuf</a>::<wbr><a class="mod" href=''>proxy</a></span></h1><div class='docblock'><p>A proxy for encoding arbitrary Rust structs in protocol buffer binary format
+by means of a &quot;proxy message&quot; (a generated <code>prost::Message</code>) plus <code>Into</code> /
+<code>TryInto</code> implementations to convert between the Rust struct and the proxy
+message.</p>
+<p>The only major downside when compared to <code>serde</code> (which doesn't support
+protocol buffers) or using a <code>prost</code>-generated struct directly is that (due
+to <code>prost</code>-generated structs insisting on owning their data, e.g. using
+<code>Vec&lt;u8&gt;</code> instead of <code>&amp;[u8]</code>) is that encoding consumes the provided struct.</p>
+<h1 id="example" class="section-header"><a href="#example">Example</a></h1>
+<div class='information'><div class='tooltip ignore'>ⓘ<span class='tooltiptext'>This example is not tested</span></div></div><div class="example-wrap"><pre class="rust rust-example-rendered ignore">
+<span class="kw">use</span> <span class="ident">pb</span>;  <span class="comment">// Module containing generated `prost::Message`.</span>
+
+<span class="comment">// Rust struct to be encoded/decoded.</span>
+<span class="kw">struct</span> <span class="ident">Block</span> {
+    <span class="kw">pub</span> <span class="ident">height</span>: <span class="ident">Height</span>,
+    <span class="kw">pub</span> <span class="ident">contents</span>: <span class="ident">Blob</span>,
+}
+
+<span class="comment">// To be provided by the client.</span>
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">Block</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">pb</span>::<span class="ident">Block</span> {
+    ...
+}
+<span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">pb</span>::<span class="ident">Block</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Block</span> {
+    ...
+}
+
+<span class="kw">let</span> <span class="ident">b</span> <span class="op">=</span> <span class="ident">Block</span> {
+    <span class="ident">height</span>: <span class="ident">Height</span>(<span class="number">1</span>),
+    <span class="ident">payload</span>: <span class="ident">Blob</span>(<span class="macro">vec</span><span class="macro">!</span>[<span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>]),
+};
+
+<span class="comment">// Encode.</span>
+<span class="kw">let</span> <span class="ident">bytes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">pb</span>::<span class="ident">Block</span>::<span class="ident">proxy_encode</span>(<span class="ident">b</span>).<span class="ident">unwrap</span>();
+
+<span class="comment">// Decode.</span>
+<span class="macro">assert_eq</span><span class="macro">!</span>(
+    <span class="ident">Block</span> {
+        <span class="ident">height</span>: <span class="ident">Height</span>(<span class="number">1</span>),
+        <span class="ident">payload</span>: <span class="ident">Blob</span>(<span class="macro">vec</span><span class="macro">!</span>[<span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>]),
+    },
+    <span class="ident">pb</span>::<span class="ident">Block</span>::<span class="ident">proxy_decode</span>(<span class="kw-2">&amp;</span><span class="ident">bytes</span>).<span class="ident">unwrap</span>()
+);</pre></div>
+</div><h2 id='enums' class='section-header'><a href="#enums">Enums</a></h2>
+<table><tr class='module-item'><td><a class="enum" href="enum.ProxyDecodeError.html" title='ic_protobuf::proxy::ProxyDecodeError enum'>ProxyDecodeError</a></td><td class='docblock-short'><p>Errors that may result when mapping a proto to a Rust struct.</p>
+</td></tr></table><h2 id='traits' class='section-header'><a href="#traits">Traits</a></h2>
+<table><tr class='module-item'><td><a class="trait" href="trait.ProtoProxy.html" title='ic_protobuf::proxy::ProtoProxy trait'>ProtoProxy</a></td><td class='docblock-short'><p>Allows a <code>prost::Message</code> to act as a proxy for encoding and decoding a Rust
+type <code>T</code>, as long as <code>Into</code> / <code>TryInto</code> implementations are provided to
+convert from one to the other and back.</p>
+</td></tr></table><h2 id='functions' class='section-header'><a href="#functions">Functions</a></h2>
+<table><tr class='module-item'><td><a class="fn" href="fn.try_from_option_field.html" title='ic_protobuf::proxy::try_from_option_field fn'>try_from_option_field</a></td><td class='docblock-short'><p>Converts an optional proto field into a Rust type using <code>From</code> / <code>TryFrom</code>.
+Returns <code>Err(ProtoMappingError::MissingField(field))</code> if the field is
+<code>None</code>.</p>
+</td></tr></table></section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../../";window.currentCrate = "ic_protobuf";</script><script src="../../main.js"></script><script defer src="../../search-index.js"></script></body></html>

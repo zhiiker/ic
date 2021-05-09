@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["handle_disk_format_changes",""],["load_checkpoint","loads the node state heighted with `height` using the specified directory layout."],["make_checkpoint","Creates a checkpoint of the node state using specified directory layout. Returns a new state that is equivalent the to given one and a result of the operation."],["reopen_state_as_tip",""]]});
