@@ -1,6 +1,0 @@
-[package]
-name = "on_wire"
-version = "0.8.0"
-edition = "2018"
-
-[dependencies]

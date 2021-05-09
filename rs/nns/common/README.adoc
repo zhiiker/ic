@@ -1,3 +1,0 @@
-= Common types and interfaces for the NNS
-
-This cargo module contains common types that are used throughout the NNS canisters.

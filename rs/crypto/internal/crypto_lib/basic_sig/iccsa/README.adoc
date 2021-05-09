@@ -1,1 +1,0 @@
-= ICCSA (Internet Computer Canister Signature Algorithm) aka Canister Signatures =

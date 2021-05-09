@@ -1,7 +1,0 @@
-[package]
-name = "ic-metrics"
-version = "0.8.0"
-edition = "2018"
-
-[dependencies]
-prometheus = { version = "0.9.0", features = [ "process" ] }
