@@ -4,11 +4,11 @@ use candid::{CandidType, Deserialize};
 use dfn_core::println;
 use serde::Serialize;
 
-use crate::mutations::common::{decode_registry_value, encode_or_panic};
-use ic_crypto_sha::Sha256;
+use ic_crypto_sha2::Sha256;
 use ic_protobuf::registry::firewall::v1::{FirewallRule, FirewallRuleSet};
 use ic_registry_keys::{make_firewall_rules_record_key, FirewallRulesScope};
 use ic_registry_transport::pb::v1::{registry_mutation, RegistryMutation, RegistryValue};
+use prost::Message;
 use std::fmt::Write;
 
 impl Registry {
@@ -39,7 +39,7 @@ impl Registry {
         let mutations = vec![RegistryMutation {
             mutation_type: registry_mutation::Type::Upsert as i32,
             key: make_firewall_rules_record_key(scope).into_bytes(),
-            value: encode_or_panic(&ruleset),
+            value: ruleset.encode_to_vec(),
         }];
 
         // Check invariants before applying mutations
@@ -51,7 +51,7 @@ impl Registry {
         let key = make_firewall_rules_record_key(scope).into_bytes();
 
         let default_registry_value = RegistryValue {
-            value: encode_or_panic(&FirewallRuleSet { entries: vec![] }),
+            value: FirewallRuleSet { entries: vec![] }.encode_to_vec(),
             version: 0,
             deletion_marker: false,
         };
@@ -64,7 +64,7 @@ impl Registry {
             .get(&key, self.latest_version())
             .unwrap_or(&default_registry_value);
 
-        let current_ruleset = decode_registry_value::<FirewallRuleSet>(current_ruleset_vec.clone());
+        let current_ruleset = FirewallRuleSet::decode(current_ruleset_vec.as_slice()).unwrap();
         current_ruleset.entries
     }
 
@@ -72,7 +72,7 @@ impl Registry {
     /// The given rules are added at the given positions. If multiple rules are added at the
     /// same position, the order is maintained.
     ///
-    /// This method is called by the proposals canister.
+    /// This method is called by the governance canister.
     pub fn do_add_firewall_rules(&mut self, payload: AddFirewallRulesPayload) {
         println!("{}do_add_firewall_rules: scope: {:?}, rules: {:?}, positions: {:?}, expected_hash: {:?}", LOG_PREFIX, payload.scope, payload.rules, payload.positions, payload.expected_hash);
 
@@ -85,7 +85,7 @@ impl Registry {
     /// Remove firewall rules for a given scope.
     /// Removes the rules at the given positions.
     ///
-    /// This method is called by the proposals canister.
+    /// This method is called by the governance canister.
     pub fn do_remove_firewall_rules(&mut self, payload: RemoveFirewallRulesPayload) {
         println!(
             "{}do_remove_firewall_rules: scope: {:?}, positions: {:?}, expected_hash: {:?}",
@@ -101,7 +101,7 @@ impl Registry {
     /// Update firewall rules for a given scope.
     /// Replaces the existing rules at the given positions with the given rules.
     ///
-    /// This method is called by the proposals canister.
+    /// This method is called by the governance canister.
     pub fn do_update_firewall_rules(&mut self, payload: UpdateFirewallRulesPayload) {
         println!("{}do_update_firewall_rules: scope: {:?}, rules: {:?}, positions: {:?}, expected_hash: {:?}", LOG_PREFIX, payload.scope, payload.rules, payload.positions, payload.expected_hash);
 
@@ -117,7 +117,7 @@ impl Registry {
 pub fn compute_firewall_ruleset_hash(rules: &[FirewallRule]) -> String {
     let mut hasher = Sha256::new();
     for rule in rules {
-        hasher.write(&encode_or_panic(rule));
+        hasher.write(&rule.encode_to_vec());
     }
     let bytes = &hasher.finish();
     let mut result_hash = String::new();
@@ -214,7 +214,7 @@ pub fn update_firewall_rules_compute_entries(
 /// The payload of a proposal to add firewall rules
 ///
 /// See /rs/protobuf/def/registry/firewall/v1/firewall.proto
-#[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub struct AddFirewallRulesPayload {
     /// Scope of application (with node/subnet prefix as applicable)
     pub scope: FirewallRulesScope,
@@ -229,7 +229,7 @@ pub struct AddFirewallRulesPayload {
 /// The payload of a proposal to remove firewall rules
 ///
 /// See /rs/protobuf/def/registry/firewall/v1/firewall.proto
-#[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub struct RemoveFirewallRulesPayload {
     /// Scope of application (with node/subnet prefix as applicable)
     pub scope: FirewallRulesScope,
@@ -242,7 +242,7 @@ pub struct RemoveFirewallRulesPayload {
 /// The payload of a proposal to update firewall rules
 ///
 /// See /rs/protobuf/def/registry/firewall/v1/firewall.proto
-#[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub struct UpdateFirewallRulesPayload {
     /// Scope of application (with node/subnet prefix as applicable)
     pub scope: FirewallRulesScope,
@@ -257,21 +257,21 @@ pub struct UpdateFirewallRulesPayload {
 #[cfg(test)]
 mod tests {
     use crate::common::test_helpers::invariant_compliant_registry;
-    use crate::mutations::firewall::{compute_firewall_ruleset_hash, decode_registry_value};
+    use crate::mutations::firewall::compute_firewall_ruleset_hash;
     use crate::mutations::firewall::{
         AddFirewallRulesPayload, RemoveFirewallRulesPayload, UpdateFirewallRulesPayload,
     };
-    use ic_base_types::{NodeId, SubnetId};
-    use ic_nns_test_utils::registry::TEST_ID;
+    use crate::registry::Registry;
+    use ic_base_types::{NodeId, PrincipalId, SubnetId};
     use ic_protobuf::registry::firewall::v1::{
         FirewallAction, FirewallRule, FirewallRuleDirection, FirewallRuleSet,
     };
     use ic_registry_keys::{make_firewall_rules_record_key, FirewallRulesScope};
-    use ic_types::PrincipalId;
+    use prost::Message;
 
-    fn firewall_mutations_test(mutation_id: u8, scope: FirewallRulesScope) {
-        let mut registry = invariant_compliant_registry(mutation_id);
+    const MUTATION_ID: u8 = 0;
 
+    fn firewall_mutations_test(scope: FirewallRulesScope, registry: &mut Registry) {
         // Add initial rules
         let mut expected_result = FirewallRuleSet {
             entries: Vec::<FirewallRule>::new(),
@@ -309,7 +309,7 @@ mod tests {
 
         registry.do_add_firewall_rules(payload);
 
-        let result_ruleset: FirewallRuleSet = decode_registry_value(
+        let result_ruleset = FirewallRuleSet::decode(
             registry
                 .get(
                     &make_firewall_rules_record_key(&scope).into_bytes(),
@@ -317,8 +317,9 @@ mod tests {
                 )
                 .unwrap()
                 .value
-                .clone(),
-        );
+                .as_slice(),
+        )
+        .unwrap();
 
         assert_eq!(expected_result, result_ruleset);
 
@@ -360,7 +361,7 @@ mod tests {
 
         registry.do_add_firewall_rules(payload);
 
-        let result_ruleset: FirewallRuleSet = decode_registry_value(
+        let result_ruleset = FirewallRuleSet::decode(
             registry
                 .get(
                     &make_firewall_rules_record_key(&scope).into_bytes(),
@@ -368,8 +369,9 @@ mod tests {
                 )
                 .unwrap()
                 .value
-                .clone(),
-        );
+                .as_slice(),
+        )
+        .unwrap();
 
         assert_eq!(expected_result, result_ruleset);
 
@@ -412,7 +414,7 @@ mod tests {
 
         registry.do_update_firewall_rules(payload);
 
-        let result_ruleset: FirewallRuleSet = decode_registry_value(
+        let result_ruleset = FirewallRuleSet::decode(
             registry
                 .get(
                     &make_firewall_rules_record_key(&scope).into_bytes(),
@@ -420,8 +422,9 @@ mod tests {
                 )
                 .unwrap()
                 .value
-                .clone(),
-        );
+                .as_slice(),
+        )
+        .unwrap();
 
         assert_eq!(expected_result, result_ruleset);
 
@@ -440,7 +443,7 @@ mod tests {
 
         registry.do_remove_firewall_rules(payload);
 
-        let result_ruleset: FirewallRuleSet = decode_registry_value(
+        let result_ruleset = FirewallRuleSet::decode(
             registry
                 .get(
                     &make_firewall_rules_record_key(&scope).into_bytes(),
@@ -448,8 +451,9 @@ mod tests {
                 )
                 .unwrap()
                 .value
-                .clone(),
-        );
+                .as_slice(),
+        )
+        .unwrap();
 
         assert_eq!(expected_result, result_ruleset);
 
@@ -552,7 +556,7 @@ mod tests {
 
         registry.do_add_firewall_rules(payload);
 
-        let result_ruleset: FirewallRuleSet = decode_registry_value(
+        let result_ruleset = FirewallRuleSet::decode(
             registry
                 .get(
                     &make_firewall_rules_record_key(&scope).into_bytes(),
@@ -560,18 +564,38 @@ mod tests {
                 )
                 .unwrap()
                 .value
-                .clone(),
-        );
+                .as_slice(),
+        )
+        .unwrap();
 
         assert_eq!(expected_result, result_ruleset);
     }
 
     #[test]
     fn firewall_mutations_all_scope_types() {
-        let id = PrincipalId::new_node_test_id(TEST_ID);
-        firewall_mutations_test(0, FirewallRulesScope::Global);
-        firewall_mutations_test(0, FirewallRulesScope::ReplicaNodes);
-        firewall_mutations_test(0, FirewallRulesScope::Subnet(SubnetId::from(id)));
-        firewall_mutations_test(0, FirewallRulesScope::Node(NodeId::from(id)));
+        let mut registry = invariant_compliant_registry(MUTATION_ID);
+        firewall_mutations_test(FirewallRulesScope::Global, &mut registry);
+        let mut registry = invariant_compliant_registry(MUTATION_ID);
+        firewall_mutations_test(FirewallRulesScope::ReplicaNodes, &mut registry);
+        let mut registry = invariant_compliant_registry(MUTATION_ID);
+        firewall_mutations_test(FirewallRulesScope::ApiBoundaryNodes, &mut registry);
+
+        let mut registry = invariant_compliant_registry(MUTATION_ID);
+        let subnet_id: SubnetId =
+            PrincipalId::try_from(registry.get_subnet_list_record().subnets[0].clone())
+                .unwrap()
+                .into();
+        firewall_mutations_test(FirewallRulesScope::Subnet(subnet_id), &mut registry);
+
+        let mut registry = invariant_compliant_registry(MUTATION_ID);
+        let subnet_id: SubnetId =
+            PrincipalId::try_from(registry.get_subnet_list_record().subnets[0].clone())
+                .unwrap()
+                .into();
+        let node_id: NodeId =
+            PrincipalId::try_from(registry.get_subnet_or_panic(subnet_id).membership[0].clone())
+                .unwrap()
+                .into();
+        firewall_mutations_test(FirewallRulesScope::Node(node_id), &mut registry);
     }
 }

@@ -3,8 +3,6 @@
 use crate::types::PublicKey;
 
 mod advanced_ops;
-#[cfg(test)]
-mod arbitrary;
 mod constructors;
 pub mod conversions;
 mod ops;
@@ -14,7 +12,7 @@ pub mod tests;
 /// Given a polynomial with secret coefficients <a0, ..., ak> the public
 /// coefficients are the public keys <A0, ..., Ak> corresponding to those secret
 /// keys.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct PublicCoefficients {
     pub coefficients: Vec<PublicKey>,
 }

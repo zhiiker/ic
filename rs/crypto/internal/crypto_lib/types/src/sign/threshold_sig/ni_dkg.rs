@@ -1,14 +1,14 @@
 //! Data types for non-interactive distributed key generation (NI-DKG).
 pub use crate::encrypt::forward_secure::{CspFsEncryptionPop, CspFsEncryptionPublicKey};
 use crate::sign::threshold_sig::public_coefficients::CspPublicCoefficients;
+use ic_protobuf::registry::subnet::v1::InitialNiDkgTranscriptRecord;
 use phantom_newtype::AmountOf;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::hash::Hash;
 use strum_macros::IntoStaticStr;
 
 /// Input for threshold signature key material
-#[derive(Clone, Debug, Eq, IntoStaticStr, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Deserialize, IntoStaticStr, Serialize)]
 #[allow(non_camel_case_types)]
 pub enum CspNiDkgDealing {
     Groth20_Bls12_381(ni_dkg_groth20_bls12_381::Dealing),
@@ -65,24 +65,12 @@ impl CspNiDkgDealing {
 }
 
 /// All the public data needed for threshold key derivation.
-#[derive(Clone, Debug, Eq, IntoStaticStr, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Deserialize, IntoStaticStr, Serialize)]
 #[allow(non_camel_case_types)]
 pub enum CspNiDkgTranscript {
     Groth20_Bls12_381(ni_dkg_groth20_bls12_381::Transcript),
 }
 impl CspNiDkgTranscript {
-    /// Generates an instance of a transcript, for use in stub implementations.
-    /// TODO (CRP-824): Delete when stub implementations are complete.
-    pub fn placeholder_to_delete() -> Self {
-        use crate::sign::threshold_sig::public_key::bls12_381::PublicKeyBytes;
-        CspNiDkgTranscript::Groth20_Bls12_381(ni_dkg_groth20_bls12_381::Transcript {
-            public_coefficients: ni_dkg_groth20_bls12_381::PublicCoefficientsBytes {
-                coefficients: vec![PublicKeyBytes([0; PublicKeyBytes::SIZE])],
-            },
-            receiver_data: BTreeMap::new(),
-        })
-    }
-
     /// From a general transcript to general public coefficients.
     pub fn public_coefficients(&self) -> CspPublicCoefficients {
         match &self {
@@ -93,10 +81,20 @@ impl CspNiDkgTranscript {
     }
 }
 
+impl TryFrom<&InitialNiDkgTranscriptRecord> for CspNiDkgTranscript {
+    type Error = String;
+
+    fn try_from(
+        initial_ni_dkg_transcript_record: &InitialNiDkgTranscriptRecord,
+    ) -> Result<Self, Self::Error> {
+        serde_cbor::from_slice(&initial_ni_dkg_transcript_record.internal_csp_transcript)
+            .map_err(|e| format!("Error deserializing CspNiDkgTranscript: {}", e))
+    }
+}
+
 /// A tag for defining the `Epoch` as `AmountOf`.
 pub struct EpochTag;
 /// A unit of DKG time.
-#[allow(unused)]
 pub type Epoch = AmountOf<EpochTag, u32>;
 
 pub mod ni_dkg_groth20_bls12_381 {
@@ -121,7 +119,7 @@ pub mod ni_dkg_groth20_bls12_381 {
     pub use crate::NodeIndex;
 
     /// Threshold signature key material with proofs of correctness.
-    #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+    #[derive(Clone, Eq, PartialEq, Hash, Debug, Deserialize, Serialize)]
     pub struct Dealing {
         pub public_coefficients: PublicCoefficientsBytes,
         pub ciphertexts: EncryptedShares,
@@ -159,7 +157,7 @@ pub mod ni_dkg_groth20_bls12_381 {
     /// that supports const generics, which should happen fairly soon.  There is
     /// little point in optimising this code given that it will be deleted
     /// shortly.
-    #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+    #[derive(Clone, Eq, PartialEq, Hash, Debug, Deserialize, Serialize)]
     #[serde(rename(serialize = "ZKProofDec"))]
     struct ZKProofDecHelper {
         pub first_move_y0: G1Bytes,
@@ -191,11 +189,11 @@ pub mod ni_dkg_groth20_bls12_381 {
         type Error = ();
 
         fn try_from(item: ZKProofDecHelper) -> Result<Self, Self::Error> {
-            let first_move_b: ArrayVec<[G1Bytes; NUM_ZK_REPETITIONS]> =
+            let first_move_b: ArrayVec<G1Bytes, NUM_ZK_REPETITIONS> =
                 item.first_move_b.into_iter().collect();
-            let first_move_c: ArrayVec<[G1Bytes; NUM_ZK_REPETITIONS]> =
+            let first_move_c: ArrayVec<G1Bytes, NUM_ZK_REPETITIONS> =
                 item.first_move_c.into_iter().collect();
-            let response_z_s: ArrayVec<[FrBytes; NUM_ZK_REPETITIONS]> =
+            let response_z_s: ArrayVec<FrBytes, NUM_ZK_REPETITIONS> =
                 item.response_z_s.into_iter().collect();
             Ok(ZKProofDec {
                 first_move_y0: item.first_move_y0,
@@ -256,7 +254,7 @@ pub mod ni_dkg_groth20_bls12_381 {
 
     /// A zero knowledge proof that the shares are indeed valid points on the
     /// curve.
-    #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+    #[derive(Clone, Eq, PartialEq, Hash, Debug, Deserialize, Serialize)]
     pub struct ZKProofShare {
         pub first_move_f: G1Bytes,
         pub first_move_a: G2Bytes,
@@ -266,7 +264,7 @@ pub mod ni_dkg_groth20_bls12_381 {
     }
 
     /// All the public data needed for threshold key derivation.
-    #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+    #[derive(Clone, Eq, PartialEq, Hash, Debug, Deserialize, Serialize)]
     pub struct Transcript {
         pub public_coefficients: PublicCoefficientsBytes,
         /// NodeIndex is for the dealer who computed the encrypted shares

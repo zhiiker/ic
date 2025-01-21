@@ -1,11 +1,25 @@
 use candid::{Decode, Encode, Nat, Principal};
-use ic_agent::hash_tree::LookupResult;
-use ic_agent::{Agent, Certificate};
-use icrc_ledger_types::icrc::generic_metadata_value::MetadataValue as Value;
+use ic_agent::{
+    hash_tree::{Label, LookupResult},
+    Agent,
+};
+use ic_cbor::CertificateToCbor;
+use ic_certification::{
+    hash_tree::{HashTreeNode, SubtreeLookupResult},
+    Certificate, HashTree,
+};
 use icrc_ledger_types::icrc::generic_value::Hash;
 use icrc_ledger_types::icrc1::account::Account;
-use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
-use icrc_ledger_types::icrc3::blocks::{DataCertificate, GetBlocksRequest, GetBlocksResponse};
+use icrc_ledger_types::icrc1::transfer::{BlockIndex, TransferArg, TransferError};
+use icrc_ledger_types::icrc2::allowance::{Allowance, AllowanceArgs};
+use icrc_ledger_types::icrc2::approve::{ApproveArgs, ApproveError};
+use icrc_ledger_types::icrc2::transfer_from::{TransferFromArgs, TransferFromError};
+use icrc_ledger_types::icrc3::archive::{ArchivedRange, QueryBlockArchiveFn};
+use icrc_ledger_types::icrc3::blocks::ICRC3DataCertificate;
+use icrc_ledger_types::icrc3::blocks::{GetBlocksRequest, GetBlocksResponse};
+use icrc_ledger_types::{
+    icrc::generic_metadata_value::MetadataValue as Value, icrc3::blocks::BlockRange,
+};
 
 #[derive(Debug)]
 pub enum Icrc1AgentError {
@@ -25,6 +39,14 @@ impl From<candid::Error> for Icrc1AgentError {
         Self::CandidError(e)
     }
 }
+
+impl std::fmt::Display for Icrc1AgentError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for Icrc1AgentError {}
 
 pub enum CallMode {
     Query,
@@ -170,6 +192,44 @@ impl Icrc1Agent {
         )
     }
 
+    pub async fn approve(
+        &self,
+        args: ApproveArgs,
+    ) -> Result<Result<Nat, ApproveError>, Icrc1AgentError> {
+        Ok(
+            Decode!(&self.update("icrc2_approve", &Encode!(&args)?).await?, Result<Nat, ApproveError>)?,
+        )
+    }
+
+    /// Returns the allowance of the `spender` from the `account`.
+    pub async fn allowance(
+        &self,
+        account: Account,
+        spender: Account,
+        mode: CallMode,
+    ) -> Result<Allowance, Icrc1AgentError> {
+        let args = AllowanceArgs { account, spender };
+        Ok(match mode {
+            CallMode::Query => Decode!(
+                &self.query("icrc2_allowance", &Encode!(&args)?).await?,
+                Allowance
+            )?,
+            CallMode::Update => Decode!(
+                &self.update("icrc2_allowance", &Encode!(&args)?).await?,
+                Allowance
+            )?,
+        })
+    }
+
+    pub async fn transfer_from(
+        &self,
+        args: TransferFromArgs,
+    ) -> Result<Result<Nat, TransferFromError>, Icrc1AgentError> {
+        Ok(
+            Decode!(&self.update("icrc2_transfer_from", &Encode!(&args)?).await?, Result<Nat, TransferFromError>)?,
+        )
+    }
+
     pub async fn get_blocks(
         &self,
         args: GetBlocksRequest,
@@ -180,11 +240,37 @@ impl Icrc1Agent {
         )?)
     }
 
-    pub async fn get_data_certificate(&self) -> Result<DataCertificate, Icrc1AgentError> {
+    pub async fn get_blocks_from_archive(
+        &self,
+        archived_blocks: ArchivedRange<QueryBlockArchiveFn>,
+    ) -> Result<BlockRange, Icrc1AgentError> {
+        let args = GetBlocksRequest {
+            start: archived_blocks.start,
+            length: archived_blocks.length,
+        };
         Ok(Decode!(
-            &self.query("get_data_certificate", &Encode!()?).await?,
-            DataCertificate
+            &self
+                .agent
+                .query(
+                    &archived_blocks.callback.canister_id,
+                    &archived_blocks.callback.method
+                )
+                .with_arg(Encode!(&args)?)
+                .call()
+                .await
+                .map_err(Icrc1AgentError::AgentError)?,
+            BlockRange
         )?)
+    }
+
+    pub async fn icrc3_get_tip_certificate(&self) -> Result<ICRC3DataCertificate, Icrc1AgentError> {
+        Decode!(
+            &self.query("icrc3_get_tip_certificate", &Encode!()?).await?,
+            Option<ICRC3DataCertificate>
+        )?
+        .ok_or(Icrc1AgentError::VerificationFailed(
+            "ICRC3DataCertificate not found".to_string(),
+        ))
     }
 
     /// The function performs the following checks:
@@ -192,14 +278,14 @@ impl Icrc1Agent {
     /// 2. Check whether the certified data at path ["canister", ledger_canister_id, "certified_data"] is equal to root_hash.
     pub async fn verify_root_hash(
         &self,
-        certificate: &Certificate<'_>,
+        certificate: &Certificate,
         root_hash: &Hash,
     ) -> Result<(), Icrc1AgentError> {
         self.agent
             .verify(certificate, self.ledger_canister_id)
             .map_err(Icrc1AgentError::AgentError)?;
 
-        let certified_data_path = [
+        let certified_data_path: [Label<Vec<u8>>; 3] = [
             "canister".into(),
             self.ledger_canister_id.as_slice().into(),
             "certified_data".into(),
@@ -221,5 +307,108 @@ impl Icrc1Agent {
             ));
         }
         Ok(())
+    }
+
+    /// Returns the hash of the last block in the chain and this block's index.
+    /// Returns an error if the hash and/or the index do not pass validation against the IC certificate.
+    /// Returns None if the blockchain has no blocks and this can be verified by the certificate.
+    pub async fn get_certified_chain_tip(
+        &self,
+    ) -> Result<Option<(Hash, BlockIndex)>, Icrc1AgentError> {
+        let ICRC3DataCertificate {
+            certificate,
+            hash_tree,
+        } = self.icrc3_get_tip_certificate().await?;
+        let certificate = match Certificate::from_cbor(certificate.as_slice()) {
+            Ok(certificate) => certificate,
+            Err(e) => {
+                return Err(Icrc1AgentError::VerificationFailed(format!(
+                    "Unable to deserialize CBOR encoded Certificate: {}",
+                    e
+                )));
+            }
+        };
+        let hash_tree: HashTree = match ciborium::de::from_reader(hash_tree.as_slice()) {
+            Ok(hash_tree) => hash_tree,
+            Err(e) => {
+                return Err(Icrc1AgentError::VerificationFailed(format!(
+                    "Unable to deserialize CBOR encoded hash_tree: {}",
+                    e
+                )))
+            }
+        };
+        self.verify_root_hash(&certificate, &hash_tree.digest())
+            .await?;
+        let last_block_index_encoded = match lookup_leaf(&hash_tree, "last_block_index")? {
+            Some(last_block_index) => last_block_index,
+            None => {
+                return Ok(None);
+            }
+        };
+
+        fn convert_block_hash(block_hash: Vec<u8>) -> Result<Hash, Icrc1AgentError> {
+            block_hash
+                .clone()
+                .try_into()
+                .or(Err(Icrc1AgentError::VerificationFailed(format!(
+                "DataCertificate last_block_hash bytes: {}, cannot be decoded as last_block_hash",
+                hex::encode(block_hash)
+            ))))
+        }
+
+        // We use two different decoding strategies depending on the presence of the tip_hash in the hash_tree.
+        match (
+            lookup_leaf(&hash_tree, "tip_hash")?,
+            lookup_leaf(&hash_tree, "last_block_hash")?,
+        ) {
+            (Some(tip_hash), _) => {
+                let last_block_index_bytes: [u8; 8] =
+                    match last_block_index_encoded.clone().try_into() {
+                        Ok(last_block_index_bytes) => last_block_index_bytes,
+                        Err(_) => {
+                            return Err(Icrc1AgentError::VerificationFailed(format!(
+                    "DataCertificate hash_tree bytes: {}, cannot be decoded as last_block_index",
+                    hex::encode(last_block_index_encoded)
+                )))
+                        }
+                    };
+                let last_block_index = u64::from_be_bytes(last_block_index_bytes);
+                Ok(Some((
+                    convert_block_hash(tip_hash)?,
+                    Nat::from(last_block_index),
+                )))
+            }
+            (_, Some(last_block_hash_vec)) => {
+                let mut decode_buf = std::io::Cursor::new(&last_block_index_encoded);
+                let last_block_index = leb128::read::unsigned(&mut decode_buf).map_err(|e| {
+                    Icrc1AgentError::VerificationFailed(format!(
+                        "Unable to decode last_block_index: {}",
+                        e
+                    ))
+                })?;
+                Ok(Some((
+                    convert_block_hash(last_block_hash_vec)?,
+                    Nat::from(last_block_index),
+                )))
+            }
+            _ => Ok(None),
+        }
+    }
+}
+
+fn lookup_leaf(hash_tree: &HashTree, leaf_name: &str) -> Result<Option<Vec<u8>>, Icrc1AgentError> {
+    match hash_tree.lookup_subtree([leaf_name.as_bytes()]) {
+        SubtreeLookupResult::Found(tree) => match tree.as_ref() {
+            HashTreeNode::Leaf(result) => Ok(Some(result.clone())),
+            _ => Err(Icrc1AgentError::VerificationFailed(format!(
+                "`{}` value in the hash_tree should be a leaf",
+                leaf_name
+            ))),
+        },
+        SubtreeLookupResult::Absent => Ok(None),
+        _ => Err(Icrc1AgentError::VerificationFailed(format!(
+            "`{}` not found in the response hash_tree",
+            leaf_name
+        ))),
     }
 }

@@ -1,15 +1,19 @@
 [package]
 name = "ic-universal-canister"
-version = "0.8.0"
-edition = "2021"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+description.workspace = true
+documentation.workspace = true
 
 [dependencies]
-candid = "0.8.1"
-hex-literal = "0.2.1"
-serde = "1.0.115"
-universal-canister = { path = "../impl" }
+candid = { workspace = true }
+ic-crypto-sha2 = { path = "../../crypto/sha2" }
+ic-embedders = { path = "../../embedders" }
 ic-types = { path = "../../types/types" }
+lazy_static = { workspace = true }
+serde = { workspace = true }
+universal-canister = { path = "../impl" }
 
 [dev-dependencies]
-ic-crypto-sha = { path = "../../crypto/sha" }
 ic-types = { path = "../../types/types" }

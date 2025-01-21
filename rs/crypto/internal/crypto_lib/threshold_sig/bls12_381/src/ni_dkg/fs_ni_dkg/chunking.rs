@@ -23,7 +23,7 @@ pub const CHUNK_MAX: Chunk = CHUNK_MIN + (CHUNK_SIZE as Chunk) - 1;
 pub(crate) const MESSAGE_BYTES: usize = Scalar::BYTES;
 
 /// NUM_CHUNKS is simply the number of chunks needed to hold a message
-pub const NUM_CHUNKS: usize = (MESSAGE_BYTES + CHUNK_BYTES - 1) / CHUNK_BYTES;
+pub const NUM_CHUNKS: usize = MESSAGE_BYTES.div_ceil(CHUNK_BYTES);
 
 #[derive(Clone, Debug, Zeroize, ZeroizeOnDrop)]
 pub struct PlaintextChunks {
@@ -72,7 +72,7 @@ impl PlaintextChunks {
 
     /// Return the chunk elements encoded as Scalars
     pub fn chunks_as_scalars(&self) -> [Scalar; NUM_CHUNKS] {
-        self.chunks.map(|c| Scalar::from_isize(c))
+        self.chunks.map(Scalar::from_isize)
     }
 
     pub fn recombine_to_scalar(&self) -> Scalar {

@@ -5,7 +5,9 @@
 #[cfg(test)]
 mod tests;
 
-use ic_constants::{MAX_INGRESS_TTL, PERMITTED_DRIFT};
+#[cfg(test)]
+use ic_exhaustive_derive::ExhaustiveSet;
+use ic_limits::{MAX_INGRESS_TTL, PERMITTED_DRIFT};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
@@ -16,9 +18,8 @@ use thiserror::Error;
 
 /// Time since UNIX_EPOCH (in nanoseconds). Just like 'std::time::Instant' or
 /// 'std::time::SystemTime', [Time] does not implement the [Default] trait.
-/// Please use `ic_test_utilities::mock_time` if you ever need such a value.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
+#[cfg_attr(test, derive(Arbitrary, ExhaustiveSet))]
 pub struct Time(u64);
 
 /// The unix epoch.
@@ -29,6 +30,7 @@ pub const UNIX_EPOCH: Time = Time(0);
 pub const GENESIS: Time = Time::from_nanos_since_unix_epoch(1_620_328_630_000_000_000);
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
+const NANOS_PER_SEC: u64 = 1_000_000_000;
 
 impl std::ops::Add<Duration> for Time {
     type Output = Time;
@@ -43,27 +45,8 @@ impl std::ops::AddAssign<Duration> for Time {
     }
 }
 
-impl std::ops::Sub<Time> for Time {
-    type Output = Duration;
-
-    fn sub(self, other: Time) -> Duration {
-        let lhs = Duration::from_nanos(self.0);
-        let rhs = Duration::from_nanos(other.0);
-        lhs - rhs
-    }
-}
-
-impl std::ops::Sub<Duration> for Time {
-    type Output = Time;
-
-    fn sub(self, other: Duration) -> Time {
-        let time = Duration::from_nanos(self.0);
-        Time::from_duration(time - other)
-    }
-}
-
 impl Time {
-    /// Number of nanoseconds since UNIX EPOCH
+    /// Number of nanoseconds since `UNIX EPOCH`.
     pub fn as_nanos_since_unix_epoch(self) -> u64 {
         self.0
     }
@@ -72,7 +55,7 @@ impl Time {
         Time(nanos)
     }
 
-    /// Number of milliseconds since UNIX EPOCH
+    /// Number of milliseconds since `UNIX EPOCH`.
     pub fn as_millis_since_unix_epoch(self) -> u64 {
         self.as_nanos_since_unix_epoch() / NANOS_PER_MILLI
     }
@@ -89,30 +72,25 @@ impl Time {
             })
     }
 
+    /// Number of seconds since `UNIX EPOCH`.
+    pub fn as_secs_since_unix_epoch(self) -> u64 {
+        self.as_nanos_since_unix_epoch() / NANOS_PER_SEC
+    }
+
+    pub fn from_secs_since_unix_epoch(secs: u64) -> Result<Self, TimeInstantiationError> {
+        secs.checked_mul(NANOS_PER_SEC)
+            .map(Time)
+            .ok_or_else(|| {
+                TimeInstantiationError::Overflow(format!(
+                    "The number of seconds {} is too large and cannot be converted into a u64 of nanoseconds",
+                    secs
+                ))
+            })
+    }
+
     /// A private function to cast from [Duration] to [Time].
     fn from_duration(t: Duration) -> Self {
         Time(t.as_nanos() as u64)
-    }
-
-    /// Checked `Time` addition. Computes `self + rhs`, returning [`None`]
-    /// if overflow occurred.
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    ///
-    /// ```
-    /// use ic_types::Time;
-    ///
-    /// assert_eq!(Time::from_nanos_since_unix_epoch(0).checked_add(Time::from_nanos_since_unix_epoch(1)), Some(Time::from_nanos_since_unix_epoch(1)));
-    /// assert_eq!(Time::from_nanos_since_unix_epoch(1).checked_add(Time::from_nanos_since_unix_epoch(u64::MAX)), None);
-    /// ```
-    pub const fn checked_add(self, rhs: Time) -> Option<Time> {
-        if let Some(result) = self.0.checked_add(rhs.0) {
-            Some(Time(result))
-        } else {
-            None
-        }
     }
 
     /// Checked `Time` addition with a `Duration`. Computes `self + rhs`, returning [`None`]
@@ -123,23 +101,107 @@ impl Time {
     /// Basic usage:
     ///
     /// ```
-    /// use std::time::Duration;
     /// use ic_types::Time;
+    /// use std::time::Duration;
     ///
-    /// assert_eq!(Time::from_nanos_since_unix_epoch(0).checked_add_duration(Duration::from_nanos(1)), Some(Time::from_nanos_since_unix_epoch(1)));
-    /// assert_eq!(Time::from_nanos_since_unix_epoch(0).checked_add_duration(Duration::MAX), None);
-    /// assert_eq!(Time::from_nanos_since_unix_epoch(1).checked_add_duration(Duration::from_nanos(u64::MAX)), None);
+    /// assert_eq!(Time::from_nanos_since_unix_epoch(0).checked_add(Duration::from_nanos(1)), Some(Time::from_nanos_since_unix_epoch(1)));
+    /// assert_eq!(Time::from_nanos_since_unix_epoch(0).checked_add(Duration::MAX), None);
+    /// assert_eq!(Time::from_nanos_since_unix_epoch(1).checked_add(Duration::from_nanos(u64::MAX)), None);
     /// ```
-    pub fn checked_add_duration(self, rhs: Duration) -> Option<Time> {
-        if let Ok(rhs_time) = Time::try_from(rhs) {
-            self.checked_add(rhs_time)
+    pub fn checked_add(self, rhs: Duration) -> Option<Time> {
+        if let Ok(rhs_nanos) = u64::try_from(rhs.as_nanos()) {
+            Some(Time(self.0.checked_add(rhs_nanos)?))
         } else {
             None
         }
     }
+
+    /// Checked `Time` subtraction. Computes `self - rhs`, returning [`None`]
+    /// if underflow occurs.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    ///
+    /// ```
+    /// use ic_types::Time;
+    /// use std::time::Duration;
+    ///
+    /// assert_eq!(Time::from_nanos_since_unix_epoch(3).checked_duration_since(Time::from_nanos_since_unix_epoch(2)), Some(Duration::from_nanos(1)));
+    /// assert_eq!(Time::from_nanos_since_unix_epoch(2).checked_duration_since(Time::from_nanos_since_unix_epoch(3)), None);
+    /// ```
+    pub const fn checked_duration_since(self, rhs: Time) -> Option<Duration> {
+        if let Some(result) = self.0.checked_sub(rhs.0) {
+            Some(Duration::from_nanos(result))
+        } else {
+            None
+        }
+    }
+
+    /// Checked `Time` subtraction with a `Duration`. Computes `self - rhs`,
+    /// returning [`None`] if underflow occurs.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    ///
+    /// ```
+    /// use ic_types::Time;
+    /// use std::time::Duration;
+    ///
+    /// assert_eq!(Time::from_nanos_since_unix_epoch(3).checked_sub(Duration::from_nanos(2)), Some(Time::from_nanos_since_unix_epoch(1)));
+    /// assert_eq!(Time::from_nanos_since_unix_epoch(2).checked_sub(Duration::from_nanos(3)), None);
+    /// ```
+    pub fn checked_sub(self, rhs: Duration) -> Option<Time> {
+        if let Ok(rhs_nanos) = u64::try_from(rhs.as_nanos()) {
+            Some(Time(self.0.checked_sub(rhs_nanos)?))
+        } else {
+            None
+        }
+    }
+
+    /// Saturating `Time` subtraction. Computes `self - rhs`, returning
+    /// `Duration::from_nanos(0)` if underflow occurs.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    ///
+    /// ```
+    /// use ic_types::Time;
+    /// use std::time::Duration;
+    ///
+    /// assert_eq!(Time::from_nanos_since_unix_epoch(3).saturating_duration_since(Time::from_nanos_since_unix_epoch(2)), Duration::from_nanos(1));
+    /// assert_eq!(Time::from_nanos_since_unix_epoch(2).saturating_duration_since(Time::from_nanos_since_unix_epoch(3)), Duration::from_nanos(0));
+    /// ```
+    pub const fn saturating_duration_since(self, rhs: Time) -> Duration {
+        Duration::from_nanos(self.0.saturating_sub(rhs.0))
+    }
+
+    /// Saturating `Duration` subtraction from a `Time`. Computes `self - rhs`,
+    /// returning `Time::from_nanos_since_unix_epoch(0)` if underflow occurs.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    ///
+    /// ```
+    /// use ic_types::Time;
+    /// use std::time::Duration;
+    ///
+    /// assert_eq!(Time::from_nanos_since_unix_epoch(3).saturating_sub(Duration::from_nanos(2)), Time::from_nanos_since_unix_epoch(1));
+    /// assert_eq!(Time::from_nanos_since_unix_epoch(2).saturating_sub(Duration::from_nanos(3)), Time::from_nanos_since_unix_epoch(0));
+    /// ```
+    pub fn saturating_sub(self, rhs: Duration) -> Time {
+        if let Ok(rhs_nanos) = u64::try_from(rhs.as_nanos()) {
+            Time(self.0.saturating_sub(rhs_nanos))
+        } else {
+            Time(0)
+        }
+    }
 }
 
-#[derive(Error, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Deserialize, Error, Serialize)]
 pub enum TimeInstantiationError {
     #[error("Time cannot be instantiated as it would overflow: {0}")]
     Overflow(String),
@@ -241,4 +303,64 @@ pub fn expiry_time_from_now() -> Time {
         .expect("Time wrapped around");
 
     UNIX_EPOCH + (since_epoch + MAX_INGRESS_TTL - PERMITTED_DRIFT)
+}
+
+/// Time since `UNIX_EPOCH`, in seconds.
+///
+/// Only intended for storing and passing around low resolution timestamps.
+/// For any time arithmetic or pretty printing, convert to `Time` first. Like
+/// `Time`, does not implement the `Default` trait.
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
+#[cfg_attr(test, derive(ExhaustiveSet))]
+pub struct CoarseTime(u32);
+
+impl CoarseTime {
+    pub const fn from_secs_since_unix_epoch(seconds: u32) -> Self {
+        Self(seconds)
+    }
+
+    /// Returns a `CoarseTime` obtained by rounding `time` down to an integer second.
+    ///
+    /// If the result would exceed `u32::MAX` (`2106-02-07T06:28:15`), it is replaced
+    /// by `u32::MAX`.
+    pub const fn floor(time: Time) -> Self {
+        Self::from_u64_seconds(time.0 / NANOS_PER_SEC)
+    }
+
+    /// Returns a `CoarseTime` obtained by rounding `time` toward the closest integer
+    /// second.
+    ///
+    /// If the result would exceed `u32::MAX` (`2106-02-07T06:28:15`), it is replaced
+    /// by `u32::MAX`.
+    pub const fn round(time: Time) -> Self {
+        Self::from_u64_seconds(time.0.saturating_add(NANOS_PER_SEC / 2) / NANOS_PER_SEC)
+    }
+
+    /// Returns a `CoarseTime` obtained by rounding `time` up to an integer second.
+    ///
+    /// If the result would exceed `u32::MAX` (`2106-02-07T06:28:15`), it is replaced
+    /// by `u32::MAX`.
+    pub const fn ceil(time: Time) -> Self {
+        Self::from_u64_seconds(time.0.saturating_add(NANOS_PER_SEC - 1) / NANOS_PER_SEC)
+    }
+
+    /// Helper for saturating rounding to `u32`.
+    const fn from_u64_seconds(seconds: u64) -> Self {
+        if seconds < u32::MAX as u64 {
+            Self(seconds as u32)
+        } else {
+            Self(u32::MAX)
+        }
+    }
+
+    /// Number of seconds since `UNIX EPOCH`.
+    pub const fn as_secs_since_unix_epoch(&self) -> u32 {
+        self.0
+    }
+}
+
+impl From<CoarseTime> for Time {
+    fn from(time: CoarseTime) -> Self {
+        Self(time.0 as u64 * NANOS_PER_SEC)
+    }
 }

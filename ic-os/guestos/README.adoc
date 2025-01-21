@@ -1,17 +1,27 @@
 = Guest OS
 
-GuestOS refers to the operating system running inside a QEMU virtual machine on the hostOS. A GuestOS image consists of the base Ubuntu system, along with the replica and orchestrator binaries. The IC protocol runs inside the GuestOS virtual machine.
+'GuestOS' refers to the operating system running inside a QEMU virtual machine on the HostOS. A GuestOS image consists of the base Ubuntu system, along with the replica and orchestrator binaries. The IC software runs inside the GuestOS virtual machine.
 
-For more details on the goals, structure, and disk layout of GuestOS, https://docs.google.com/presentation/d/1xECozJhVCqzFC3mMMvROD7rlB-xWDHHLKvZuVnuLgJc/edit?usp=sharing[see here]
+The GuestOS virtual machine ensures a consistent runtime environment across various hardware platforms for the GuestOS and its services (orchestrator, replica, etc.). Moreover, it provides a method for upgrading the GuestOS and all its services in a unified manner.
 
 == How to build and run GuestOS
 === Building GuestOS
 
 To build a GuestOS image, refer to the link:../README.adoc[IC-OS README]
 
-=== Running GuestOS
+=== Running GuestOS locally
 
-The GuestOS image (`disk.img`) can booted directly in qemu using the following command:
+This requires QEMU with qemu-system and qemu-kvm installed on the machine.
+
+Bazel can be used to boot a local VM with a GuestOS like this:
+
+    bazel run //ic-os/guestos/envs/dev:launch-local-vm
+
+In a VM or container without KVM support, use:
+
+    bazel run //ic-os/guestos/envs/dev:launch-local-vm-no-kvm
+
+The GuestOS image (`disk.img`) can booted directly in QEMU using the following command:
 
     qemu-system-x86_64 \
     -nographic -m 4G \
@@ -26,46 +36,32 @@ Alternatively, Bazel can be used to perform a testnet deployment. For documentat
 
 Instead of running GuestOS locally in qemu, you can launch a GuestOS virtual machine on Farm:
 
-    bazel run --config=systest //ic-os/guestos:launch-single-vm
+    bazel run --config=systest //ic-os/guestos/envs/dev:launch-remote-vm
 
 The program will spin up a new GuestOS VM on Farm, and the machine can then be accessed via SSH.
 
-For more details about the program, refer to the `rs/ic_os/launch-single-vm` directory.
-
-== Upgrade GuestOS
-
-The GuestOS disk layout contains two sets of system partitions, called partition sets "A" and "B". The A/B partitions enable a dual-boot system that can be updated and maintained without any downtime.
-
-image:docs/media/guestOS_disk-layout.png[]
-
-The image above shows the GuestOS disk layout with partition set "A" in green and partition set "B" in blue.
-
-At any given time, one partition set is "active" while the other is "passive". 
-To upgrade the GuestOS, first, the new GuestOS is written to the passive partition set. Then, the active and passive partition sets are "swapped," so that when GuestOS reboots, it will use the new GuestOS on the new partition, thereby upgrading the GuestOS.
-
-=== Building GuestOS upgrade image
-
-The same Bazel command used to build a GuestOS image will also produce a GuestOS upgrade image:
-
-    bazel build //ic-os/guestos/{prod,dev,dev-malicious}/...
-
-This command will output update-img.tar{.gz,.zst} in /ic/bazel-bin/ic-os/guestos/{prod,dev,dev-malicious}, which is the tarred GuestOS update image.
-
-=== Installing GuestOS upgrade image
-
-    rootfs/opt/ic/bin/manageboot.sh upgrade-install update-img.tar
-    rootfs/opt/ic/bin/manageboot.sh upgrade-commit
-
-After these commands have been run, the newly installed system will be booted. Note that on the next boot, the system will revert back to the original GuestOS unless confirmation is given that the new system is fully operational:
-
-    rootfs/opt/ic/bin/manageboot.sh confirm
-
-For more information on the upgrade commands, see https://github.com/dfinity/ic/blob/master/ic-os/guestos/rootfs/opt/ic/bin/manageboot.sh[rootfs/opt/ic/bin/manageboot.sh]
+For more details about the program, refer to the `rs/ic_os/dev_test_tools/launch-single-vm` directory.
 
 == Developing the Ubuntu system
 
-The Ubuntu configuration and system logic is contained in the rootfs/ subdirectory.
-See instructions link:rootfs/README.adoc#[here] on how to make changes to the OS.
+The Ubuntu configuration and system logic is contained in the components/ subdirectory.
+See instructions link:components/README.adoc#[here] on how to make changes to the OS.
 
 For further reading, see the docs in the
 link:docs/README.adoc#[docs/ subdirectory]
+
+== Performance Benchmarking
+
+Performance benchmarks are run in GuestOS, on hardware, every day during the nightly
+link:../../.github/workflows-source/schedule-daily.yml[`Bazel Test Bare Metal`] job.
+
+This job runs commands from link:../dev-tools/bare_metal_deployment/benchmark_runner.sh[`benchmark_runner.sh`],
+and expects that results are placed into the `results` folder on the node. All results are then
+dumped into the logs of the CI job.
+
+Currently, node metrics are not collected, but we hope to point the monitoring infrastructure at
+this node to track performance changes over time.
+
+These benchmarks can be run manually, following the benchmarking instructions
+link:../dev-tools/bare_metal_deployment/README.md[here], but it is easiest to trigger the nightly
+job via https://github.com/dfinity/ic/actions.

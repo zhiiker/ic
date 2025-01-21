@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used)]
-
 use super::*;
 use crate::sign::tests::REG_V2;
 use crate::sign::threshold_sig::ni_dkg::test_utils::{
@@ -434,13 +432,16 @@ mod load_transcript {
             internal_csp_transcript: csp_ni_dkg_transcript(&pub_coeffs),
             ..dummy_transcript()
         };
-        let csp = csp_with_load_threshold_signing_key_returning(Ok(()));
+        let setup = Setup::builder()
+            .with_load_threshold_signing_key_returning(Ok(()))
+            .with_observe_epoch_in_loaded_transcript(epoch(transcript.registry_version))
+            .build();
         let threshold_sig_data_store = LockableThresholdSigDataStore::new();
 
         let result = load_transcript(
             &NODE_1,
             &threshold_sig_data_store,
-            &csp,
+            &setup.csp,
             &transcript,
             &no_op_logger(),
         );
@@ -459,13 +460,16 @@ mod load_transcript {
             dkg_id: NI_DKG_ID_1,
             ..dummy_transcript()
         };
-        let csp = csp_with_load_threshold_signing_key_returning(Err(key_not_found_error()));
+        let setup = Setup::builder()
+            .with_load_threshold_signing_key_returning(Err(key_not_found_error()))
+            .with_observe_epoch_in_loaded_transcript(epoch(transcript.registry_version))
+            .build();
         let threshold_sig_data_store = LockableThresholdSigDataStore::new();
 
         let result = load_transcript(
             &NODE_1,
             &threshold_sig_data_store,
-            &csp,
+            &setup.csp,
             &transcript,
             &no_op_logger(),
         );
@@ -483,13 +487,16 @@ mod load_transcript {
             dkg_id: NI_DKG_ID_1,
             ..dummy_transcript()
         };
-        let csp = csp_with_load_threshold_signing_key_returning(Ok(()));
+        let setup = Setup::builder()
+            .with_load_threshold_signing_key_returning(Ok(()))
+            .with_observe_epoch_in_loaded_transcript(epoch(transcript.registry_version))
+            .build();
         let threshold_sig_data_store = LockableThresholdSigDataStore::new();
 
         let result = load_transcript(
             &NODE_1,
             &threshold_sig_data_store,
-            &csp,
+            &setup.csp,
             &transcript,
             &no_op_logger(),
         );
@@ -508,13 +515,16 @@ mod load_transcript {
             dkg_id: NI_DKG_ID_1,
             ..dummy_transcript()
         };
-        let csp = csp_with_load_threshold_signing_key_returning(Ok(()));
+        let setup = Setup::builder()
+            .with_load_threshold_signing_key_returning(Ok(()))
+            .with_observe_epoch_in_loaded_transcript(epoch(transcript.registry_version))
+            .build();
         let threshold_sig_data_store = LockableThresholdSigDataStore::new();
 
         let result = load_transcript(
             &NODE_1,
             &threshold_sig_data_store,
-            &csp,
+            &setup.csp,
             &transcript,
             &no_op_logger(),
         );
@@ -525,18 +535,20 @@ mod load_transcript {
     }
 
     #[test]
-    fn should_not_call_csp_load_threshold_signing_key_and_return_ok_if_not_in_committee() {
+    fn should_observe_metrics_but_not_call_csp_load_threshold_signing_key_if_not_in_committee() {
         const NODE_NOT_IN_COMMITTEE: NodeId = NODE_2;
         let transcript = NiDkgTranscript {
             committee: receivers(&[NODE_1]),
             ..dummy_transcript()
         };
-        let csp = MockAllCryptoServiceProvider::new(); // expect no call!
+        let setup = Setup::builder()
+            .with_observe_epoch_in_loaded_transcript(epoch(transcript.registry_version))
+            .build();
 
         let result = load_transcript(
             &NODE_NOT_IN_COMMITTEE,
             &LockableThresholdSigDataStore::new(),
-            &csp,
+            &setup.csp,
             &transcript,
             &no_op_logger(),
         );
@@ -556,18 +568,19 @@ mod load_transcript {
         };
         let mut csp = MockAllCryptoServiceProvider::new();
         csp.expect_load_threshold_signing_key()
-            .withf(
-                move |algorithm_id, dkg_id, epoch_, transcript, receiver_index| {
-                    *algorithm_id == AlgorithmId::NiDkg_Groth20_Bls12_381
-                        && *dkg_id == NI_DKG_ID_1
-                        && *epoch_ == epoch(REG_V1)
-                        && *transcript == csp_transcript
-                        && *receiver_index == 2 // index of NODE_3 in (sorted)
-                                                // resharing committee
-                },
-            )
+            .withf(move |algorithm_id, epoch_, transcript, receiver_index| {
+                *algorithm_id == AlgorithmId::NiDkg_Groth20_Bls12_381
+                    && *epoch_ == epoch(REG_V1)
+                    && *transcript == csp_transcript
+                    && *receiver_index == 2 // index of NODE_3 in (sorted)
+                                            // resharing committee
+            })
             .times(1)
             .return_const(Ok(()));
+        csp.expect_observe_epoch_in_loaded_transcript()
+            .withf(move |epoch_| *epoch_ == epoch(REG_V1))
+            .times(1)
+            .return_const(());
 
         let _ = load_transcript(
             &NODE_3,
@@ -585,12 +598,15 @@ mod load_transcript {
             registry_version: REG_V1,
             ..dummy_transcript()
         };
-        let csp = csp_with_load_threshold_signing_key_returning(Ok(()));
+        let setup = Setup::builder()
+            .with_load_threshold_signing_key_returning(Ok(()))
+            .with_observe_epoch_in_loaded_transcript(epoch(transcript.registry_version))
+            .build();
 
         let result = load_transcript(
             &NODE_3,
             &LockableThresholdSigDataStore::new(),
-            &csp,
+            &setup.csp,
             &transcript,
             &no_op_logger(),
         );
@@ -607,14 +623,16 @@ mod load_transcript {
             ..dummy_transcript()
         };
         let invalid_arg_error = invalid_arg_error();
-        let csp = csp_with_load_threshold_signing_key_returning(Err(
-            CspDkgLoadPrivateKeyError::InvalidTranscriptError(invalid_arg_error.clone()),
-        ));
+        let setup = Setup::builder()
+            .with_load_threshold_signing_key_returning(Err(
+                CspDkgLoadPrivateKeyError::InvalidTranscriptError(invalid_arg_error.clone()),
+            ))
+            .build();
 
         let error = load_transcript(
             &NODE_3,
             &LockableThresholdSigDataStore::new(),
-            &csp,
+            &setup.csp,
             &transcript,
             &no_op_logger(),
         )
@@ -634,15 +652,17 @@ mod load_transcript {
             registry_version: REG_V1,
             ..dummy_transcript()
         };
-        let csp = csp_with_load_threshold_signing_key_returning(Err(
-            CspDkgLoadPrivateKeyError::InvalidTranscriptError(invalid_arg_error()),
-        ));
+        let setup = Setup::builder()
+            .with_load_threshold_signing_key_returning(Err(
+                CspDkgLoadPrivateKeyError::InvalidTranscriptError(invalid_arg_error()),
+            ))
+            .build();
         let threshold_sig_data_store = LockableThresholdSigDataStore::new();
 
         let result = load_transcript(
             &NODE_3,
             &threshold_sig_data_store,
-            &csp,
+            &setup.csp,
             &transcript,
             &no_op_logger(),
         );
@@ -659,13 +679,16 @@ mod load_transcript {
             dkg_id: NI_DKG_ID_1,
             ..dummy_transcript()
         };
-        let csp = csp_with_load_threshold_signing_key_returning(Err(epoch_too_old_error()));
+        let setup = Setup::builder()
+            .with_load_threshold_signing_key_returning(Err(epoch_too_old_error()))
+            .with_observe_epoch_in_loaded_transcript(epoch(transcript.registry_version))
+            .build();
         let threshold_sig_data_store = LockableThresholdSigDataStore::new();
 
         let result = load_transcript(
             &NODE_1,
             &threshold_sig_data_store,
-            &csp,
+            &setup.csp,
             &transcript,
             &no_op_logger(),
         );
@@ -686,16 +709,6 @@ mod load_transcript {
         }
     }
 
-    fn csp_with_load_threshold_signing_key_returning(
-        result: Result<(), CspDkgLoadPrivateKeyError>,
-    ) -> impl CryptoServiceProvider {
-        let mut csp = MockAllCryptoServiceProvider::new();
-        csp.expect_load_threshold_signing_key()
-            .times(1)
-            .return_const(result);
-        csp
-    }
-
     fn transcript_data_from_store(
         lockable_threshold_sig_data_store: &LockableThresholdSigDataStore,
         dkg_id: NiDkgId,
@@ -710,7 +723,7 @@ mod load_transcript {
     ) -> Option<TranscriptData> {
         lockable_threshold_sig_data_store
             .read()
-            .transcript_data(DkgId::NiDkgId(dkg_id))
+            .transcript_data(&dkg_id)
             .cloned()
     }
 
@@ -725,6 +738,51 @@ mod load_transcript {
     fn invalid_arg_error() -> InvalidArgumentError {
         InvalidArgumentError {
             message: "some error".to_string(),
+        }
+    }
+
+    struct Setup {
+        csp: MockAllCryptoServiceProvider,
+    }
+
+    impl Setup {
+        fn builder() -> SetupBuilder {
+            SetupBuilder {
+                csp: MockAllCryptoServiceProvider::new(),
+            }
+        }
+    }
+
+    struct SetupBuilder {
+        csp: MockAllCryptoServiceProvider,
+    }
+
+    impl SetupBuilder {
+        fn with_load_threshold_signing_key_returning(
+            mut self,
+            result: Result<(), CspDkgLoadPrivateKeyError>,
+        ) -> Self {
+            self.csp
+                .expect_load_threshold_signing_key()
+                .times(1)
+                .return_const(result);
+            self
+        }
+
+        fn with_observe_epoch_in_loaded_transcript(
+            mut self,
+            epoch_in_loaded_transcript: Epoch,
+        ) -> Self {
+            self.csp
+                .expect_observe_epoch_in_loaded_transcript()
+                .withf(move |epoch_| *epoch_ == epoch_in_loaded_transcript)
+                .times(1)
+                .return_const(());
+            self
+        }
+
+        fn build(self) -> Setup {
+            Setup { csp: self.csp }
         }
     }
 }

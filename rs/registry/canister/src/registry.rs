@@ -14,9 +14,11 @@ use ic_registry_transport::{
 };
 use ic_types::messages::MAX_INTER_CANISTER_PAYLOAD_IN_BYTES_U64;
 use prost::Message;
-use std::cmp::max;
-use std::collections::{BTreeMap, VecDeque};
-use std::fmt;
+use std::{
+    cmp::max,
+    collections::{BTreeMap, VecDeque},
+    fmt,
+};
 
 #[cfg(target_arch = "wasm32")]
 use dfn_core::println;
@@ -34,7 +36,7 @@ pub const MAX_REGISTRY_DELTAS_SIZE: usize =
 /// so that we're able to call pop_front().
 pub type RegistryMap = BTreeMap<Vec<u8>, VecDeque<RegistryValue>>;
 pub type Version = u64;
-#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Default)]
 pub struct EncodedVersion([u8; 8]);
 
 impl EncodedVersion {
@@ -72,7 +74,7 @@ impl AsRef<[u8]> for EncodedVersion {
 /// The registry is a versioned key value store.
 ///
 /// TODO(NNS1-487): Garbage collection.
-#[derive(PartialEq, Default, Clone, Debug)]
+#[derive(Clone, PartialEq, Debug, Default)]
 pub struct Registry {
     /// Global counter that is incremented each time a mutation is applied to
     /// the registry. Each set of changes is tagged with this version.
@@ -109,7 +111,7 @@ impl Registry {
     ) -> Vec<RegistryDelta> {
         let max_version = match max_versions {
             Some(max_versions) => version.saturating_add(max_versions as u64),
-            None => std::u64::MAX,
+            None => u64::MAX,
         };
 
         self.store
@@ -207,7 +209,7 @@ impl Registry {
             //    INSERT entry is removed, the newly connected clients won't
             //    fail because of an UPDATE in the first survived entry with the
             //    same key.
-            m.mutation_type = match Type::from_i32(m.mutation_type).unwrap() {
+            m.mutation_type = match Type::try_from(m.mutation_type).unwrap() {
                 Type::Insert | Type::Update | Type::Upsert => Type::Upsert,
                 Type::Delete => Type::Delete,
             } as i32;
@@ -244,13 +246,6 @@ impl Registry {
         self.apply_mutations_as_version(mutations, self.version);
     }
 
-    /// This is needed to test certain edge cases where the registry is in an invalid state
-    /// such as when a new invariant is added.
-    #[cfg(test)]
-    pub(crate) fn dangerously_apply_mutations(&mut self, mutations: Vec<RegistryMutation>) {
-        self.apply_mutations(mutations)
-    }
-
     /// Verifies the implicit precondition corresponding to the mutation_type
     /// field.
     fn verify_mutation_type(&self, mutations: &[RegistryMutation]) -> Vec<Error> {
@@ -261,7 +256,7 @@ impl Registry {
                 let latest = self
                     .get_last(key)
                     .filter(|registry_value| !registry_value.deletion_marker);
-                match (Type::from_i32(m.mutation_type), latest) {
+                match (Type::try_from(m.mutation_type).ok(), latest) {
                     (None, _) => Err(Error::MalformedMessage(format!(
                         "Unknown mutation type {} for key {:?}.",
                         m.mutation_type, m.key
@@ -287,7 +282,6 @@ impl Registry {
             LOG_PREFIX,
             mutations.len()
         );
-
         self.verify_mutations_internal(&mutations);
         self.apply_mutations(mutations);
     }
@@ -382,7 +376,7 @@ impl Registry {
         assert!(self.changelog.is_empty());
         assert_eq!(self.version, 0);
 
-        let repr_version = ReprVersion::from_i32(stable_repr.version).unwrap_or_else(|| {
+        let repr_version = ReprVersion::try_from(stable_repr.version).unwrap_or_else(|_| {
             panic!(
                 "Version {} of stable registry representation is not supported by this canister",
                 stable_repr.version
@@ -621,7 +615,7 @@ mod tests {
         let deltas = registry.get_changes_since(0, None);
         // Assert that we got the right thing, and test a few values
         assert_eq!(deltas.len(), 2);
-        let key1_values = &deltas.get(0).unwrap().values;
+        let key1_values = &deltas.first().unwrap().values;
         let key2_values = &deltas.get(1).unwrap().values;
         assert_eq!(key1_values.len(), 4);
         assert_eq!(key2_values.len(), 2);
@@ -637,7 +631,7 @@ mod tests {
         let deltas = registry.get_changes_since(1, Some(2));
         // Assert that we got the right thing, and test the values.
         assert_eq!(deltas.len(), 2);
-        let key1_values = &deltas.get(0).unwrap().values;
+        let key1_values = &deltas.first().unwrap().values;
         let key2_values = &deltas.get(1).unwrap().values;
         assert_eq!(key1_values.len(), 2);
         assert_eq!(key2_values.len(), 2);

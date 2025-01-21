@@ -16,20 +16,18 @@
 use async_trait::async_trait;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::future::FutureExt;
-use std::convert::TryFrom;
-
 use ic_base_types::{CanisterId, PrincipalId};
-use ic_nervous_system_common::cmc::FakeCmc;
-use ic_nervous_system_common::{ledger::IcpLedger, NervousSystemError};
+use ic_nervous_system_common::{cmc::FakeCmc, ledger::IcpLedger, NervousSystemError};
 use ic_nns_common::pb::v1::NeuronId;
-use ic_nns_governance::governance::{Environment, Governance, HeapGrowthPotential};
-use ic_nns_governance::pb::v1::neuron;
-use ic_nns_governance::pb::v1::proposal;
-use ic_nns_governance::pb::v1::{
-    ExecuteNnsFunction, Governance as GovernanceProto, GovernanceError, Motion, NetworkEconomics,
-    Neuron, Proposal, Topic,
+use ic_nns_governance::{
+    governance::{Environment, Governance, HeapGrowthPotential, RngError},
+    pb::v1::{
+        neuron, proposal, ExecuteNnsFunction, Governance as GovernanceProto, GovernanceError,
+        Motion, NetworkEconomics, Neuron, Proposal, Topic,
+    },
 };
 use icp_ledger::{AccountIdentifier, Subaccount, Tokens};
+use std::convert::TryFrom;
 
 criterion_group! {
     name = benches;
@@ -50,11 +48,19 @@ impl Environment for MockEnvironment {
         self.secs
     }
 
-    fn random_u64(&mut self) -> u64 {
+    fn random_u64(&mut self) -> Result<u64, RngError> {
         todo!()
     }
 
-    fn random_byte_array(&mut self) -> [u8; 32] {
+    fn random_byte_array(&mut self) -> Result<[u8; 32], RngError> {
+        todo!()
+    }
+
+    fn seed_rng(&mut self, _seed: [u8; 32]) {
+        todo!()
+    }
+
+    fn get_rng_seed(&self) -> Option<[u8; 32]> {
         todo!()
     }
 
@@ -71,7 +77,7 @@ impl Environment for MockEnvironment {
     }
 
     async fn call_canister_method(
-        &mut self,
+        &self,
         _target: CanisterId,
         _method_name: &str,
         _request: Vec<u8>,
@@ -116,7 +122,7 @@ impl IcpLedger for MockLedger {
 // will be accepted when submitted and executed in the call to process
 // proposals.
 fn make_and_process_proposal(gov: &mut Governance) {
-    tokio_test::block_on(gov.make_proposal(
+    gov.make_proposal(
         &NeuronId { id: 0 },
         // Must match neuron 1's serialized_id.
         &PrincipalId::try_from(b"SID0".to_vec()).unwrap(),
@@ -128,7 +134,9 @@ fn make_and_process_proposal(gov: &mut Governance) {
             })),
             ..Default::default()
         },
-    ))
+    )
+    .now_or_never()
+    .unwrap()
     .unwrap();
     gov.run_periodic_tasks().now_or_never();
 }

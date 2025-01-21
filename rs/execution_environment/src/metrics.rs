@@ -1,26 +1,157 @@
+use ic_error_types::UserError;
+use ic_management_canister_types::QueryMethod;
 use ic_metrics::{
     buckets::{decimal_buckets, decimal_buckets_with_zero},
     MetricsRegistry,
 };
+use ic_system_api::sandbox_safe_system_state::RequestMetadataStats;
 use ic_types::{
-    NumInstructions, NumMessages, NumSlices, MAX_STABLE_MEMORY_IN_BYTES, MAX_WASM_MEMORY_IN_BYTES,
+    NumInstructions, NumMessages, NumSlices, Time, MAX_STABLE_MEMORY_IN_BYTES,
+    MAX_WASM_MEMORY_IN_BYTES,
 };
-use prometheus::{Histogram, IntCounter};
+use prometheus::{Histogram, HistogramVec, IntCounter, IntCounterVec};
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
 pub(crate) const QUERY_HANDLER_CRITICAL_ERROR: &str = "query_handler_critical_error";
+pub(crate) const SYSTEM_API_DATA_CERTIFICATE_COPY: &str = "data_certificate_copy";
+pub(crate) const SYSTEM_API_CANISTER_CYCLE_BALANCE: &str = "canister_cycle_balance";
+pub(crate) const SYSTEM_API_CANISTER_CYCLE_BALANCE128: &str = "canister_cycle_balance128";
+pub(crate) const SYSTEM_API_TIME: &str = "time";
+
+pub const SUCCESS_STATUS_LABEL: &str = "success";
+
+#[derive(Clone)]
+pub struct IngressFilterMetrics {
+    pub inspect_message_duration_seconds: Histogram,
+    pub inspect_message_instructions: Histogram,
+    pub inspect_message_count: IntCounter,
+}
+
+impl IngressFilterMetrics {
+    pub fn new(metrics_registry: &MetricsRegistry) -> Self {
+        Self {
+            inspect_message_duration_seconds: duration_histogram(
+                "execution_inspect_message_duration_seconds",
+                "The duration of executing a canister_inspect_message.",
+                metrics_registry,
+            ),
+            inspect_message_instructions: instructions_histogram(
+                "execution_inspect_message_instructions",
+                "The number of instructions executed in a canister_inspect_message.",
+                metrics_registry,
+            ),
+            inspect_message_count: metrics_registry.int_counter(
+                "execution_inspect_message_count",
+                "The total number of executed canister_inspect_messages.",
+            ),
+        }
+    }
+}
+
+/// Trait for observing metrics concerning call trees.
+///
+/// New call trees are created by ingress messages or canister tasks; canister requests are found
+/// on each branch in the call tree.
+///
+/// The age and depth of a call tree is measured relative to the root.
+pub trait CallTreeMetrics {
+    fn observe(
+        &self,
+        request_stats: RequestMetadataStats,
+        call_context_creation_time: Time,
+        time: Time,
+    );
+}
+
+/// Implementation of `CallTreeMetrics` that doesn't record anything.
+pub(crate) struct CallTreeMetricsNoOp;
+
+impl CallTreeMetrics for CallTreeMetricsNoOp {
+    fn observe(
+        &self,
+        _request_stats: RequestMetadataStats,
+        _call_context_creation_time: Time,
+        _time: Time,
+    ) {
+    }
+}
+
+#[derive(Clone)]
+pub struct CallTreeMetricsImpl {
+    /// The depth down the call tree requests were created at (starting at 0).
+    pub(crate) request_call_tree_depth: Histogram,
+    /// Call tree age at the point when each new request was created.
+    pub(crate) request_call_tree_age_seconds: Histogram,
+    /// Call context age at the point when each new request was created.
+    pub(crate) request_call_context_age_seconds: Histogram,
+}
+
+impl CallTreeMetricsImpl {
+    pub fn new(metrics_registry: &MetricsRegistry) -> Self {
+        Self {
+            request_call_tree_depth: metrics_registry.histogram(
+                "execution_environment_request_call_tree_depth",
+                "The depth down the call tree that new requests were created at (0 based).",
+                decimal_buckets_with_zero(0, 2),
+            ),
+            request_call_tree_age_seconds: metrics_registry.histogram(
+                "execution_environment_request_call_tree_age_seconds",
+                "Call tree age at the point when each new request was created.",
+                decimal_buckets_with_zero(0, 6),
+            ),
+            request_call_context_age_seconds: metrics_registry.histogram(
+                "execution_environment_request_call_context_age_seconds",
+                "Call context age at the point when each new request was created.",
+                decimal_buckets_with_zero(0, 6),
+            ),
+        }
+    }
+}
+
+impl CallTreeMetrics for CallTreeMetricsImpl {
+    fn observe(
+        &self,
+        request_stats: RequestMetadataStats,
+        call_context_creation_time: Time,
+        time: Time,
+    ) {
+        // Observe call-tree related metrics.
+        for _ in 0..request_stats.count {
+            self.request_call_tree_depth
+                .observe(*request_stats.metadata.call_tree_depth() as f64);
+        }
+        let duration =
+            time.saturating_duration_since(*request_stats.metadata.call_tree_start_time());
+        for _ in 0..request_stats.count {
+            self.request_call_tree_age_seconds
+                .observe(duration.as_secs_f64());
+        }
+
+        // Observe new requests vs. original context.
+        for _ in 0..request_stats.count {
+            self.request_call_context_age_seconds.observe(
+                time.saturating_duration_since(call_context_creation_time)
+                    .as_secs_f64(),
+            );
+        }
+    }
+}
 
 pub(crate) struct QueryHandlerMetrics {
     pub query: ScopedMetrics,
     pub query_initial_call: ScopedMetrics,
     pub query_retry_call: ScopedMetrics,
     pub query_spawned_calls: ScopedMetrics,
-    pub query_cache_hits: IntCounter,
-    pub query_cache_misses: IntCounter,
-    pub query_cache_evicted_entries: IntCounter,
-    pub query_cache_invalidated_entries: IntCounter,
-    pub query_cache_count_bytes: Histogram,
     pub query_critical_error: IntCounter,
+    /// The total number of tracked System API calls invoked during the query execution.
+    pub query_system_api_calls: IntCounterVec,
+    /// The number of canisters evaluated and executed at least once
+    /// during the call graph evaluation.
+    pub evaluated_canisters: Histogram,
+    /// The number of transient errors.
+    pub transient_errors: IntCounter,
+    /// Duration of a subnet query message execution, in seconds, similar to `execution_subnet_message_duration_seconds`.
+    pub subnet_query_messages: HistogramVec,
 }
 
 impl QueryHandlerMetrics {
@@ -124,29 +255,48 @@ impl QueryHandlerMetrics {
                     metrics_registry,
                 ),
             },
-            query_cache_hits: metrics_registry.int_counter(
-                "execution_query_cache_hits",
-                "The number of replica side query cache hits",
-            ),
-            query_cache_misses: metrics_registry.int_counter(
-                "execution_query_cache_misses",
-                "The number of replica side query cache misses",
-            ),
-            query_cache_evicted_entries: metrics_registry.int_counter(
-                "execution_query_cache_evicted_entries",
-                "The number of evicted entries in the replica side query cache",
-            ),
-            query_cache_invalidated_entries: metrics_registry.int_counter(
-                "execution_query_cache_invalidated_entries",
-                "The number of invalidated entries in the replica side query cache",
-            ),
-            query_cache_count_bytes: memory_histogram(
-                "execution_query_cache_count_bytes",
-                "The replica side query cache size in bytes",
-                metrics_registry,
-            ),
             query_critical_error: metrics_registry.error_counter(QUERY_HANDLER_CRITICAL_ERROR),
+            query_system_api_calls: metrics_registry.int_counter_vec(
+                "execution_query_system_api_calls_total",
+                "The total number of tracked System API calls invoked \
+                        during the query execution",
+                &["system_api_call_counter"],
+            ),
+            evaluated_canisters: metrics_registry.histogram(
+                "execution_query_evaluated_canisters",
+                "The number of canisters evaluated and executed at least once \
+                        during the call graph evaluation",
+                vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0],
+            ),
+            transient_errors: metrics_registry.int_counter(
+                "execution_query_transient_errors_total",
+                "The total number of transient errors accumulated \
+                        during the query execution",
+            ),
+            subnet_query_messages: metrics_registry.histogram_vec(
+                "execution_subnet_query_message_duration_seconds",
+                "Duration of a subnet query message execution, in seconds.",
+                decimal_buckets(-3, 2),
+                &["method_name", "status"],
+            ),
         }
+    }
+
+    pub fn observe_subnet_query_message<T>(
+        &self,
+        query_method: QueryMethod,
+        duration: f64,
+        result: &Result<T, UserError>,
+    ) {
+        let method_name_label = &format!("query_ic00_{}", query_method);
+        let status_label = match result {
+            Ok(_) => SUCCESS_STATUS_LABEL,
+            Err(user_error) => &format!("{:?}", user_error.code()),
+        };
+
+        self.subnet_query_messages
+            .with_label_values(&[method_name_label, status_label])
+            .observe(duration);
     }
 }
 
@@ -157,6 +307,7 @@ impl QueryHandlerMetrics {
 /// - the number of instructions executed in the phase,
 /// - the number of slices executed in the phase,
 /// - the number of messages executed in the phase.
+///
 /// Use `MeasurementScope` instead of observing the metrics manually.
 #[derive(Debug)]
 pub(crate) struct ScopedMetrics {
@@ -180,6 +331,7 @@ pub(crate) struct ScopedMetrics {
 /// 2) Add `let scope = MeasurementScope::root(...)` in the top-most phase.
 /// 3) Add `let scope = MeasurementScope::nested(...)` in a sub-phase.
 /// 4) Tell the scopes about executed instructions using `scope.add()`.
+///
 /// See the `example_usage()` test below for details.
 #[must_use = "Keep the scope in a local variable"]
 #[derive(Debug)]
@@ -239,6 +391,11 @@ impl<'a> MeasurementScope<'a> {
         core.slices += slices;
         core.messages += messages;
     }
+
+    /// Returns the number of messages associated with this measurement scope.
+    pub fn messages(&self) -> NumMessages {
+        self.core.borrow().messages
+    }
 }
 
 impl<'a> Clone for MeasurementScope<'a> {
@@ -275,12 +432,16 @@ fn instructions_buckets() -> Vec<f64> {
         buckets.push(NumInstructions::from(value));
     }
 
-    buckets.push(NumInstructions::from(1_000_000_000_000));
+    // Add buckets for counting install_code messages
+    for value in (100_000_000_000..=1_000_000_000_000).step_by(100_000_000_000) {
+        buckets.push(NumInstructions::from(value));
+    }
 
     // Ensure that all buckets are unique.
     buckets.sort_unstable();
     buckets.dedup();
-    // Buckets are [0, 10, 1K, 10K, 20K, ..., 100B, 200B, 500B, 1T] + [1B, 2B, 3B, ..., 9B]
+    // Buckets are [0, 10, 1K, 10K, 20K, ..., 100B, 200B, 500B, 1T] + [1B, 2B, 3B, ..., 9B] + [100B,
+    // 200B, 300B, ..., 900B].
     buckets.into_iter().map(|x| x.get() as f64).collect()
 }
 
@@ -313,37 +474,40 @@ pub fn cycles_histogram<S: Into<String>>(
     metrics_registry.histogram(name, help, decimal_buckets_with_zero(6, 15))
 }
 
-/// Returns buckets appropriate for WASM and Stable memories
-fn memory_buckets() -> Vec<f64> {
-    const K: u64 = 1024;
-    const M: u64 = K * 1024;
-    const G: u64 = M * 1024;
-    let mut buckets: Vec<_> = [
-        0,
-        4 * K,
-        64 * K,
-        M,
-        10 * M,
-        50 * M,
-        100 * M,
-        500 * M,
-        G,
-        2 * G,
-        3 * G,
-        4 * G,
-        5 * G,
-        6 * G,
-        7 * G,
-        8 * G,
-    ]
-    .iter()
-    .chain([MAX_STABLE_MEMORY_IN_BYTES, MAX_WASM_MEMORY_IN_BYTES].iter())
-    .cloned()
-    .collect();
+/// Returns unique and sorted buckets.
+pub fn unique_sorted_buckets(buckets: &[u64]) -> Vec<f64> {
     // Ensure that all buckets are unique
+    let mut buckets = buckets.to_vec();
     buckets.sort_unstable();
     buckets.dedup();
     buckets.into_iter().map(|x| x as f64).collect()
+}
+
+/// Returns buckets appropriate for Wasm and Stable memories
+fn memory_buckets() -> Vec<f64> {
+    const KIB: u64 = 1024;
+    const MIB: u64 = 1024 * KIB;
+    const GIB: u64 = 1024 * MIB;
+    unique_sorted_buckets(&[
+        0,
+        4 * KIB,
+        64 * KIB,
+        MIB,
+        10 * MIB,
+        50 * MIB,
+        100 * MIB,
+        500 * MIB,
+        GIB,
+        2 * GIB,
+        3 * GIB,
+        4 * GIB,
+        5 * GIB,
+        6 * GIB,
+        7 * GIB,
+        8 * GIB,
+        MAX_STABLE_MEMORY_IN_BYTES,
+        MAX_WASM_MEMORY_IN_BYTES,
+    ])
 }
 
 /// Returns a histogram with buckets appropriate for Canister memory.
@@ -388,7 +552,7 @@ struct MeasurementScopeCore<'a> {
     record_zeros: bool,
 }
 
-impl<'a> Drop for MeasurementScopeCore<'a> {
+impl Drop for MeasurementScopeCore<'_> {
     fn drop(&mut self) {
         if let Some(outer) = &self.outer {
             outer.add(self.instructions, self.slices, self.messages);
@@ -648,7 +812,21 @@ mod tests {
             .map(|x| x as u64)
             .collect();
         assert!(!buckets.is_empty());
-        let limits = [10, 1_000, 1_000_000_000, 200_000_000_000, 500_000_000_000];
+        let limits = [
+            10,
+            1_000,
+            1_000_000_000,
+            2_000_000_000,
+            3_000_000_000,
+            5_000_000_000,
+            7_000_000_000,
+            100_000_000_000,
+            200_000_000_000,
+            300_000_000_000,
+            500_000_000_000,
+            700_000_000_000,
+            1_000_000_000_000,
+        ];
         for l in limits {
             assert!(buckets.contains(&l));
         }

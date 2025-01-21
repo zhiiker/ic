@@ -5,10 +5,8 @@ use ic_interfaces::execution_environment::{
     TrapCode::{HeapOutOfBounds, StableMemoryOutOfBounds, StableMemoryTooBigFor32Bit},
 };
 use ic_replicated_state::{canister_state::WASM_PAGE_SIZE_IN_BYTES, page_map, NumWasmPages};
-use ic_types::{NumPages, MAX_STABLE_MEMORY_IN_BYTES};
+use ic_types::NumOsPages;
 
-const MAX_64_BIT_STABLE_MEMORY_IN_PAGES: usize =
-    (MAX_STABLE_MEMORY_IN_BYTES / WASM_PAGE_SIZE_IN_BYTES as u64) as usize;
 const MAX_32_BIT_STABLE_MEMORY_IN_PAGES: usize = 64 * 1024; // 4GiB
 
 /// Essentially the same as a `page_map::Memory`, but we use a `Buffer` instead
@@ -33,31 +31,19 @@ impl StableMemory {
         }
     }
 
-    /// Determines size of stable memory in Web assembly pages.
+    /// Returns the stable memory size in Wasm pages after checking that it fits
+    /// into an unsigned 32-bit integer.
     pub(super) fn stable_size(&self) -> HypervisorResult<u32> {
         let size = self.stable_memory_size.get();
         if size > MAX_32_BIT_STABLE_MEMORY_IN_PAGES {
-            return Err(HypervisorError::Trapped(StableMemoryTooBigFor32Bit));
+            return Err(HypervisorError::Trapped {
+                trap_code: StableMemoryTooBigFor32Bit,
+                backtrace: None,
+            });
         }
 
         // Safe as we confirmed above the value is small enough to fit into 32-bits.
         Ok(size.try_into().unwrap())
-    }
-
-    /// Grows stable memory by specified amount.
-    pub(super) fn stable_grow(&mut self, additional_pages: u32) -> HypervisorResult<i32> {
-        let initial_page_count = self.stable_size()? as usize;
-        let additional_pages = additional_pages as usize;
-
-        if additional_pages + initial_page_count > MAX_32_BIT_STABLE_MEMORY_IN_PAGES {
-            return Ok(-1);
-        }
-
-        self.stable_memory_size = NumWasmPages::from(initial_page_count + additional_pages);
-
-        Ok(initial_page_count
-            .try_into()
-            .expect("could not fit initial page count in 32 bits, although 32-bit api is used"))
     }
 
     /// Reads from stable memory back to heap.
@@ -71,11 +57,17 @@ impl StableMemory {
         let (dst, offset, size) = (dst as usize, offset as usize, size as usize);
 
         if offset + size > (self.stable_size()? as usize * WASM_PAGE_SIZE_IN_BYTES) {
-            return Err(HypervisorError::Trapped(StableMemoryOutOfBounds));
+            return Err(HypervisorError::Trapped {
+                trap_code: StableMemoryOutOfBounds,
+                backtrace: None,
+            });
         }
 
         if dst + size > heap.len() {
-            return Err(HypervisorError::Trapped(HeapOutOfBounds));
+            return Err(HypervisorError::Trapped {
+                trap_code: HeapOutOfBounds,
+                backtrace: None,
+            });
         }
         self.stable_memory_buffer
             .read(&mut heap[dst..dst + size], offset);
@@ -94,36 +86,22 @@ impl StableMemory {
         let (src, offset, size) = (src as usize, offset as usize, size as usize);
 
         if offset + size > (self.stable_size()? as usize * WASM_PAGE_SIZE_IN_BYTES) {
-            return Err(HypervisorError::Trapped(StableMemoryOutOfBounds));
+            return Err(HypervisorError::Trapped {
+                trap_code: StableMemoryOutOfBounds,
+                backtrace: None,
+            });
         }
 
         if src + size > heap.len() {
-            return Err(HypervisorError::Trapped(HeapOutOfBounds));
+            return Err(HypervisorError::Trapped {
+                trap_code: HeapOutOfBounds,
+                backtrace: None,
+            });
         }
 
         self.stable_memory_buffer
             .write(&heap[src..src + size], offset);
         Ok(())
-    }
-
-    /// Determines size of stable memory in Web assembly pages.
-    pub(super) fn stable64_size(&self) -> HypervisorResult<u64> {
-        Ok(self.stable_memory_size.get() as u64)
-    }
-
-    /// Grows stable memory by specified amount.
-    pub(super) fn stable64_grow(&mut self, additional_pages: u64) -> HypervisorResult<i64> {
-        let initial_page_count = self.stable64_size()?;
-
-        let (page_count, overflow) = additional_pages.overflowing_add(initial_page_count);
-        if overflow || page_count > MAX_64_BIT_STABLE_MEMORY_IN_PAGES as u64 {
-            return Ok(-1);
-        }
-
-        self.stable_memory_size =
-            NumWasmPages::from(initial_page_count as usize + additional_pages as usize);
-
-        Ok(initial_page_count as i64)
     }
 
     /// Same as `stable64_read`, but doesn't do any bounds checks on the stable
@@ -140,7 +118,10 @@ impl StableMemory {
     ) -> HypervisorResult<()> {
         let (heap_end, overflow) = dst.overflowing_add(size);
         if overflow || heap_end as usize > heap.len() {
-            return Err(HypervisorError::Trapped(HeapOutOfBounds));
+            return Err(HypervisorError::Trapped {
+                trap_code: HeapOutOfBounds,
+                backtrace: None,
+            });
         }
         self.stable_memory_buffer
             .read(&mut heap[dst as usize..heap_end as usize], offset as usize);
@@ -160,20 +141,30 @@ impl StableMemory {
         let (dst, offset, size) = (dst as usize, offset as usize, size as usize);
 
         let (stable_memory_size_in_bytes, overflow) = self
-            .stable64_size()?
-            .overflowing_mul(WASM_PAGE_SIZE_IN_BYTES as u64);
+            .stable_memory_size
+            .get()
+            .overflowing_mul(WASM_PAGE_SIZE_IN_BYTES);
         if overflow {
-            return Err(HypervisorError::Trapped(StableMemoryOutOfBounds));
+            return Err(HypervisorError::Trapped {
+                trap_code: StableMemoryOutOfBounds,
+                backtrace: None,
+            });
         }
 
         let (stable_memory_end, overflow) = offset.overflowing_add(size);
-        if overflow || stable_memory_end > stable_memory_size_in_bytes as usize {
-            return Err(HypervisorError::Trapped(StableMemoryOutOfBounds));
+        if overflow || stable_memory_end > stable_memory_size_in_bytes {
+            return Err(HypervisorError::Trapped {
+                trap_code: StableMemoryOutOfBounds,
+                backtrace: None,
+            });
         }
 
         let (heap_end, overflow) = dst.overflowing_add(size);
         if overflow || heap_end > heap.len() {
-            return Err(HypervisorError::Trapped(HeapOutOfBounds));
+            return Err(HypervisorError::Trapped {
+                trap_code: HeapOutOfBounds,
+                backtrace: None,
+            });
         }
         self.stable_memory_buffer
             .read(&mut heap[dst..heap_end], offset);
@@ -194,20 +185,30 @@ impl StableMemory {
         let (src, offset, size) = (src as usize, offset as usize, size as usize);
 
         let (stable_memory_size_in_bytes, overflow) = self
-            .stable64_size()?
-            .overflowing_mul(WASM_PAGE_SIZE_IN_BYTES as u64);
+            .stable_memory_size
+            .get()
+            .overflowing_mul(WASM_PAGE_SIZE_IN_BYTES);
         if overflow {
-            return Err(HypervisorError::Trapped(StableMemoryOutOfBounds));
+            return Err(HypervisorError::Trapped {
+                trap_code: StableMemoryOutOfBounds,
+                backtrace: None,
+            });
         }
 
         let (stable_memory_end, overflow) = offset.overflowing_add(size);
-        if overflow || stable_memory_end > stable_memory_size_in_bytes as usize {
-            return Err(HypervisorError::Trapped(StableMemoryOutOfBounds));
+        if overflow || stable_memory_end > stable_memory_size_in_bytes {
+            return Err(HypervisorError::Trapped {
+                trap_code: StableMemoryOutOfBounds,
+                backtrace: None,
+            });
         }
 
         let (heap_end, overflow) = src.overflowing_add(size);
         if overflow || heap_end > heap.len() {
-            return Err(HypervisorError::Trapped(HeapOutOfBounds));
+            return Err(HypervisorError::Trapped {
+                trap_code: HeapOutOfBounds,
+                backtrace: None,
+            });
         }
 
         self.stable_memory_buffer
@@ -220,7 +221,7 @@ impl StableMemory {
     ///
     /// No guarantee is made that such a write would succeed though (e.g. it
     /// could exceed the current stable memory size).
-    pub(super) fn dirty_pages_from_write(&self, offset: u64, size: u64) -> NumPages {
+    pub(super) fn dirty_pages_from_write(&self, offset: u64, size: u64) -> NumOsPages {
         self.stable_memory_buffer
             .dirty_pages_from_write(offset, size)
     }

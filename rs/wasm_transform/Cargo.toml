@@ -1,0 +1,16 @@
+[package]
+name = "ic-wasm-transform"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+description.workspace = true
+documentation.workspace = true
+
+[dependencies]
+wasm-encoder = { workspace = true }
+wasmparser = { workspace = true }
+
+
+[dev-dependencies]
+wasmprinter = { workspace = true }
+wat = { workspace = true }

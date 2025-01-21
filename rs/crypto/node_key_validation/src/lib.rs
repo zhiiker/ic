@@ -3,8 +3,8 @@
 //! Such verification is used, for example, to ensure that only valid node key
 //! material is stored in the registry or to check registry invariants.
 //!
-//! Use `ValidNodePublicKeys::try_from(keys, node_id)` to perform the validation
-//! checks.
+//! Use `ValidNodePublicKeys::try_from(keys, node_id, current_time)` to perform
+//! the validation checks.
 //!
 //! Validation of a *node's signing key* includes verifying that
 //! * the key is present and well-formed
@@ -39,13 +39,16 @@ use ic_base_types::{NodeId, PrincipalId};
 use ic_crypto_internal_basic_sig_ed25519::types::PublicKeyBytes as BasicSigEd25519PublicKeyBytes;
 use ic_crypto_internal_multi_sig_bls12381::types::PopBytes as MultiSigBls12381PopBytes;
 use ic_crypto_internal_multi_sig_bls12381::types::PublicKeyBytes as MultiSigBls12381PublicKeyBytes;
-use ic_crypto_internal_threshold_sig_ecdsa::{verify_mega_public_key, EccCurveType};
+use ic_crypto_internal_threshold_sig_canister_threshold_sig::{
+    verify_mega_public_key, EccCurveType,
+};
 pub use ic_crypto_tls_cert_validation::TlsCertValidationError;
 pub use ic_crypto_tls_cert_validation::ValidTlsCertificate;
 use ic_protobuf::registry::crypto::v1::AlgorithmId as AlgorithmIdProto;
 use ic_protobuf::registry::crypto::v1::PublicKey;
 use ic_protobuf::registry::crypto::v1::X509PublicKeyCert;
 use ic_types::crypto::CurrentNodePublicKeys;
+use ic_types::Time;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::fmt;
@@ -62,7 +65,7 @@ mod proto_conversions;
 /// valid.
 ///
 /// Use `try_from` to create an instance from unvalidated `NodePublicKeys`.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
 pub struct ValidNodePublicKeys {
     node_signing_public_key: ValidNodeSigningPublicKey,
     committee_signing_public_key: ValidCommitteeSigningPublicKey,
@@ -108,14 +111,18 @@ impl
 impl ValidNodePublicKeys {
     /// Determines if the given node public key material is valid.
     ///
-    /// Returns `ValidNodePublicKeys` iff the `keys` are valid and iff they
-    /// are valid for `node_id`. After successful validation, callers shall
-    /// only work with `ValidNodePublicKeys` in their API and not with
-    /// the possibly invalid `CurrentNodePublicKeys` so as to avoid confusion about
-    /// whether key material is validated or not.
+    /// Returns `ValidNodePublicKeys` iff the `keys` are valid with respect to
+    /// the given `node_id` and `current_time`. For additional information on
+    /// how the keys are validated, see this crate's documentation.
+    ///
+    /// After successful validation, callers shall only work with
+    /// `ValidNodePublicKeys` in their API and not with the possibly invalid
+    /// `CurrentNodePublicKeys` so as to avoid confusion about whether key
+    /// material is validated or not.
     pub fn try_from(
         keys: CurrentNodePublicKeys,
         node_id: NodeId,
+        current_time: Time,
     ) -> Result<Self, KeyValidationError> {
         let node_signing_public_key_proto = keys
             .node_signing_public_key
@@ -132,7 +139,8 @@ impl ValidNodePublicKeys {
         let tls_certificate_proto = keys.tls_certificate.ok_or_else(|| TlsCertValidationError {
             error: "invalid TLS certificate: certificate is missing".to_string(),
         })?;
-        let tls_certificate = ValidTlsCertificate::try_from((tls_certificate_proto, node_id))?;
+        let tls_certificate =
+            ValidTlsCertificate::try_from((tls_certificate_proto, node_id, current_time))?;
 
         let dkg_dealing_encryption_public_key_proto = keys
             .dkg_dealing_encryption_public_key
@@ -199,7 +207,7 @@ impl ValidNodePublicKeys {
 ///
 /// See `try_from((PublicKey, NodeId))` if you need to validate the [`derived_node_id`] against an
 /// expected trustworthy node id.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
 pub struct ValidNodeSigningPublicKey {
     public_key: PublicKey,
     derived_node_id: NodeId,
@@ -251,7 +259,7 @@ impl ValidNodeSigningPublicKey {
 ///
 /// The [`public_key`] contained is guaranteed to be immutable and a valid node committee signing public key.
 /// Use `try_from` to create an instance from an unvalidated public key.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
 pub struct ValidCommitteeSigningPublicKey {
     public_key: PublicKey,
 }
@@ -270,7 +278,7 @@ impl TryFrom<PublicKey> for ValidCommitteeSigningPublicKey {
 
         // Note that `verify_pop` also ensures that the public key is a point on the
         // curve and in the right subgroup.
-        ic_crypto_internal_multi_sig_bls12381::verify_pop(pop_bytes, pubkey_bytes)
+        ic_crypto_internal_multi_sig_bls12381::verify_pop(&pop_bytes, &pubkey_bytes)
             .map_err(|e| invalid_committee_signing_key_error(format!("{}", e)))?;
         Ok(Self { public_key: value })
     }
@@ -287,7 +295,7 @@ impl ValidCommitteeSigningPublicKey {
 /// The [`public_key`] contained is guaranteed to be immutable and
 /// a valid NIDGK dealing encryption public key.
 /// Use `try_from((PublicKey, NodeId))` to create an instance from an unvalidated public key and node id.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
 pub struct ValidDkgDealingEncryptionPublicKey {
     public_key: PublicKey,
 }
@@ -322,7 +330,7 @@ impl ValidDkgDealingEncryptionPublicKey {
 /// i.e., the contained public key material is guaranteed to be valid.
 ///
 /// Use `try_from` to create an instance from an unvalidated public key.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
 pub struct ValidIDkgDealingEncryptionPublicKey {
     public_key: PublicKey,
 }
@@ -334,7 +342,7 @@ impl TryFrom<PublicKey> for ValidIDkgDealingEncryptionPublicKey {
     type Error = KeyValidationError;
 
     fn try_from(public_key: PublicKey) -> Result<Self, Self::Error> {
-        let curve_type = match AlgorithmIdProto::from_i32(public_key.algorithm) {
+        let curve_type = match AlgorithmIdProto::try_from(public_key.algorithm).ok() {
             Some(AlgorithmIdProto::MegaSecp256k1) => Ok(EccCurveType::K256),
             alg_id => Err(invalid_idkg_dealing_enc_pubkey_error(format!(
                 "unsupported algorithm: {:?}",
@@ -357,7 +365,7 @@ impl ValidIDkgDealingEncryptionPublicKey {
 }
 
 /// A key validation error.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct KeyValidationError {
     pub error: String,
 }

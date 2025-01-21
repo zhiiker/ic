@@ -5,7 +5,7 @@ use cached::{Cached, SizedCache};
 #[cfg(test)]
 mod tests;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct SignatureCacheStatistics {
     pub size: usize,
     pub hits: u64,
@@ -18,7 +18,7 @@ impl SignatureCacheStatistics {
     }
 }
 
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub(crate) struct SignatureCacheEntry {
     hash: [u8; 32],
 }
@@ -28,7 +28,7 @@ impl SignatureCacheEntry {
     ///
     /// This reduces the amount of memory the cache consumes
     pub(crate) fn new(pk: &[u8; 96], sig: &[u8; 48], msg: &[u8]) -> Self {
-        let mut sha256 = ic_crypto_sha::Sha256::new();
+        let mut sha256 = ic_crypto_sha2::Sha256::new();
         sha256.write(pk);
         sha256.write(sig);
         sha256.write(msg);

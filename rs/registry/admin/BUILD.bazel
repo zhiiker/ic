@@ -2,24 +2,27 @@ load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
 
 package(default_visibility = ["//visibility:public"])
 
+# See rs/nervous_system/feature_test.md
 DEPENDENCIES = [
+    # Keep sorted.
     "//rs/canister_client",
     "//rs/canister_client/sender",
     "//rs/config",
     "//rs/crypto/internal/crypto_lib/types",
-    "//rs/crypto/sha",
     "//rs/crypto/utils/threshold_sig_der",
     "//rs/http_utils",
     "//rs/interfaces/registry",
+    "//rs/nervous_system/clients",
     "//rs/nervous_system/common",
     "//rs/nervous_system/common/test_keys",
-    "//rs/nervous_system/root",
+    "//rs/nervous_system/humanize",
     "//rs/nervous_system/proto",
+    "//rs/nervous_system/root",
     "//rs/nns/cmc",
     "//rs/nns/common",
     "//rs/nns/constants",
-    "//rs/nns/governance",
-    "//rs/nns/handlers/root",
+    "//rs/nns/governance/api",
+    "//rs/nns/handlers/root/impl:root",
     "//rs/nns/init",
     "//rs/nns/sns-wasm",
     "//rs/nns/test_utils",
@@ -37,56 +40,72 @@ DEPENDENCIES = [
     "//rs/registry/subnet_features",
     "//rs/registry/subnet_type",
     "//rs/registry/transport",
-    "//rs/rust_canisters/on_wire",
-    "//rs/sns/swap",
     "//rs/sns/init",
-    "//rs/types/base_types",
-    "//rs/types/ic00_types",
+    "//rs/sns/swap",
+    "//rs/types/management_canister_types",
     "//rs/types/types",
     "@crate_index//:anyhow",
     "@crate_index//:base64",
-    "@crate_index//:bytes",
     "@crate_index//:candid",
     "@crate_index//:chrono",
     "@crate_index//:clap",
     "@crate_index//:futures",
     "@crate_index//:hex",
-    "@crate_index//:humantime",
     "@crate_index//:ic-btc-interface",
+    "@crate_index//:indexmap",
     "@crate_index//:itertools",
-    "@crate_index//:lazy_static",
     "@crate_index//:maplit",
     "@crate_index//:pretty_assertions",
     "@crate_index//:prost",
-    "@crate_index//:regex",
-    "@crate_index//:reqwest",
     "@crate_index//:serde",
-    "@crate_index//:serde-bytes-repr",
-    "@crate_index//:serde_cbor",
     "@crate_index//:serde_json",
     "@crate_index//:strum",
     "@crate_index//:tempfile",
     "@crate_index//:tokio",
     "@crate_index//:url",
-    "@crate_index//:walkdir",
 ]
 
 MACRO_DEPENDENCIES = [
+    # Keep sorted.
+    "//rs/registry/admin-derive",
     "@crate_index//:async-trait",
     "@crate_index//:strum_macros",
-    "//rs/registry/admin-derive",
 ]
 
-DEV_DEPENDENCIES = []
+DEV_DEPENDENCIES = [
+    # Keep sorted.
+    "//packages/pocket-ic",
+    "//rs/nervous_system/integration_tests:nervous_system_integration_tests",
+    "//rs/pocket_ic_server:pocket-ic-server",
+    "//rs/registry/admin:ic-admin",
+]
+
+DEV_DATA = [
+    "//rs/nns/governance:governance-canister",
+    "//rs/nns/handlers/root/impl:root-canister",
+    "//rs/nns/sns-wasm:sns-wasm-canister",
+    "//rs/nns/handlers/lifeline/impl:lifeline_canister",
+    "//rs/registry/canister:registry-canister",
+    "//rs/ledger_suite/icp/ledger:ledger-canister-wasm-notify-method",
+]
+
+DEV_ENV = {
+    "GOVERNANCE_CANISTER_WASM_PATH": "$(rootpath //rs/nns/governance:governance-canister)",
+    "REGISTRY_CANISTER_WASM_PATH": "$(rootpath //rs/registry/canister:registry-canister)",
+    "LEDGER_CANISTER_NOTIFY_METHOD_WASM_PATH": "$(rootpath //rs/ledger_suite/icp/ledger:ledger-canister-wasm-notify-method)",
+    "LIFELINE_CANISTER_WASM_PATH": "$(rootpath //rs/nns/handlers/lifeline/impl:lifeline_canister)",
+    "SNS_WASM_CANISTER_WASM_PATH": "$(rootpath //rs/nns/sns-wasm:sns-wasm-canister)",
+    "ROOT_CANISTER_WASM_PATH": "$(rootpath //rs/nns/handlers/root/impl:root-canister)",
+    "POCKET_IC_BIN": "$(rootpath //rs/pocket_ic_server:pocket-ic-server)",
+    "IC_ADMIN_BIN": "$(rootpath //rs/registry/admin:ic-admin)",
+}
 
 ALIASES = {}
 
 rust_binary(
     name = "ic-admin",
-    srcs = glob(
-        ["src/*.rs"],
-        exclude = ["**/*_tests.rs"],
-    ),
+    testonly = True,
+    srcs = glob(["src/**/*.rs"]),
     aliases = ALIASES,
     proc_macro_deps = MACRO_DEPENDENCIES,
     deps = DEPENDENCIES,
@@ -94,8 +113,18 @@ rust_binary(
 
 rust_test(
     name = "ic-admin_unit_test",
-    srcs = glob(["src/*.rs"]),
     crate = ":ic-admin",
+    proc_macro_deps = MACRO_DEPENDENCIES,
+    deps = DEPENDENCIES,
+)
+
+rust_test(
+    name = "integration_tests",
+    srcs = glob(["tests/**/*.rs"]),
+    aliases = ALIASES,
+    data = DEV_DATA,
+    env = DEV_ENV,
+    flaky = False,
     proc_macro_deps = MACRO_DEPENDENCIES,
     deps = DEPENDENCIES + DEV_DEPENDENCIES,
 )

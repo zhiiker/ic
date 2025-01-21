@@ -47,7 +47,7 @@ pub async fn create_handler(
         }
         Err(err) => {
             return Response::builder()
-                .status(500)
+                .status(400)
                 .body(Body::from(err.to_string()))
                 .unwrap()
         }
@@ -57,6 +57,15 @@ pub async fn create_handler(
     let (id, is_duplicate) = match c.create(&name, &canister).await {
         Ok(id) => (id, false),
         Err(CreateError::Duplicate(id)) => (id, true),
+        Err(CreateError::RateLimited(domain)) => {
+            return Response::builder()
+                .status(429)
+                .body(Body::from(format!(
+                    "rate limit exceeded for domain {}",
+                    domain
+                )))
+                .unwrap()
+        }
         Err(CreateError::UnexpectedError(_)) => {
             return Response::builder()
                 .status(500)
@@ -175,7 +184,7 @@ pub async fn update_handler(
         }
         Err(err) => {
             return Response::builder()
-                .status(500)
+                .status(400)
                 .body(Body::from(err.to_string()))
                 .unwrap()
         }

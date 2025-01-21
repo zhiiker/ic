@@ -26,27 +26,31 @@ use ic_consensus_utils::{
 use ic_interfaces::{
     ingress_manager::IngressSelector,
     messaging::{MessageRouting, MessageRoutingError},
+    time_source::system_time_now,
 };
 use ic_interfaces_registry::RegistryClient;
 use ic_logger::{debug, trace, ReplicaLogger};
 use ic_metrics::MetricsRegistry;
 use ic_types::{
-    consensus::{Block, FinalizationContent, FinalizationShare},
+    consensus::{FinalizationContent, FinalizationShare, HashedBlock},
     replica_config::ReplicaConfig,
-    Height, ReplicaVersion,
+    Height,
 };
-use std::{cell::RefCell, sync::Arc};
+use std::cell::RefCell;
+use std::sync::Arc;
+use std::time::Instant;
 
 pub struct Finalizer {
-    replica_config: ReplicaConfig,
+    pub(crate) replica_config: ReplicaConfig,
     registry_client: Arc<dyn RegistryClient>,
     membership: Arc<Membership>,
-    crypto: Arc<dyn ConsensusCrypto>,
+    pub(crate) crypto: Arc<dyn ConsensusCrypto>,
     message_routing: Arc<dyn MessageRouting>,
     ingress_selector: Arc<dyn IngressSelector>,
-    log: ReplicaLogger,
+    pub(crate) log: ReplicaLogger,
     metrics: FinalizerMetrics,
     prev_finalized_height: RefCell<Height>,
+    last_batch_delivered_at: RefCell<Option<Instant>>,
 }
 
 impl Finalizer {
@@ -71,6 +75,7 @@ impl Finalizer {
             log,
             metrics: FinalizerMetrics::new(metrics_registry),
             prev_finalized_height: RefCell::new(Height::from(0)),
+            last_batch_delivered_at: RefCell::new(None),
         }
     }
 
@@ -94,10 +99,10 @@ impl Finalizer {
         // Try to deliver finalized batches to messaging
         let _ = deliver_batches(
             &*self.message_routing,
+            &self.membership,
             pool,
             &*self.registry_client,
             self.replica_config.subnet_id,
-            ReplicaVersion::default(),
             &self.log,
             None,
             Some(&|result, block_stats, batch_stats| {
@@ -112,7 +117,7 @@ impl Finalizer {
             .collect()
     }
 
-    // Write logs, report metrics depending on the batch deliver result.
+    /// Write logs, report metrics depending on the batch deliver result.
     #[allow(clippy::too_many_arguments)]
     fn process_batch_delivery_result(
         &self,
@@ -122,7 +127,23 @@ impl Finalizer {
     ) {
         match result {
             Ok(()) => {
+                let now = Instant::now();
+                if let Some(last_batch_delivered_at) = *self.last_batch_delivered_at.borrow() {
+                    self.metrics
+                        .batch_delivery_interval
+                        .observe(now.duration_since(last_batch_delivered_at).as_secs_f64());
+                }
+                self.last_batch_delivered_at.borrow_mut().replace(now);
+                // Batch creation time is essentially wall time (on some replica), so the median
+                // duration across the subnet is meaningful.
+                self.metrics.batch_delivery_latency.observe(
+                    system_time_now()
+                        .saturating_duration_since(block_stats.block_time)
+                        .as_secs_f64(),
+                );
+
                 self.metrics.process(&block_stats, &batch_stats);
+
                 for ingress in batch_stats.ingress_ids.iter() {
                     debug!(
                         self.log,
@@ -155,7 +176,7 @@ impl Finalizer {
     ///
     /// In this case, the single notarized block is returned. Otherwise,
     /// return `None`
-    fn pick_block_to_finality_sign(&self, pool: &PoolReader<'_>, h: Height) -> Option<Block> {
+    fn pick_block_to_finality_sign(&self, pool: &PoolReader<'_>, h: Height) -> Option<HashedBlock> {
         let me = self.replica_config.node_id;
         let previous_beacon = pool.get_random_beacon(h.decrement())?;
         // check whether this replica was a notary at height h
@@ -199,10 +220,9 @@ impl Finalizer {
 
         // If notarization shares exists created by this replica at height `h`
         // that sign a block different than `notarized_block`, do not finalize.
-        let other_notarized_shares_exists = pool.get_notarization_shares(h).any(|x| {
-            x.signature.signer == me
-                && x.content.block != ic_types::crypto::crypto_hash(&notarized_block)
-        });
+        let other_notarized_shares_exists = pool
+            .get_notarization_shares(h)
+            .any(|x| x.signature.signer == me && x.content.block != *notarized_block.get_hash());
         if other_notarized_shares_exists {
             return None;
         }
@@ -215,7 +235,9 @@ impl Finalizer {
     fn finalize_height(&self, pool: &PoolReader<'_>, height: Height) -> Option<FinalizationShare> {
         let content = FinalizationContent::new(
             height,
-            ic_types::crypto::crypto_hash(&self.pick_block_to_finality_sign(pool, height)?),
+            self.pick_block_to_finality_sign(pool, height)?
+                .get_hash()
+                .clone(),
         );
         let signature = self
             .crypto
@@ -223,80 +245,6 @@ impl Finalizer {
                 &content,
                 self.replica_config.node_id,
                 pool.registry_version(height)?,
-            )
-            .ok()?;
-        Some(FinalizationShare { content, signature })
-    }
-
-    /// Generate finalization shares for each notarized block in the validated
-    /// pool.
-    #[cfg(feature = "malicious_code")]
-    pub(crate) fn maliciously_finalize_all(&self, pool: &PoolReader<'_>) -> Vec<FinalizationShare> {
-        use ic_interfaces::consensus_pool::HeightRange;
-        use ic_logger::info;
-        use ic_protobuf::log::malicious_behaviour_log_entry::v1::{
-            MaliciousBehaviour, MaliciousBehaviourLogEntry,
-        };
-        trace!(self.log, "maliciously_finalize");
-        let mut finalization_shares = Vec::new();
-
-        let min_height = pool.get_finalized_height().increment();
-        let max_height = pool.get_notarized_height();
-
-        let proposals = pool
-            .pool()
-            .validated()
-            .block_proposal()
-            .get_by_height_range(HeightRange::new(min_height, max_height));
-
-        for proposal in proposals {
-            let block = proposal.as_ref();
-
-            // if this replica already created a finalization share for this block, we do
-            // not finality sign this block anymore. The point is not to spam.
-            let signed_this_block_before = pool
-                .pool()
-                .validated()
-                .finalization_share()
-                .get_by_height(block.height)
-                .any(|share| {
-                    share.signature.signer == self.replica_config.node_id
-                        && share.content.block == *proposal.content.get_hash()
-                });
-
-            if !signed_this_block_before {
-                if let Some(finalization_share) = self.maliciously_finalize_block(pool, block) {
-                    finalization_shares.push(finalization_share);
-                }
-            }
-        }
-
-        if !finalization_shares.is_empty() {
-            info!(
-                self.log,
-                "[MALICIOUS] maliciously finalizing {} proposals",
-                finalization_shares.len();
-                malicious_behaviour => MaliciousBehaviourLogEntry { malicious_behaviour: MaliciousBehaviour::FinalizeAll as i32}
-            );
-        }
-
-        finalization_shares
-    }
-
-    /// Try to create a finalization share for a given block.
-    #[cfg(feature = "malicious_code")]
-    fn maliciously_finalize_block(
-        &self,
-        pool: &PoolReader<'_>,
-        block: &Block,
-    ) -> Option<FinalizationShare> {
-        let content = FinalizationContent::new(block.height, ic_types::crypto::crypto_hash(block));
-        let signature = self
-            .crypto
-            .sign(
-                &content,
-                self.replica_config.node_id,
-                pool.registry_version(block.height)?,
             )
             .ok()?;
         Some(FinalizationShare { content, signature })
@@ -309,28 +257,25 @@ mod tests {
     use super::*;
     use crate::consensus::batch_delivery::generate_responses_to_setup_initial_dkg_calls;
     use ic_consensus_mocks::{dependencies, dependencies_with_subnet_params, Dependencies};
-    use ic_ic00_types::SetupInitialDKGResponse;
+    use ic_crypto_test_utils_ni_dkg::dummy_transcript_for_tests;
     use ic_logger::replica_logger::no_op_logger;
+    use ic_management_canister_types::SetupInitialDKGResponse;
     use ic_metrics::MetricsRegistry;
     use ic_registry_subnet_type::SubnetType;
     use ic_replicated_state::{
         metadata_state::subnet_call_context_manager::SetupInitialDkgContext, SystemMetadata,
     };
     use ic_test_utilities::{
-        ingress_selector::FakeIngressSelector,
-        message_routing::FakeMessageRouting,
-        types::ids::{node_test_id, subnet_test_id},
+        ingress_selector::FakeIngressSelector, message_routing::FakeMessageRouting,
     };
     use ic_test_utilities_registry::SubnetRecordBuilder;
-    use ic_types::consensus::{HasHeight, HashedBlock};
-    use ic_types::messages::Payload;
+    use ic_test_utilities_types::ids::{node_test_id, subnet_test_id};
     use ic_types::{
-        crypto::threshold_sig::ni_dkg::{
-            NiDkgId, NiDkgTag, NiDkgTargetId, NiDkgTargetSubnet, NiDkgTranscript,
-        },
-        messages::{CallbackId, Request},
+        consensus::{HasHeight, HashedBlock},
+        crypto::threshold_sig::ni_dkg::{NiDkgId, NiDkgTag, NiDkgTargetId, NiDkgTargetSubnet},
+        messages::{CallbackId, Payload, Request, NO_DEADLINE},
+        CanisterId, Cycles, PrincipalId, RegistryVersion, SubnetId,
     };
-    use ic_types::{CanisterId, Cycles, PrincipalId, RegistryVersion, SubnetId};
     use std::{
         collections::{BTreeMap, BTreeSet},
         str::FromStr,
@@ -555,6 +500,8 @@ mod tests {
                     payment: Cycles::zero(),
                     method_name: "".to_string(),
                     method_payload: vec![],
+                    metadata: Default::default(),
+                    deadline: NO_DEADLINE,
                 },
                 nodes_in_target_subnet: BTreeSet::new(),
                 target_id: TARGET_ID,
@@ -566,7 +513,7 @@ mod tests {
         .collect::<BTreeMap<_, _>>();
 
         // Build some transcipts with matching ids and tags
-        let transcripts_for_new_subnets = vec![
+        let transcripts_for_remote_subnets = vec![
             (
                 NiDkgId {
                     start_block_height: Height::from(0),
@@ -575,7 +522,7 @@ mod tests {
                     target_subnet: NiDkgTargetSubnet::Remote(TARGET_ID),
                 },
                 CallbackId::from(1),
-                Ok(NiDkgTranscript::dummy_transcript_for_tests()),
+                Ok(dummy_transcript_for_tests()),
             ),
             (
                 NiDkgId {
@@ -585,7 +532,7 @@ mod tests {
                     target_subnet: NiDkgTargetSubnet::Remote(TARGET_ID),
                 },
                 CallbackId::from(1),
-                Ok(NiDkgTranscript::dummy_transcript_for_tests()),
+                Ok(dummy_transcript_for_tests()),
             ),
         ]
         .drain(..)
@@ -593,13 +540,13 @@ mod tests {
 
         // Run the
         let result = generate_responses_to_setup_initial_dkg_calls(
-            &transcripts_for_new_subnets[..],
+            &transcripts_for_remote_subnets[..],
             &no_op_logger(),
         );
         assert_eq!(result.len(), 1);
 
         // Deserialize the `SetupInitialDKGResponse` and check the subnet id
-        let payload = match &result[0].response_payload {
+        let payload = match &result[0].payload {
             Payload::Data(data) => data,
             Payload::Reject(_) => panic!("Payload was rejected unexpectedly"),
         };
@@ -608,7 +555,7 @@ mod tests {
             initial_transcript_records.fresh_subnet_id,
             SubnetId::from(
                 PrincipalId::from_str(
-                    "wqwyc-qwfhw-xd535-3ic5a-jqn3j-okdfe-vlasr-ulpoq-xiirw-xpeoc-iae"
+                    "icdrs-3sfmz-hm6r3-cdzf5-cfroa-3cddh-aght7-azz25-eo34b-4strl-wae"
                 )
                 .unwrap()
             )

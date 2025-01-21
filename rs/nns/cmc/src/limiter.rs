@@ -1,14 +1,16 @@
 use candid::CandidType;
 use ic_types::Cycles;
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
-use std::convert::TryInto;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    collections::VecDeque,
+    convert::TryInto,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 /// A record of how many cycles have been minted in the last `max_age`
 /// period. Minting events are aggregated into windows of `resolution`
 /// seconds in size to limit memory consumption.
-#[derive(Serialize, Deserialize, Clone, CandidType, Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub struct Limiter {
     time_windows: VecDeque<TimeWindowCount>,
     total_count: Cycles,
@@ -85,7 +87,7 @@ impl Limiter {
 
 type TimeWindow = u32;
 
-#[derive(Serialize, Deserialize, Clone, CandidType, Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 struct TimeWindowCount {
     window: TimeWindow,
     count: Cycles,

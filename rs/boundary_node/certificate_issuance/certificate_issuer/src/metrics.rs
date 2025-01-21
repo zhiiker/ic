@@ -6,6 +6,7 @@ use candid::Principal;
 use certificate_orchestrator_interface::IcCertificate;
 use ic_agent::{hash_tree::HashTree, Certificate};
 use opentelemetry::{
+    baggage::BaggageExt,
     metrics::{Counter, Histogram, Meter},
     Context, KeyValue,
 };
@@ -14,7 +15,7 @@ use trust_dns_resolver::{error::ResolveError, lookup::Lookup, proto::rr::RecordT
 
 use crate::{
     acme,
-    certificate::{self, ExportError, Package, UploadError},
+    certificate::{self, ExportError, GetCert, GetCertError, Package, Pair, UploadError},
     check::{Check, CheckError},
     dns::{self, Record, Resolve},
     registration::{
@@ -23,7 +24,8 @@ use crate::{
     },
     verification::{Verify, VerifyError},
     work::{
-        Dispense, DispenseError, Peek, PeekError, Process, ProcessError, Queue, QueueError, Task,
+        extract_domain, Dispense, DispenseError, Peek, PeekError, Process, ProcessError, Queue,
+        QueueError, Task,
     },
 };
 
@@ -39,8 +41,8 @@ impl MetricParams {
         Self {
             action: action.to_string(),
             counter: meter
-                .u64_counter(format!("{namespace}.{action}.total"))
-                .with_description(format!("Counts occurences of {action} calls"))
+                .u64_counter(format!("{namespace}.{action}"))
+                .with_description(format!("Counts occurrences of {action} calls"))
                 .init(),
             recorder: meter
                 .f64_histogram(format!("{namespace}.{action}.duration_sec"))
@@ -64,6 +66,7 @@ impl<T: Create> Create for WithMetrics<T> {
             Ok(_) => "ok",
             Err(err) => match err {
                 CreateError::Duplicate(_) => "duplicate",
+                CreateError::RateLimited(_) => "rate-limited",
                 CreateError::UnexpectedError(_) => "fail",
             },
         };
@@ -78,10 +81,8 @@ impl<T: Create> Create for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
-
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
         info!(action = action.as_str(), name, status, duration, error = ?out.as_ref().err());
 
@@ -123,10 +124,8 @@ impl<T: Update> Update for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
-
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
         info!(action = action.as_str(), %id, typ = ?typ, status, duration, error = ?out.as_ref().err());
 
@@ -159,10 +158,8 @@ impl<T: Remove> Remove for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
-
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
         info!(action = action.as_str(), %id, status, duration, error = ?out.as_ref().err());
 
@@ -195,10 +192,42 @@ impl<T: Get> Get for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
+        info!(action = action.as_str(), %id, status, duration, error = ?out.as_ref().err());
+
+        out
+    }
+}
+
+#[async_trait]
+impl<T: GetCert> GetCert for WithMetrics<T> {
+    async fn get_cert(&self, id: &Id) -> Result<Pair, GetCertError> {
+        let start_time = Instant::now();
+
+        let out = self.0.get_cert(id).await;
+
+        let status = match &out {
+            Ok(_) => "ok",
+            Err(err) => match err {
+                GetCertError::NotFound => "not-found",
+                GetCertError::UnexpectedError(_) => "fail",
+            },
+        };
+
+        let duration = start_time.elapsed().as_secs_f64();
+
+        let labels = &[KeyValue::new("status", status)];
+
+        let MetricParams {
+            action,
+            counter,
+            recorder,
+        } = &self.1;
+
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
         info!(action = action.as_str(), %id, status, duration, error = ?out.as_ref().err());
 
@@ -231,10 +260,8 @@ impl<T: Queue> Queue for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
-
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
         info!(action = action.as_str(), %id, t, status, duration, error = ?out.as_ref().err());
 
@@ -267,10 +294,8 @@ impl<T: Peek> Peek for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
-
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
         info!(action = action.as_str(), status, duration, error = ?out.as_ref().err());
 
@@ -303,10 +328,8 @@ impl<T: Dispense> Dispense for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
-
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
         info!(action = action.as_str(), status, duration, error = ?out.as_ref().err());
 
@@ -324,17 +347,32 @@ impl<T: Process> Process for WithMetrics<T> {
         let status = match &out {
             Ok(_) => "ok",
             Err(err) => match err {
+                ProcessError::AwaitingAcmeOrderCreation => "awaiting-acme-order-creation",
                 ProcessError::AwaitingDnsPropagation => "awaiting-dns-propagation",
                 ProcessError::AwaitingAcmeOrderReady => "awaiting-acme-order-ready",
+                ProcessError::FailedUserConfigurationCheck => "failed-user-configuration-check",
                 ProcessError::UnexpectedError(_) => "fail",
             },
         };
 
         let duration = start_time.elapsed().as_secs_f64();
 
+        let cx = Context::current();
+        let bgg = cx.baggage();
+        let is_renewal = bgg.get("is_renewal").unwrap().to_string();
+        let is_important = bgg.get("is_important").unwrap().to_string();
+
+        let apex_domain = match is_important.as_str() {
+            "1" => extract_domain(&task.name),
+            _ => "N/A",
+        };
+
         let labels = &[
             KeyValue::new("status", status),
             KeyValue::new("task", task.action.to_string()),
+            KeyValue::new("is_renewal", is_renewal.clone()),
+            KeyValue::new("is_important", is_important.clone()),
+            KeyValue::new("apex_domain", apex_domain.to_string()),
         ];
 
         let MetricParams {
@@ -343,12 +381,10 @@ impl<T: Process> Process for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
-
-        info!(action = action.as_str(), id, name = task.name, task = task.action.to_string(), status, duration, error = ?out.as_ref().err());
+        info!(action = action.as_str(), id, name = task.name, task = task.action.to_string(), is_renewal, is_important, status, duration, error = ?out.as_ref().err());
 
         out
     }
@@ -375,10 +411,8 @@ impl<T: Resolve> Resolve for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
-
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
         info!(action = action.as_str(), name, record_type = record_type.to_string(), status, duration, error = ?out.as_ref().err());
 
@@ -404,10 +438,8 @@ impl<T: dns::Create> dns::Create for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
-
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
         info!(action = action.as_str(), zone, name, status, duration, error = ?out.as_ref().err());
 
@@ -433,10 +465,8 @@ impl<T: dns::Delete> dns::Delete for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
-
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
         info!(action = action.as_str(), zone, name, status, duration, error = ?out.as_ref().err());
 
@@ -462,10 +492,8 @@ impl<T: acme::Order> acme::Order for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
-
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
         info!(action = action.as_str(), name, status, duration, error = ?out.as_ref().err());
 
@@ -491,10 +519,8 @@ impl<T: acme::Ready> acme::Ready for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
-
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
         info!(action = action.as_str(), name, status, duration, error = ?out.as_ref().err());
 
@@ -520,10 +546,8 @@ impl<T: acme::Finalize> acme::Finalize for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
-
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
         info!(action = action.as_str(), name, status, duration, error = ?out.as_ref().err());
 
@@ -556,10 +580,8 @@ impl<T: certificate::Upload> certificate::Upload for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
-
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
         info!(action = action.as_str(), %id, status, duration, error = ?out.as_ref().err());
 
@@ -575,7 +597,7 @@ impl<T: Verify> Verify for WithMetrics<T> {
         limit: u64,
         pkgs: &[Package],
         cert: &Certificate,
-        tree: &HashTree,
+        tree: &HashTree<Vec<u8>>,
     ) -> Result<(), VerifyError> {
         let start_time = Instant::now();
 
@@ -592,9 +614,8 @@ impl<T: Verify> Verify for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
         info!(action = action.as_str(), ?key, limit, status, duration, error = ?out.as_ref().err());
 
@@ -624,9 +645,8 @@ impl<T: certificate::Export> certificate::Export for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
         info!(action = action.as_str(), ?key, limit, status, duration, error = ?out.as_ref().err());
 
@@ -665,10 +685,8 @@ impl<T: Check> Check for WithMetrics<T> {
             recorder,
         } = &self.1;
 
-        let cx = Context::current();
-
-        counter.add(&cx, 1, labels);
-        recorder.record(&cx, duration, labels);
+        counter.add(1, labels);
+        recorder.record(duration, labels);
 
         info!(action = action.as_str(), name, status, duration, error = ?out.as_ref().err());
 

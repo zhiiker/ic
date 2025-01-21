@@ -10,15 +10,30 @@ use mockall::automock;
 use serde::Serialize;
 
 use crate::{
+    decoder_config,
     encode::{Decode, Encode},
     verification::Verify,
 };
 
-#[derive(Debug, CandidType, Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, PartialEq, Debug, CandidType, Deserialize, Serialize)]
 pub struct Pair(
     pub Vec<u8>, // Private Key
     pub Vec<u8>, // Certificate Chain
 );
+
+#[derive(Debug, thiserror::Error)]
+pub enum GetCertError {
+    #[error("Not found")]
+    NotFound,
+    #[error(transparent)]
+    UnexpectedError(#[from] anyhow::Error),
+}
+
+#[automock]
+#[async_trait]
+pub trait GetCert: Send + Sync {
+    async fn get_cert(&self, id: &Id) -> Result<Pair, GetCertError>;
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum UploadError {
@@ -34,7 +49,7 @@ pub trait Upload: Sync + Send {
     async fn upload(&self, id: &Id, pair: Pair) -> Result<(), UploadError>;
 }
 
-#[derive(Debug, CandidType, Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, CandidType, Deserialize, Serialize)]
 pub struct Package {
     pub id: String,
     pub name: String,
@@ -55,6 +70,54 @@ pub trait Export: Sync + Send {
         key: Option<String>,
         limit: u64,
     ) -> Result<(Vec<Package>, IcCertificate), ExportError>;
+}
+
+pub struct CanisterCertGetter {
+    agent: Arc<Agent>,
+    canister_id: Principal,
+    decoder: Arc<dyn Decode>,
+}
+
+impl CanisterCertGetter {
+    pub fn new(agent: Arc<Agent>, canister_id: Principal, decoder: Arc<dyn Decode>) -> Self {
+        Self {
+            agent,
+            canister_id,
+            decoder,
+        }
+    }
+}
+
+#[async_trait]
+impl GetCert for CanisterCertGetter {
+    async fn get_cert(&self, id: &Id) -> Result<Pair, GetCertError> {
+        use ifc::{GetCertificateError as Error, GetCertificateResponse as Response};
+
+        let args = Encode!(&id).context("failed to encode arg")?;
+
+        let resp = self
+            .agent
+            .query(&self.canister_id, "getCertificate")
+            .with_arg(args)
+            .call()
+            .await
+            .context("failed to query canister")?;
+
+        let resp = Decode!([decoder_config()]; &resp, Response)
+            .context("failed to decode canister response")?;
+
+        match resp {
+            Response::Ok(enc_pair) => Ok(Pair(
+                self.decoder.decode(&enc_pair.0).await?,
+                self.decoder.decode(&enc_pair.1).await?,
+            )),
+            Response::Err(err) => Err(match err {
+                Error::NotFound => GetCertError::NotFound,
+                Error::Unauthorized => GetCertError::UnexpectedError(anyhow!("unauthorized")),
+                Error::UnexpectedError(err) => GetCertError::UnexpectedError(anyhow!(err)),
+            }),
+        }
+    }
 }
 
 pub struct CanisterUploader {
@@ -93,7 +156,8 @@ impl Upload for CanisterUploader {
             .await
             .context("failed to query canister")?;
 
-        let resp = Decode!(&resp, Response).context("failed to decode canister response")?;
+        let resp = Decode!([decoder_config()]; &resp, Response)
+            .context("failed to decode canister response")?;
 
         match resp {
             Response::Ok(()) => Ok(()),
@@ -138,7 +202,8 @@ impl Export for CanisterExporter {
             .await
             .context("failed to query canister")?;
 
-        let resp = Decode!(&resp, Response).context("failed to decode canister response")?;
+        let resp = Decode!([decoder_config()]; &resp, Response)
+            .context("failed to decode canister response")?;
 
         match resp {
             Response::Ok((pkgs, iccert)) => Ok((
@@ -205,7 +270,7 @@ impl<T: Export> Export for WithVerify<T> {
     ) -> Result<(Vec<Package>, IcCertificate), ExportError> {
         let (pkgs, iccert) = self.0.export(key.clone(), limit).await?;
 
-        let (cert, tree): (Certificate, HashTree) = (
+        let (cert, tree): (Certificate, HashTree<Vec<u8>>) = (
             serde_cbor::from_slice(&iccert.cert).context("failed to cbor-decode ic certificate")?,
             serde_cbor::from_slice(&iccert.tree).context("failed to cbor-decode tree")?,
         );

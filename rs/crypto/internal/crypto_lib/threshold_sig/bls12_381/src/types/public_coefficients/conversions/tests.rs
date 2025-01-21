@@ -1,9 +1,7 @@
 //! Tests for PublicCoefficients conversions
 
-use super::super::arbitrary::arbitrary_public_coefficient_bytes;
 use super::*;
 use ic_crypto_internal_types::sign::threshold_sig::public_coefficients::bls12_381::PublicCoefficientsBytes;
-use proptest::prelude::*;
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
 
@@ -56,9 +54,9 @@ fn public_coefficients_bytes_size_should_be_correct() {
 /// not much to check apart from length.
 #[test]
 fn public_coefficients_from_polynomial_should_be_correct() {
-    let mut rng = ChaChaRng::from_seed([1u8; 32]);
+    let rng = &mut ChaChaRng::from_seed([1u8; 32]);
     for size in 0_usize..10 {
-        let polynomial = Polynomial::random(size, &mut rng);
+        let polynomial = Polynomial::random(size, rng);
         let public_coefficients = PublicCoefficients::from(polynomial);
         assert_eq!(size, public_coefficients.coefficients.len());
     }
@@ -72,11 +70,11 @@ fn public_key_for_public_coefficients_should_be_correct() {
         },
         G2Projective::identity(),
     )];
-    let mut rng = ChaChaRng::from_seed([1u8; 32]);
+    let rng = &mut ChaChaRng::from_seed([1u8; 32]);
     for _ in 0..3 {
-        let polynomial = Polynomial::random(5, &mut rng);
+        let polynomial = Polynomial::random(5, rng);
         let public_coefficients = PublicCoefficients::from(&polynomial);
-        let public_key = public_key_from_secret_key(&polynomial.coefficients[0]);
+        let public_key = public_key_from_secret_key(polynomial.coeff(0));
         test_vectors.push((public_coefficients, public_key.0));
     }
     for (public_coefficients, expected_public_key) in test_vectors {
@@ -98,8 +96,8 @@ fn public_key_for_empty_public_coefficients_should_be_zero() {
 /// coefficient
 #[test]
 fn public_key_for_non_empty_public_coefficients_should_be_correct() {
-    let mut rng = ChaChaRng::from_seed([1u8; 32]);
-    let polynomial = Polynomial::random(5, &mut rng);
+    let rng = &mut ChaChaRng::from_seed([1u8; 32]);
+    let polynomial = Polynomial::random(5, rng);
     let public_coefficients = PublicCoefficients::from(&polynomial);
     let public_key = PublicKey::from(&public_coefficients);
     assert_eq!(public_coefficients.coefficients[0], public_key);
@@ -165,35 +163,4 @@ fn malformed_public_coefficients_bytes_should_fail_to_parse() {
         PublicCoefficients::try_from(&malformed_public_coefficients).is_err(),
         "Expected an error when parsing malformed public coefficients"
     );
-}
-
-/// Verifies that stringifying and parsing PublicCoefficientsBytes yields the
-/// original
-fn test_stringifying_and_parsing_public_coefficients_should_produce_original(
-    public_coefficients: PublicCoefficientsBytes,
-) {
-    let string = String::from(public_coefficients.clone());
-    let parsed = PublicCoefficientsBytes::try_from(string.as_str());
-    assert_eq!(
-        Ok(public_coefficients),
-        parsed,
-        "String form does not parse to original: '{}'",
-        string
-    );
-}
-
-/// Verifies that parsing an invalid PublicCoefficientsBytes string returns an
-/// error
-#[test]
-fn test_parsing_invalid_public_coefficients_string_should_produce_error() {
-    let string = "base 64 has no spaces";
-    let parsed = PublicCoefficientsBytes::try_from(string);
-    assert!(parsed.is_err(), "{}", string);
-}
-
-proptest! {
-    #[test]
-    fn proptest_stringifying_and_parsing_public_coefficients_should_produce_original_new (public_coefficients in arbitrary_public_coefficient_bytes(0,5)) {
-         test_stringifying_and_parsing_public_coefficients_should_produce_original(public_coefficients);
-    }
 }

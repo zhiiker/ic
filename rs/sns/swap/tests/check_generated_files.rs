@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 #[test]
 fn check_generated_files() {
-    let cmd = "cargo run --bin ic-sns-swap-protobuf-generator";
+    let cmd = "bazel run //rs/sns/swap/protobuf_generator:protobuf_generator";
 
     let manifest_dir = PathBuf::from(
         std::env::var("CARGO_MANIFEST_DIR")
@@ -16,7 +16,7 @@ fn check_generated_files() {
     // TODO(NNS1-1589): Uncomment.
     // let sns_root_proto = manifest_dir.join("../root/proto");
     let base_types_proto = manifest_dir.join("../../types/base_types/proto");
-    let ledger_proto = manifest_dir.join("../../rosetta-api/icp_ledger/proto");
+    let ledger_proto = manifest_dir.join("../../ledger_suite/icp/proto");
     let nervous_system_proto = manifest_dir.join("../../nervous_system/proto/proto");
 
     generate_prost_files(

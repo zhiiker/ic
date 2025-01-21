@@ -8,7 +8,11 @@ rust_library(
         "src/lib.rs",
     ],
     crate_name = "ic_canister_log",
-    version = "0.8.0",
+    version = "0.9.0",
+    deps = [
+        # Keep sorted.
+        "@crate_index//:serde",
+    ],
 )
 
 rust_doc_test(

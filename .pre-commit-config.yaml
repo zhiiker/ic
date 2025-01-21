@@ -22,6 +22,13 @@ repos:
     files: \.py$
     language: system
 
+  - id: bazel_protobuf_format
+    name: Auto format Protobuf files
+    stages: [commit]
+    entry: bazel run //:protobuf-format
+    files: \.proto$
+    language: system
+
   - id: bazel_ormolu_format
     name: Auto format Haskell files
     stages: [commit]
@@ -51,31 +58,3 @@ repos:
     language: system
     always_run: true
     verbose: true
-
-# The following repo is maintained by us at
-# https://gitlab.com/dfinity-lab/open/pre-commit-tools.
-- repo: https://gitlab.com/dfinity-lab/open/pre-commit-tools.git
-  rev: 17101bf5cebeda988b13764909a6140badc5ef03
-  hooks:
-  - id: buf-checks
-    args: ["--config=buf.yaml"]
-    exclude: |
-      (?x)(
-      )
-  - id: nixpkgs-fmt
-    exclude: |
-        (?x)^(
-            .*/Cargo\.nix|
-            experimental/.*
-        )$
-
-- repo: https://github.com/willthames/ansible-lint.git
-  rev: v4.2.0
-  hooks:
-    - id: ansible-lint
-      always_run: false
-      files: (^|/)testnet/.+\.(yaml|yml)$
-      exclude: |
-          (?x)^(
-              testnet/tests/.*|.*/docker-compose.yml|testnet/env/shared-config\.yml
-          )$

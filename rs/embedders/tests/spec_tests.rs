@@ -1,9 +1,9 @@
-use std::{ffi::OsString, fmt::Write, fs, path::PathBuf};
+use std::{fmt::Write, fs, path::PathBuf};
 
-use ic_embedders::wasm_utils::wasm_transform;
+use ic_embedders::wasm_utils::validation::wasmtime_validation_config;
 use wasmtime::{
-    Config, Engine, Global, GlobalType, Instance, Linker, Memory, MemoryType, Mutability, Store,
-    Table, TableType, Val, ValType,
+    Config, Engine, Global, GlobalType, Instance, Linker, Memory, MemoryType, Mutability, Ref,
+    RefType, Store, Table, TableType, Val, ValType,
 };
 use wast::{
     parser::ParseBuffer,
@@ -18,22 +18,39 @@ const FILES_TO_SKIP: &[&str] = &["names.wast"];
 
 /// Conversions between wast and wasmtime types.
 mod convert {
+    use wasmtime::Store;
     use wast::{
-        core::{HeapType, NanPattern, V128Pattern, WastArgCore},
-        token::{Float32, Float64},
+        core::{AbstractHeapType, HeapType, NanPattern, V128Pattern, WastArgCore},
+        token::{F32, F64},
         WastArg, WastRet,
     };
 
     fn heap_type(heap_type: HeapType) -> wasmtime::Val {
         match heap_type {
-            HeapType::Func => wasmtime::Val::FuncRef(None),
-            HeapType::Extern => wasmtime::Val::ExternRef(None),
-            HeapType::Any
-            | HeapType::Eq
-            | HeapType::Array
-            | HeapType::I31
-            | HeapType::Index(_)
-            | HeapType::Struct => {
+            HeapType::Abstract { shared: _, ty } => match ty {
+                AbstractHeapType::Func => wasmtime::Val::FuncRef(None),
+                AbstractHeapType::Extern => wasmtime::Val::ExternRef(None),
+                AbstractHeapType::Any
+                | AbstractHeapType::Eq
+                | AbstractHeapType::Struct
+                | AbstractHeapType::Array
+                | AbstractHeapType::I31
+                | AbstractHeapType::NoFunc
+                | AbstractHeapType::NoExtern
+                | AbstractHeapType::None => {
+                    panic!(
+                        "Unable to handle heap type {:?}. The GC proposal isn't supported",
+                        heap_type
+                    )
+                }
+                AbstractHeapType::Exn | AbstractHeapType::NoExn => {
+                    panic!(
+                        "Unable to handle heap type {:?}. The exceptions proposal isn't supported",
+                        heap_type
+                    )
+                }
+            },
+            HeapType::Concrete(_) => {
                 panic!(
                     "Unable to handle heap type {:?}. The GC proposal isn't supported",
                     heap_type
@@ -42,17 +59,22 @@ mod convert {
         }
     }
 
-    pub(super) fn arg(arg: WastArg) -> Option<wasmtime::Val> {
+    pub(super) fn arg(arg: WastArg, store: &mut Store<()>) -> Option<wasmtime::Val> {
         match arg {
             WastArg::Core(WastArgCore::I32(i)) => Some(wasmtime::Val::I32(i)),
             WastArg::Core(WastArgCore::I64(i)) => Some(wasmtime::Val::I64(i)),
             WastArg::Core(WastArgCore::F32(f)) => Some(wasmtime::Val::F32(f.bits)),
             WastArg::Core(WastArgCore::F64(f)) => Some(wasmtime::Val::F64(f.bits)),
-            WastArg::Core(WastArgCore::V128(v)) => {
-                Some(wasmtime::Val::V128(u128::from_le_bytes(v.to_le_bytes())))
-            }
+            WastArg::Core(WastArgCore::V128(v)) => Some(wasmtime::Val::V128(
+                u128::from_le_bytes(v.to_le_bytes()).into(),
+            )),
             WastArg::Core(WastArgCore::RefNull(ty)) => Some(heap_type(ty)),
-            WastArg::Core(WastArgCore::RefExtern(n)) => Some(wasmtime::ExternRef::new(n).into()),
+            WastArg::Core(WastArgCore::RefExtern(n)) => {
+                Some(wasmtime::ExternRef::new(store, n).unwrap().into())
+            }
+            WastArg::Core(WastArgCore::RefHost(n)) => {
+                Some(unsafe { wasmtime::AnyRef::from_raw(store, n).unwrap().into() })
+            }
             WastArg::Component(_) => {
                 println!(
                     "Component feature not enabled. Can't handle WastArg {:?}",
@@ -66,7 +88,7 @@ mod convert {
     /// Comparison of a Wasmtime f32 result with the expected Wast value. Copied
     /// from
     /// https://github.com/bytecodealliance/wasmtime/blob/main/crates/wast/src/core.rs#L106.
-    fn f32_equal(actual: u32, expected: &NanPattern<Float32>) -> bool {
+    fn f32_equal(actual: u32, expected: &NanPattern<F32>) -> bool {
         match expected {
             // Check if an f32 (as u32 bits to avoid possible quieting when moving values in registers, e.g.
             // https://developer.arm.com/documentation/ddi0344/i/neon-and-vfp-programmers-model/modes-of-operation/default-nan-mode?lang=en)
@@ -99,7 +121,7 @@ mod convert {
     /// Comparison of a Wasmtime f64 result with the expected Wast value. Copied
     /// from
     /// https://github.com/bytecodealliance/wasmtime/blob/main/crates/wast/src/core.rs#L171.
-    pub fn f64_equal(actual: u64, expected: &NanPattern<Float64>) -> bool {
+    pub fn f64_equal(actual: u64, expected: &NanPattern<F64>) -> bool {
         match expected {
             // Check if an f64 (as u64 bits to avoid possible quieting when moving values in registers, e.g.
             // https://developer.arm.com/documentation/ddi0344/i/neon-and-vfp-programmers-model/modes-of-operation/default-nan-mode?lang=en)
@@ -187,7 +209,7 @@ mod convert {
         }
     }
 
-    fn val_equal(left: &wasmtime::Val, right: &WastRet) -> bool {
+    fn val_equal(left: &wasmtime::Val, right: &WastRet, store: &Store<()>) -> bool {
         use wasmtime::Val as V;
         use wast::core::WastRetCore as R;
         use WastRet::Core as C;
@@ -197,11 +219,16 @@ mod convert {
             (V::I64(l), C(R::I64(r))) => l == r,
             (V::F32(l), C(R::F32(r))) => f32_equal(*l, r),
             (V::F64(l), C(R::F64(r))) => f64_equal(*l, r),
-            (V::V128(l), C(R::V128(r))) => v128_equal(*l, r),
+            (V::V128(l), C(R::V128(r))) => v128_equal(l.as_u128(), r),
             (V::ExternRef(None), C(R::RefExtern(_))) => false,
             // `WastArgCore::RefExtern` always stores a `u32`.
-            (V::ExternRef(Some(l)), C(R::RefExtern(r))) => {
-                let l = l.data().downcast_ref::<u32>().unwrap();
+            (V::ExternRef(Some(l)), C(R::RefExtern(Some(r)))) => {
+                let l = l
+                    .data(store)
+                    .expect("reference to be rooted")
+                    .unwrap()
+                    .downcast_ref::<u32>()
+                    .unwrap();
                 l == r
             }
             (V::ExternRef(l), C(R::RefNull(_))) => l.is_none(),
@@ -216,9 +243,11 @@ mod convert {
         }
     }
 
-    pub(super) fn vals_equal(left: &[wasmtime::Val], right: &[WastRet]) -> bool {
+    pub(super) fn vals_equal(left: &[wasmtime::Val], right: &[WastRet], store: &Store<()>) -> bool {
         if left.len() == right.len() {
-            left.iter().zip(right.iter()).all(|(l, r)| val_equal(l, r))
+            left.iter()
+                .zip(right.iter())
+                .all(|(l, r)| val_equal(l, r, store))
         } else {
             false
         }
@@ -234,6 +263,10 @@ fn wat_id<'a>(wat: &QuoteWat<'a>) -> Option<Id<'a>> {
     }
 }
 
+// False positive clippy lint.
+// Issue: https://github.com/rust-lang/rust-clippy/issues/12856
+// Fixed in: https://github.com/rust-lang/rust-clippy/pull/12892
+#[allow(clippy::needless_borrows_for_generic_args)]
 /// The tests seem to assume there is an existing `spectest` which provides
 /// these exports.
 fn define_spectest_exports(linker: &mut Linker<()>, mut store: &mut Store<()>) {
@@ -296,8 +329,8 @@ fn define_spectest_exports(linker: &mut Linker<()>, mut store: &mut Store<()>) {
 
     let table = Table::new(
         &mut store,
-        TableType::new(ValType::FuncRef, 10, Some(20)),
-        Val::FuncRef(None),
+        TableType::new(RefType::FUNCREF, 10, Some(20)),
+        Ref::Func(None),
     )
     .unwrap();
     linker
@@ -394,7 +427,10 @@ impl<'a> TestState<'a> {
         params: Vec<WastArg>,
         id: Option<Id<'a>>,
     ) -> Result<Vec<wasmtime::Val>, String> {
-        let params: Vec<_> = params.into_iter().map(|a| convert::arg(a)).collect();
+        let params: Vec<_> = params
+            .into_iter()
+            .map(|x| convert::arg(x, &mut self.store))
+            .collect();
         if params.iter().any(|p| p.is_none()) {
             return Ok(vec![]);
         }
@@ -460,7 +496,7 @@ fn parse_and_encode(
             location(wat, text, path)
         )
     })?;
-    let module = wasm_transform::Module::parse(&wasm, enable_multi_memory)
+    let module = ic_wasm_transform::Module::parse(&wasm, enable_multi_memory)
         .map_err(|e| format!("Parsing error: {:?} in {}", e, location(wat, text, path)))?;
     module
         .encode()
@@ -512,7 +548,7 @@ fn run_directive<'a>(
         }
         // These directives include many wasm modules that wasm-transform won't
         // be able to recognize as invalid (e.g. function bodies that don't type
-        // check). So we want to assert that after parsing and endcoding,
+        // check). So we want to assert that after parsing and encoding,
         // wasmtime still throws an error on validation. That is, wasm-transform
         // didn't somehow make an invalid module valid.
         WastDirective::AssertInvalid {
@@ -542,7 +578,7 @@ fn run_directive<'a>(
             match exec {
                 wast::WastExecute::Invoke(invoke) => {
                     let run_results = test_state.run(invoke.name, invoke.args, invoke.module)?;
-                    if !convert::vals_equal(&run_results, &results) {
+                    if !convert::vals_equal(&run_results, &results, &test_state.store) {
                         return Err(format!(
                             "Incorrect result running wasm at {}: Expected {:?} but got {:?}",
                             span_location(span, text, path),
@@ -592,7 +628,7 @@ fn run_directive<'a>(
                     span_location(span, text, path)
                 )),
                 Err(e) => {
-                    // There seemes to be one case in `bulk.wast` where the
+                    // There seems to be one case in `bulk.wast` where the
                     // error message contains extra information.
                     let message = if message.starts_with("uninitialized element") {
                         "uninitialized element"
@@ -680,6 +716,7 @@ fn run_directive<'a>(
                 }
             }
         }
+        WastDirective::Thread(_) | WastDirective::Wait { .. } => todo!(),
     }
 }
 
@@ -712,18 +749,10 @@ fn test_spec_file(
     }
 }
 
-fn run_testsuite(subdirectory: &str, config: &Config, parsing_multi_memory_enabled: bool) {
-    let dir_path = format!("./external/wasm_spec_testsuite/{}", subdirectory);
-    let directory = std::fs::read_dir(dir_path).unwrap();
-    let mut test_files = vec![];
-    for entry in directory {
-        let entry = entry.unwrap();
-        let path = entry.path();
-        if path.extension() == Some(&OsString::from("wast"))
-            && !FILES_TO_SKIP.contains(&path.file_name().unwrap().to_str().unwrap())
-        {
-            test_files.push(path);
-        }
+/// Run tests on the spec files and collect errors.
+fn run_testsuite(test_files: Vec<PathBuf>, config: &Config, parsing_multi_memory_enabled: bool) {
+    if test_files.is_empty() {
+        panic!("No test files");
     }
 
     println!("Running spec tests on {} files", test_files.len());
@@ -740,13 +769,27 @@ fn run_testsuite(subdirectory: &str, config: &Config, parsing_multi_memory_enabl
     }
 }
 
-/// Note that the tests should pass with or without
-/// `cranelift_nan_canonicalization`. But we only use `wasmtime` with
-/// this feature enabled, so it's better to test the case we actually
-/// use.
+/// Return the list of (wasm spec) test files pointed to by the environment variable (potentially
+/// filtered out, see below).
+fn parse_env_test_files(varname: &str) -> Vec<PathBuf> {
+    let files =
+        std::env::var(varname).unwrap_or_else(|_| panic!("Could not read env var '{varname}'"));
+    files
+        .split(" ") /* File names are space-separated */
+        .map(|f| f.into()) /* str -> PathBuf */
+        /* see FILES_TO_SKIP */
+        .filter(|f: &PathBuf| !FILES_TO_SKIP.contains(&f.file_name().unwrap().to_str().unwrap()))
+        .collect()
+}
+
+/// Returns the config that is as close as possible to the actual config used in
+/// production for validation.
 fn default_config() -> Config {
-    let mut config = Config::default();
-    config.cranelift_nan_canonicalization(true);
+    let mut config = wasmtime_validation_config(&ic_config::embedders::Config::default());
+    // Some tests require SIMD instructions to run.
+    config.wasm_simd(true);
+    // This is needed to avoid stack overflows in some tests.
+    config.max_wasm_stack(512 * 1024);
     config
 }
 
@@ -758,21 +801,24 @@ fn error_to_string(e: anyhow::Error) -> String {
 }
 
 /// These tests run on data from the WebAssembly spec testsuite. The suite is not
-/// incuded in our repo, but is imported by Bazel using the `new_git_repository`
+/// included in our repo, but is imported by Bazel using the `new_git_repository`
 /// rule in `WORKSPACE.bazel`.
 ///
-/// If you need to look at the test `wast` files directly they can be found in
-/// `bazel-ic/external/wasm_spec_testsuite/` after building this test.
+/// See BUILD.bazel for inspecting the `wast` files.
 #[test]
 fn spec_testsuite() {
-    run_testsuite("", &default_config(), false)
+    let test_files = parse_env_test_files("WASM_SPEC_BASE");
+    run_testsuite(test_files, default_config().wasm_memory64(false), false)
 }
 
 #[test]
 fn multi_memory_testsuite() {
+    let test_files = parse_env_test_files("WASM_SPEC_MULTI_MEMORY");
     run_testsuite(
-        "proposals/multi-memory",
-        default_config().wasm_multi_memory(true),
+        test_files,
+        default_config()
+            .wasm_multi_memory(true)
+            .wasm_memory64(false),
         true,
     )
 }
@@ -781,9 +827,6 @@ fn multi_memory_testsuite() {
 fn memory64_testsuite() {
     let mut config = Config::default();
     config.wasm_memory64(true);
-    run_testsuite(
-        "proposals/memory64",
-        default_config().wasm_memory64(true),
-        false,
-    )
+    let test_files = parse_env_test_files("WASM_SPEC_MEMORY64");
+    run_testsuite(test_files, default_config().wasm_memory64(true), false)
 }

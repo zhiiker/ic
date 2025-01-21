@@ -1,17 +1,15 @@
 //! A standalone crate for validating an [`HttpRequest`] according to the
 //! [Internet Computer Specification](https://internetcomputer.org/docs/current/references/ic-interface-spec#http-interface).
-use ic_types::messages::{HasCanisterId, HttpRequest, HttpRequestContent};
+use ic_types::messages::HttpRequest;
 use ic_types::{CanisterId, UserId};
 use std::fmt::{Display, Formatter};
 
 mod internal;
 
 pub use internal::IngressMessageVerifier;
+pub use internal::IngressMessageVerifierBuilder;
+pub use internal::StandaloneIngressSigVerifier;
 pub use internal::TimeProvider;
-
-/// Wrapper trait for the content of an ingress message to be validated.
-pub trait IngressMessageContent: HttpRequestContent + HasCanisterId {}
-impl<T> IngressMessageContent for T where T: HttpRequestContent + HasCanisterId {}
 
 /// Validate an incoming HTTP request according to the
 /// [IC specification](https://internetcomputer.org/docs/current/references/ic-interface-spec#authentication).
@@ -50,10 +48,9 @@ impl<T> IngressMessageContent for T where T: HttpRequestContent + HasCanisterId 
 pub trait HttpRequestVerifier<C> {
     fn validate_request(&self, request: &HttpRequest<C>) -> Result<(), RequestValidationError>;
 }
-
 /// Top-level error that occur when verifying an HTTP request
 /// with [`HttpRequestVerifier::validate_request`].
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum RequestValidationError {
     InvalidIngressExpiry(String),
     InvalidDelegationExpiry(String),
@@ -63,6 +60,9 @@ pub enum RequestValidationError {
     MissingSignature(UserId),
     AnonymousSignatureNotAllowed,
     CanisterNotInDelegationTargets(CanisterId),
+    TooManyPathsError { length: usize, maximum: usize },
+    PathTooLongError { length: usize, maximum: usize },
+    NonceTooBigError { num_bytes: usize, maximum: usize },
 }
 
 impl Display for RequestValidationError {
@@ -93,13 +93,28 @@ impl Display for RequestValidationError {
                 "Canister {} is not one of the delegation targets",
                 canister_id
             ),
+            RequestValidationError::TooManyPathsError { length, maximum } => write!(
+                f,
+                "Too many paths in read state request: got {} paths, but at most {} are allowed",
+                length, maximum
+            ),
+            RequestValidationError::PathTooLongError { length, maximum } => write!(
+                f,
+                "At least one path in read state request is too deep: got {} labels, but at most {} are allowed",
+                length, maximum
+            ),
+            RequestValidationError::NonceTooBigError { num_bytes: length, maximum } => write!(
+                f,
+                "Nonce in request is too big: got {} bytes, but at most {} are allowed",
+                length, maximum
+            ),
         }
     }
 }
 
 /// Authentication-related error that can occur when verifying an HTTP request
 /// with [`HttpRequestVerifier::validate_request`].
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum AuthenticationError {
     /// The signature is invalid and cannot be verified.
     InvalidBasicSignature(String),

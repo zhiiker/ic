@@ -1,19 +1,24 @@
 use crate::webauthn::validate_webauthn_sig;
-use ic_constants::{MAX_INGRESS_TTL, PERMITTED_DRIFT_AT_VALIDATOR};
-use ic_crypto::{user_public_key_from_bytes, KeyBytesContentType};
-use ic_interfaces::crypto::IngressSigVerifier;
-use ic_types::crypto::{CanisterSig, CanisterSigOf};
+use ic_crypto_interfaces_sig_verification::IngressSigVerifier;
+use ic_crypto_standalone_sig_verifier::{user_public_key_from_bytes, KeyBytesContentType};
+use ic_crypto_tree_hash::Path;
+use ic_limits::{MAX_INGRESS_TTL, PERMITTED_DRIFT_AT_VALIDATOR};
 use ic_types::{
-    crypto::{AlgorithmId, BasicSig, BasicSigOf, CryptoError, UserPublicKey},
-    malicious_flags::MaliciousFlags,
+    crypto::{
+        threshold_sig::RootOfTrustProvider, AlgorithmId, BasicSig, BasicSigOf, CanisterSig,
+        CanisterSigOf, CryptoError, UserPublicKey,
+    },
     messages::{
         Authentication, Delegation, HasCanisterId, HttpRequest, HttpRequestContent, MessageId,
-        SignedDelegation, UserSignature, WebAuthnSignature,
+        Query, ReadState, SignedDelegation, SignedIngressContent, UserSignature, WebAuthnSignature,
     },
-    CanisterId, PrincipalId, RegistryVersion, Time, UserId,
+    CanisterId, PrincipalId, Time, UserId,
 };
-use std::collections::HashSet;
-use std::{collections::BTreeSet, convert::TryFrom, fmt};
+use std::{
+    collections::{BTreeSet, HashSet},
+    convert::TryFrom,
+    sync::Arc,
+};
 use thiserror::Error;
 use AuthenticationError::*;
 use RequestValidationError::*;
@@ -24,75 +29,178 @@ mod tests;
 /// Maximum number of delegations allowed in an `HttpRequest`.
 /// Requests having more delegations will be declared invalid without further verifying whether
 /// the delegation chain is correctly signed.
-/// **Note**: this limit is currently more generous than the one in the [IC specification](https://internetcomputer.org/docs/current/references/ic-interface-spec#authentication),
-/// which specifies a maximum of 4 delegations, in order to prevent potentially breaking already deployed applications
-/// since this limit was before (wrongly) not enforced.
-/// This limit will be tightened up once the number of delegations can be observed (via metrics or logs),
-/// see CRP-1961.
+/// **Note**: this limit is part of the [IC specification](https://internetcomputer.org/docs/current/references/ic-interface-spec#authentication)
+/// and so changing this value might be breaking or result in a deviation from the specification.
 const MAXIMUM_NUMBER_OF_DELEGATIONS: usize = 20;
 
 /// Maximum number of targets (collection of `CanisterId`s) that can be specified in a
 /// single delegation. Requests having a single delegation with more targets will be declared
 /// invalid without any further verification.
-/// **Note**: this limit part of the [IC specification](https://internetcomputer.org/docs/current/references/ic-interface-spec#authentication)
+/// **Note**: this limit is part of the [IC specification](https://internetcomputer.org/docs/current/references/ic-interface-spec#authentication)
 /// and so changing this value might be breaking or result in a deviation from the specification.
 const MAXIMUM_NUMBER_OF_TARGETS_PER_DELEGATION: usize = 1_000;
 
-/// Validates the `request` and that the sender is authorized to send
-/// a message to the receiving canister.
-///
-/// See notes on request validity in the crate docs.
-pub fn validate_request<C: HttpRequestContent + HasCanisterId>(
-    request: &HttpRequest<C>,
-    ingress_signature_verifier: &dyn IngressSigVerifier,
-    current_time: Time,
-    registry_version: RegistryVersion,
-    malicious_flags: &MaliciousFlags,
-) -> Result<(), RequestValidationError> {
-    #[cfg(feature = "malicious_code")]
-    {
-        if malicious_flags.maliciously_disable_ingress_validation {
-            return Ok(());
-        }
-    }
+/// Maximum number of bytes allowed for the nonce in an `HttpRequest`.
+/// Requests having a bigger nonce will be declared invalid without any further validation.
+/// **Note**: this limit is part of the [IC specification](https://internetcomputer.org/docs/current/references/ic-interface-spec#authentication)
+/// and so changing this value might be breaking or result in a deviation from the specification.
+const MAXIMUM_NUMBER_OF_BYTES_IN_NONCE: usize = 32;
 
-    get_authorized_canisters(
-        request,
-        ingress_signature_verifier,
-        current_time,
-        registry_version,
-        malicious_flags,
-    )
-    .and_then(|targets| {
-        if targets.contains(&request.content().canister_id()) {
-            Ok(())
-        } else {
-            Err(CanisterNotInDelegationTargets(
-                request.content().canister_id(),
-            ))
-        }
-    })
+/// Maximum number of paths that can be specified in a read state request. Requests having more paths
+/// will be declared invalid without any further verification.
+/// **Note**: this limit is part of the [IC specification](https://internetcomputer.org/docs/current/references/ic-interface-spec#http-read-state)
+/// and so changing this value might be breaking or result in a deviation from the specification.
+const MAXIMUM_NUMBER_OF_PATHS: usize = 1_000;
+
+/// Maximum number of labels than can be specified in a single path inside a read state request.
+/// Requests having a single path with more labels will be declared invalid without any further verification.
+/// **Note**: this limit is part of the [IC specification](https://internetcomputer.org/docs/current/references/ic-interface-spec#http-read-state)
+/// and so changing this value might be breaking or result in a deviation from the specification.
+const MAXIMUM_NUMBER_OF_LABELS_PER_PATH: usize = 127;
+
+/// A trait for validating an `HttpRequest` with content `C`.
+pub trait HttpRequestVerifier<C, R>: Send + Sync {
+    /// Validates the given request.
+    /// If valid, returns the set of canister IDs that are *common* to all delegations.
+    /// Otherwise, returns an error.
+    ///
+    /// The given `request` is valid iff
+    /// * The request hasn't expired relative to `current_time`.
+    /// * The delegations (if any) are valid:
+    ///     * There are at most `MAXIMUM_NUMBER_OF_DELEGATIONS` delegations.
+    ///     * There are at most `MAXIMUM_NUMBER_OF_TARGETS_PER_DELEGATION` targets for each delegation.
+    ///     * The delegations haven't expired relative to `current_time`.
+    ///     * The delegations form a chain of certificates that are correctly signed and do not contain any cycle.
+    /// * The request's signature (if any) is correct.
+    /// * If the request specifies a `CanisterId` (see `HasCanisterId`),
+    ///   then it must be among the set of canister IDs that are common to all delegations.
+    ///
+    /// The following signatures (for signing the request or any delegation) are supported
+    /// (see the [IC specification](https://internetcomputer.org/docs/current/references/ic-interface-spec#signatures)):
+    /// * Ed25519
+    /// * ECDSA secp256r1 (aka P-256)
+    /// * ECDSA secp256k1
+    /// * RSA SHA256
+    /// * Canister signature, where the signature will be verified with respect to the root of trust given by the `root_of_trust_provider`.
+    ///   If no canister signatures are involved, the `root_of_trust_provider` will not be queried.
+    fn validate_request(
+        &self,
+        request: &HttpRequest<C>,
+        current_time: Time,
+        root_of_trust_provider: &R,
+    ) -> Result<CanisterIdSet, RequestValidationError>;
 }
 
-/// Returns the set of canisters that the request is authorized to act on.
-///
-/// The request must be valid for this call to be successful. See notes on
-/// request validity in the crate docs.
-pub fn get_authorized_canisters<C: HttpRequestContent>(
+pub struct HttpRequestVerifierImpl {
+    validator: Arc<dyn IngressSigVerifier + Send + Sync>,
+}
+
+impl HttpRequestVerifierImpl {
+    pub fn new(validator: Arc<dyn IngressSigVerifier + Send + Sync>) -> Self {
+        Self { validator }
+    }
+}
+
+impl<R> HttpRequestVerifier<SignedIngressContent, R> for HttpRequestVerifierImpl
+where
+    R: RootOfTrustProvider,
+    R::Error: std::error::Error,
+{
+    fn validate_request(
+        &self,
+        request: &HttpRequest<SignedIngressContent>,
+        current_time: Time,
+        root_of_trust_provider: &R,
+    ) -> Result<CanisterIdSet, RequestValidationError> {
+        validate_ingress_expiry(request, current_time)?;
+        let delegation_targets = validate_request_content(
+            request,
+            self.validator.as_ref(),
+            current_time,
+            root_of_trust_provider,
+        )?;
+        validate_request_target(request, &delegation_targets)?;
+        Ok(delegation_targets)
+    }
+}
+
+impl<R> HttpRequestVerifier<Query, R> for HttpRequestVerifierImpl
+where
+    R: RootOfTrustProvider,
+    R::Error: std::error::Error,
+{
+    fn validate_request(
+        &self,
+        request: &HttpRequest<Query>,
+        current_time: Time,
+        root_of_trust_provider: &R,
+    ) -> Result<CanisterIdSet, RequestValidationError> {
+        if !request.sender().get().is_anonymous() {
+            validate_ingress_expiry(request, current_time)?;
+        }
+        let delegation_targets = validate_request_content(
+            request,
+            self.validator.as_ref(),
+            current_time,
+            root_of_trust_provider,
+        )?;
+        validate_request_target(request, &delegation_targets)?;
+        Ok(delegation_targets)
+    }
+}
+
+impl<R> HttpRequestVerifier<ReadState, R> for HttpRequestVerifierImpl
+where
+    R: RootOfTrustProvider,
+    R::Error: std::error::Error,
+{
+    fn validate_request(
+        &self,
+        request: &HttpRequest<ReadState>,
+        current_time: Time,
+        root_of_trust_provider: &R,
+    ) -> Result<CanisterIdSet, RequestValidationError> {
+        validate_paths_width_and_depth(&request.content().paths)?;
+        if !request.sender().get().is_anonymous() {
+            validate_ingress_expiry(request, current_time)?;
+        }
+        validate_request_content(
+            request,
+            self.validator.as_ref(),
+            current_time,
+            root_of_trust_provider,
+        )
+    }
+}
+
+fn validate_paths_width_and_depth(paths: &[Path]) -> Result<(), RequestValidationError> {
+    if paths.len() > MAXIMUM_NUMBER_OF_PATHS {
+        return Err(TooManyPaths {
+            maximum: MAXIMUM_NUMBER_OF_PATHS,
+            length: paths.len(),
+        });
+    }
+    for path in paths {
+        if path.len() > MAXIMUM_NUMBER_OF_LABELS_PER_PATH {
+            return Err(PathTooLong {
+                maximum: MAXIMUM_NUMBER_OF_LABELS_PER_PATH,
+                length: path.len(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_request_content<C: HttpRequestContent, R: RootOfTrustProvider>(
     request: &HttpRequest<C>,
     ingress_signature_verifier: &dyn IngressSigVerifier,
     current_time: Time,
-    registry_version: RegistryVersion,
-    #[allow(unused_variables)] malicious_flags: &MaliciousFlags,
-) -> Result<CanisterIdSet, RequestValidationError> {
-    #[cfg(feature = "malicious_code")]
-    {
-        if malicious_flags.maliciously_disable_ingress_validation {
-            return Ok(CanisterIdSet::all());
-        }
-    }
-
-    validate_ingress_expiry(request, current_time)?;
+    root_of_trust_provider: &R,
+) -> Result<CanisterIdSet, RequestValidationError>
+where
+    R::Error: std::error::Error,
+{
+    validate_nonce(request)?;
     validate_user_id_and_signature(
         ingress_signature_verifier,
         &request.sender(),
@@ -102,86 +210,74 @@ pub fn get_authorized_canisters<C: HttpRequestContent>(
             Authentication::Authenticated(signature) => Some(signature),
         },
         current_time,
-        registry_version,
+        root_of_trust_provider,
     )
 }
 
-/// Error in validating an [HttpRequest].
-#[derive(Debug, PartialEq)]
-pub enum RequestValidationError {
-    InvalidIngressExpiry(String),
-    InvalidDelegationExpiry(String),
-    UserIdDoesNotMatchPublicKey(UserId, Vec<u8>),
-    InvalidSignature(AuthenticationError),
-    InvalidDelegation(AuthenticationError),
-    MissingSignature(UserId),
-    AnonymousSignatureNotAllowed,
-    CanisterNotInDelegationTargets(CanisterId),
+fn validate_request_target<C: HasCanisterId>(
+    request: &HttpRequest<C>,
+    targets: &CanisterIdSet,
+) -> Result<(), RequestValidationError> {
+    if targets.contains(&request.content().canister_id()) {
+        Ok(())
+    } else {
+        Err(CanisterNotInDelegationTargets(
+            request.content().canister_id(),
+        ))
+    }
 }
 
-impl fmt::Display for RequestValidationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            InvalidIngressExpiry(msg) => write!(f, "{}", msg),
-            InvalidDelegationExpiry(msg) => write!(f, "{}", msg),
-            UserIdDoesNotMatchPublicKey(user_id, pubkey) => write!(
-                f,
-                "The user id {} does not match the public key {}",
-                user_id,
-                hex::encode(pubkey)
-            ),
-            InvalidSignature(err) => write!(f, "Invalid signature: {}", err),
-            InvalidDelegation(err) => write!(f, "Invalid delegation: {}", err),
-            MissingSignature(user_id) => write!(f, "Missing signature from user: {}", user_id),
-            AnonymousSignatureNotAllowed => {
-                write!(f, "Signature is not allowed for the anonymous user")
-            }
-            CanisterNotInDelegationTargets(canister_id) => write!(
-                f,
-                "Canister {} is not one of the delegation targets",
-                canister_id
-            ),
-        }
-    }
+/// Error in validating an [HttpRequest].
+#[derive(PartialEq, Debug, Error)]
+pub enum RequestValidationError {
+    #[error("Invalid request expiry: {0}")]
+    InvalidRequestExpiry(String),
+    #[error("Invalid delegation expiry: {0}")]
+    InvalidDelegationExpiry(String),
+    #[error("The user id '{0}' does not match the public key '{n}'", n=hex::encode(.1))]
+    UserIdDoesNotMatchPublicKey(UserId, Vec<u8>),
+    #[error("Invalid signature: {0}")]
+    InvalidSignature(AuthenticationError),
+    #[error("Invalid delegation: {0}")]
+    InvalidDelegation(AuthenticationError),
+    #[error("Missing signature from user: {0}")]
+    MissingSignature(UserId),
+    #[error("Signature is not allowed for the anonymous user.")]
+    AnonymousSignatureNotAllowed,
+    #[error("Canister '{0}' is not one of the delegation targets.")]
+    CanisterNotInDelegationTargets(CanisterId),
+    #[error("Too many paths in read state request: got {length} paths, but at most {maximum} are allowed.")]
+    TooManyPaths { length: usize, maximum: usize },
+    #[error("At least one path in read state request is too deep: got {length} labels, but at most {maximum} are allowed.")]
+    PathTooLong { length: usize, maximum: usize },
+    #[error(
+        "Nonce in request is too big: got {num_bytes} bytes, but at most {maximum} are allowed."
+    )]
+    NonceTooBig { num_bytes: usize, maximum: usize },
 }
 
 /// Error in verifying the signature or authentication part of a request.
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq, Debug, Error)]
 pub enum AuthenticationError {
+    #[error("Invalid basic signature: {0}")]
     InvalidBasicSignature(CryptoError),
-    InvalidCanisterSignature(CryptoError),
+    #[error("Invalid canister signature: {0}")]
+    InvalidCanisterSignature(String),
+    #[error("Invalid public key: {0}")]
     InvalidPublicKey(CryptoError),
+    #[error("WebAuthn error: {0}")]
     WebAuthnError(String),
+    #[error("Delegation target error: {0}")]
     DelegationTargetError(String),
+    #[error{"Chain of delegations is too long: got {length} delegations, but at most {maximum} are allowed."}]
     DelegationTooLongError { length: usize, maximum: usize },
+    #[error("Chain of delegations contains at least one cycle: first repeating public key encountered {}", hex::encode(.public_key))]
     DelegationContainsCyclesError { public_key: Vec<u8> },
-}
-
-impl fmt::Display for AuthenticationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            InvalidBasicSignature(err) => write!(f, "Invalid basic signature: {}", err),
-            InvalidCanisterSignature(err) => write!(f, "Invalid canister signature: {}", err),
-            InvalidPublicKey(err) => write!(f, "Invalid public key: {}", err),
-            WebAuthnError(msg) => write!(f, "{}", msg),
-            DelegationTargetError(msg) => write!(f, "{}", msg),
-            DelegationTooLongError { length, maximum } => write!(
-                f,
-                "Chain of delegations is too long: got {} delegations, but at most {} are allowed",
-                length, maximum
-            ),
-            DelegationContainsCyclesError { public_key } => write!(
-                f,
-                "Chain of delegations contains at least one cycle: first repeating public key encountered {}",
-                hex::encode(public_key)
-            ),
-        }
-    }
 }
 
 /// Set of canister IDs.
 ///
-/// It is guaranteed that the set contains at most [`MAXIMUM_NUMBER_OF_TARGETS_PER_DELEGATION`]
+/// It is guaranteed that the set contains at most `MAXIMUM_NUMBER_OF_TARGETS_PER_DELEGATION`
 /// elements.
 /// Use [`CanisterIdSet::all`] to instantiate a set containing the entire domain of canister IDs
 /// or [`CanisterIdSet::try_from_iter`] to instantiate a specific subset.
@@ -205,7 +301,7 @@ impl fmt::Display for AuthenticationError {
 /// assert!(subset_canister_ids.contains(&CanisterId::from_u64(1)));
 /// assert!(!subset_canister_ids.contains(&CanisterId::from_u64(2)));
 /// ```
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct CanisterIdSet {
     ids: internal::CanisterIdSet,
 }
@@ -214,7 +310,7 @@ mod internal {
     use super::*;
     /// An enum representing a mutable set of canister IDs.
     /// Contrary to `super::CanisterIdSet`, the number of canister IDs is not restricted.
-    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    #[derive(Clone, Eq, PartialEq, Hash, Debug)]
     pub(super) enum CanisterIdSet {
         /// The entire domain of canister IDs.
         All,
@@ -302,13 +398,25 @@ impl CanisterIdSet {
     }
 }
 
-#[derive(Error, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Error)]
 pub enum CanisterIdSetInstantiationError {
     #[error(
-        "Expected at most {} elements but got {0}",
-        MAXIMUM_NUMBER_OF_TARGETS_PER_DELEGATION
+        "Expected at most {n} elements but got {0}",
+        n=MAXIMUM_NUMBER_OF_TARGETS_PER_DELEGATION
     )]
     TooManyElements(usize),
+}
+
+fn validate_nonce<C: HttpRequestContent>(
+    request: &HttpRequest<C>,
+) -> Result<(), RequestValidationError> {
+    match request.nonce() {
+        Some(nonce) if nonce.len() > MAXIMUM_NUMBER_OF_BYTES_IN_NONCE => Err(NonceTooBig {
+            num_bytes: nonce.len(),
+            maximum: MAXIMUM_NUMBER_OF_BYTES_IN_NONCE,
+        }),
+        _ => Ok(()),
+    }
 }
 
 // Check if ingress_expiry is within a proper range with respect to the given
@@ -325,32 +433,28 @@ fn validate_ingress_expiry<C: HttpRequestContent>(
     let max_expiry_diff = MAX_INGRESS_TTL
         .checked_add(PERMITTED_DRIFT_AT_VALIDATOR)
         .ok_or_else(|| {
-            InvalidIngressExpiry(format!(
+            InvalidRequestExpiry(format!(
                 "Addition of MAX_INGRESS_TTL {MAX_INGRESS_TTL:?} with \
                 PERMITTED_DRIFT_AT_VALIDATOR {PERMITTED_DRIFT_AT_VALIDATOR:?} overflows",
             ))
         })?;
     let max_allowed_expiry = min_allowed_expiry
-        .checked_add_duration(max_expiry_diff)
+        .checked_add(max_expiry_diff)
         .ok_or_else(|| {
-            InvalidIngressExpiry(format!(
+            InvalidRequestExpiry(format!(
                 "Addition of min_allowed_expiry {min_allowed_expiry:?} \
                 with max_expiry_diff {max_expiry_diff:?} overflows",
             ))
         })?;
     if !(min_allowed_expiry <= provided_expiry && provided_expiry <= max_allowed_expiry) {
         let msg = format!(
-            "Specified ingress_expiry not within expected range:\n\
-             Minimum allowed expiry: {}\n\
-             Maximum allowed expiry: {}\n\
-             Provided expiry:        {}\n\
-             Local replica time:     {}",
-            min_allowed_expiry,
-            max_allowed_expiry,
-            provided_expiry,
-            chrono::Utc::now(),
+            "Specified ingress_expiry not within expected range: \
+             Minimum allowed expiry: {}, \
+             Maximum allowed expiry: {}, \
+             Provided expiry:        {}",
+            min_allowed_expiry, max_allowed_expiry, provided_expiry
         );
-        return Err(InvalidIngressExpiry(msg));
+        return Err(InvalidRequestExpiry(msg));
     }
     Ok(())
 }
@@ -403,13 +507,16 @@ fn validate_user_id(sender_pubkey: &[u8], id: &UserId) -> Result<(), RequestVali
 }
 
 // Verifies that the message is properly signed.
-fn validate_signature(
+fn validate_signature<R: RootOfTrustProvider>(
     validator: &dyn IngressSigVerifier,
     message_id: &MessageId,
     signature: &UserSignature,
     current_time: Time,
-    registry_version: RegistryVersion,
-) -> Result<CanisterIdSet, RequestValidationError> {
+    root_of_trust_provider: &R,
+) -> Result<CanisterIdSet, RequestValidationError>
+where
+    R::Error: std::error::Error,
+{
     validate_sender_delegation_length(&signature.sender_delegation)?;
     validate_sender_delegation_expiry(&signature.sender_delegation, current_time)?;
     let empty_vec = Vec::new();
@@ -419,7 +526,7 @@ fn validate_signature(
         validator,
         signed_delegations.as_slice(),
         signature.signer_pubkey.clone(),
-        registry_version,
+        root_of_trust_provider,
     )?;
 
     let (pk, pk_type) = public_key_from_bytes(&pubkey).map_err(InvalidSignature)?;
@@ -445,9 +552,13 @@ fn validate_signature(
         }
         KeyBytesContentType::IcCanisterSignatureAlgPublicKeyDer => {
             let canister_sig = CanisterSigOf::from(CanisterSig(signature.signature.clone()));
+            let root_of_trust = root_of_trust_provider
+                .root_of_trust()
+                .map_err(|e| InvalidCanisterSignature(e.to_string()))
+                .map_err(InvalidSignature)?;
             validator
-                .verify_canister_sig(&canister_sig, message_id, &pk, registry_version)
-                .map_err(InvalidCanisterSignature)
+                .verify_canister_sig(&canister_sig, message_id, &pk, &root_of_trust)
+                .map_err(|e| InvalidCanisterSignature(e.to_string()))
                 .map_err(InvalidSignature)?;
             Ok(targets)
         }
@@ -474,16 +585,19 @@ fn validate_signature_plain(
 }
 
 // Validate a chain of delegations.
-// See https://sdk.dfinity.org/docs/interface-spec/index.html#_envelope_authentication
+// See https://internetcomputer.org/docs/current/references/ic-interface-spec#authentication
 //
 // If the delegations are valid, returns the public key used to sign the
 // request as well as the set of canister IDs that the public key is valid for.
-fn validate_delegations(
+fn validate_delegations<R: RootOfTrustProvider>(
     validator: &dyn IngressSigVerifier,
     signed_delegations: &[SignedDelegation],
     mut pubkey: Vec<u8>,
-    registry_version: RegistryVersion,
-) -> Result<(Vec<u8>, CanisterIdSet), RequestValidationError> {
+    root_of_trust_provider: &R,
+) -> Result<(Vec<u8>, CanisterIdSet), RequestValidationError>
+where
+    R::Error: std::error::Error,
+{
     ensure_delegations_does_not_contain_cycles(&pubkey, signed_delegations)?;
     ensure_delegations_does_not_contain_too_many_targets(signed_delegations)?;
     // Initially, assume that the delegations target all possible canister IDs.
@@ -493,9 +607,14 @@ fn validate_delegations(
         let delegation = sd.delegation();
         let signature = sd.signature();
 
-        let new_targets =
-            validate_delegation(validator, signature, delegation, &pubkey, registry_version)
-                .map_err(InvalidDelegation)?;
+        let new_targets = validate_delegation(
+            validator,
+            signature,
+            delegation,
+            &pubkey,
+            root_of_trust_provider,
+        )
+        .map_err(InvalidDelegation)?;
         // Restrict the canister targets to the ones specified in the delegation.
         targets = targets.intersect(new_targets);
         pubkey = delegation.pubkey().to_vec();
@@ -540,13 +659,16 @@ fn ensure_delegations_does_not_contain_too_many_targets(
     Ok(())
 }
 
-fn validate_delegation(
+fn validate_delegation<R: RootOfTrustProvider>(
     validator: &dyn IngressSigVerifier,
     signature: &[u8],
     delegation: &Delegation,
     pubkey: &[u8],
-    registry_version: RegistryVersion,
-) -> Result<CanisterIdSet, AuthenticationError> {
+    root_of_trust_provider: &R,
+) -> Result<CanisterIdSet, AuthenticationError>
+where
+    R::Error: std::error::Error,
+{
     let (pk, pk_type) = public_key_from_bytes(pubkey)?;
 
     match pk_type {
@@ -567,9 +689,12 @@ fn validate_delegation(
         }
         KeyBytesContentType::IcCanisterSignatureAlgPublicKeyDer => {
             let canister_sig = CanisterSigOf::from(CanisterSig(signature.to_vec()));
+            let root_of_trust = root_of_trust_provider
+                .root_of_trust()
+                .map_err(|e| InvalidCanisterSignature(e.to_string()))?;
             validator
-                .verify_canister_sig(&canister_sig, delegation, &pk, registry_version)
-                .map_err(InvalidCanisterSignature)?;
+                .verify_canister_sig(&canister_sig, delegation, &pk, &root_of_trust)
+                .map_err(|e| InvalidCanisterSignature(e.to_string()))?;
         }
     }
 
@@ -582,14 +707,17 @@ fn validate_delegation(
 }
 
 // Verifies correct user and signature.
-fn validate_user_id_and_signature(
+fn validate_user_id_and_signature<R: RootOfTrustProvider>(
     ingress_signature_verifier: &dyn IngressSigVerifier,
     sender: &UserId,
     message_id: &MessageId,
     signature: Option<&UserSignature>,
     current_time: Time,
-    registry_version: RegistryVersion,
-) -> Result<CanisterIdSet, RequestValidationError> {
+    root_of_trust_provider: &R,
+) -> Result<CanisterIdSet, RequestValidationError>
+where
+    R::Error: std::error::Error,
+{
     match signature {
         None => {
             if sender.get().is_anonymous() {
@@ -608,7 +736,7 @@ fn validate_user_id_and_signature(
                         message_id,
                         signature,
                         current_time,
-                        registry_version,
+                        root_of_trust_provider,
                     )
                 })
             }

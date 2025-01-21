@@ -10,9 +10,7 @@ use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 // A polynomial is a vector of (usually secret) field elements
-// TODO (CRP-310): Consider making the polynomials private again
-pub mod polynomial;
-pub use polynomial::Polynomial;
+pub(crate) use ic_crypto_internal_bls12_381_type::Polynomial;
 
 // 'PublicCoefficients' is a vector of exponents and is the public version of
 // 'polynomial'.
@@ -49,7 +47,7 @@ impl CombinedSignatureBytes {
 pub(super) type SecretKey = Scalar;
 
 /// A serialized BLS secret key.
-#[derive(Clone, Eq, PartialEq, Zeroize, ZeroizeOnDrop, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Deserialize, Serialize, Zeroize, ZeroizeOnDrop)]
 pub struct SecretKeyBytes(pub(crate) SecretArray<{ SecretKeyBytes::SIZE }>);
 impl SecretKeyBytes {
     pub const SIZE: usize = Scalar::BYTES;
@@ -57,17 +55,21 @@ impl SecretKeyBytes {
     pub fn new(val: SecretArray<{ SecretKeyBytes::SIZE }>) -> Self {
         Self(val)
     }
+
+    pub fn inner_secret(&self) -> &SecretArray<{ SecretKeyBytes::SIZE }> {
+        &self.0
+    }
 }
 
 /// A wrapped BLS public key.
 ///
 /// Doing this (instead of a type) allows for From conversions in
 /// this crate.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct PublicKey(pub G2Projective);
 
 /// Interpolation failed because of duplicate x-coordinates.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum ThresholdError {
     DuplicateX,
 }

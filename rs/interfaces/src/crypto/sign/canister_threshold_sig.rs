@@ -35,8 +35,10 @@ use ic_types::crypto::canister_threshold_sig::error::{
     IDkgOpenTranscriptError, IDkgRetainKeysError, IDkgVerifyComplaintError,
     IDkgVerifyDealingPrivateError, IDkgVerifyDealingPublicError, IDkgVerifyInitialDealingsError,
     IDkgVerifyOpeningError, IDkgVerifyTranscriptError, ThresholdEcdsaCombineSigSharesError,
-    ThresholdEcdsaSignShareError, ThresholdEcdsaVerifyCombinedSignatureError,
-    ThresholdEcdsaVerifySigShareError,
+    ThresholdEcdsaCreateSigShareError, ThresholdEcdsaVerifyCombinedSignatureError,
+    ThresholdEcdsaVerifySigShareError, ThresholdSchnorrCombineSigSharesError,
+    ThresholdSchnorrCreateSigShareError, ThresholdSchnorrVerifyCombinedSigError,
+    ThresholdSchnorrVerifySigShareError,
 };
 use ic_types::crypto::canister_threshold_sig::idkg::{
     BatchSignedIDkgDealings, IDkgComplaint, IDkgOpening, IDkgTranscript, IDkgTranscriptParams,
@@ -44,6 +46,7 @@ use ic_types::crypto::canister_threshold_sig::idkg::{
 };
 use ic_types::crypto::canister_threshold_sig::{
     ThresholdEcdsaCombinedSignature, ThresholdEcdsaSigInputs, ThresholdEcdsaSigShare,
+    ThresholdSchnorrCombinedSignature, ThresholdSchnorrSigInputs, ThresholdSchnorrSigShare,
 };
 use std::collections::{BTreeMap, HashSet};
 
@@ -106,7 +109,7 @@ use std::collections::{BTreeMap, HashSet};
 ///
 /// * Dealers: all the nodes in a subnet.
 /// * Receivers: same nodes as the set of dealers.
-/// The nodes run two instances of the IDKG protocol in sequence:
+///   The nodes run two instances of the IDKG protocol in sequence:
 /// 1. Run IDKG protocol to generate a [`Random`] secret key. Since the commitment used here is masking, the nodes do
 ///    not yet know the corresponding public key, but only a share of it.
 /// 2. Run IDKG protocol to do a [`ReshareOfMasked`] secret key generated in the previous protocol instance. Since the
@@ -120,7 +123,7 @@ use std::collections::{BTreeMap, HashSet};
 /// * Dealers: nodes that were receivers in the IDKG instance that generated the key to be re-shared.
 /// * Receivers: all nodes in the subnet with the new topology (which may include new nodes and exclude nodes that were
 ///   removed).
-/// The nodes re-share a key by running a single IDKG protocol instance:
+///   The nodes re-share a key by running a single IDKG protocol instance:
 /// 1. Run IDKG protocol to do a [`ReshareOfUnmasked`] key that was previously generated.
 ///
 /// ## XNet Key Re-sharing
@@ -143,7 +146,7 @@ use std::collections::{BTreeMap, HashSet};
 /// honest dealings.
 ///
 /// [`InitialIDkgDealings`]: ic_types::crypto::canister_threshold_sig::idkg::InitialIDkgDealings
-/// [`PreSignatureQuadruple`]: ic_types::crypto::canister_threshold_sig::PreSignatureQuadruple
+/// [`EcdsaPreSignatureQuadruple`]: ic_types::crypto::canister_threshold_sig::EcdsaPreSignatureQuadruple
 /// [`Random`]: ic_types::crypto::canister_threshold_sig::idkg::IDkgTranscriptOperation::Random
 /// [`ReshareOfMasked`]: ic_types::crypto::canister_threshold_sig::idkg::IDkgTranscriptOperation::ReshareOfMasked
 /// [`ReshareOfUnmasked`]: ic_types::crypto::canister_threshold_sig::idkg::IDkgTranscriptOperation::ReshareOfUnmasked
@@ -170,6 +173,30 @@ pub trait IDkgProtocol {
     ///
     /// For resharing or multiplication, the relevant previous dealings
     /// must have been loaded via prior calls to `load_transcript`.
+    ///
+    /// # Errors
+    /// * [`IDkgCreateDealingError::NotADealer`] if the current node is not specified as a dealer
+    ///   in `params`.
+    /// * [`IDkgCreateDealingError::MalformedPublicKey`] if the public key in the registry of any
+    ///   of the receivers specified in `params` is malformed.
+    /// * [`IDkgCreateDealingError::PublicKeyNotFound`] if the public key of any of the receivers
+    ///   specified in `params` is not found in the registry.
+    /// * [`IDkgCreateDealingError::UnsupportedAlgorithm`] if the public key in the registry of any
+    ///   of the receivers specified in `params` has an unsupported algorithm.
+    /// * [`IDkgCreateDealingError::RegistryError`] if there was an error retrieving the public key
+    ///   of any of the receivers specified in `params` from the registry.
+    /// * [`IDkgCreateDealingError::SerializationError`] if there was an error deserializing the
+    ///   internal iDKG transcript in `params.operation_type`, or an error serializing the created
+    ///   dealing.
+    /// * [`IDkgCreateDealingError::SignatureError`] if there was an error signing the created
+    ///   dealing.
+    /// * [`IDkgCreateDealingError::InternalError`] if there was an internal error creating the
+    ///   dealing, likely due to invalid input.
+    /// * [`IDkgCreateDealingError::SecretSharesNotFound`] if the secret shares necessary for
+    ///   creating the dealing could not be found in the canister secret key store. Calling
+    ///   [`IDkgProtocol::load_transcript`] may be necessary.
+    /// * [`IDkgCreateDealingError::TransientInternalError`] if there was a transient internal
+    ///   error, e.g., when communicating with the remote CSP vault.
     fn create_dealing(
         &self,
         params: &IDkgTranscriptParams,
@@ -181,10 +208,10 @@ pub trait IDkgProtocol {
     /// and it verifies the optional contextual proof.
     ///
     /// # Errors
-    /// * `IDkgVerifyDealingPublicError::TranscriptIdMismatch` if the transcript ID in the `params`
+    /// * [`IDkgVerifyDealingPublicError::TranscriptIdMismatch`] if the transcript ID in the `params`
     ///    is different from the one included in the dealing.
-    /// * `IDkgVerifyDealingPublicError::InvalidDealing` if the internal dealing is invalid.
-    /// * `IDkgVerifyDealingPublicError::InvalidSignature` if the signature on the dealing is invalid.
+    /// * [`IDkgVerifyDealingPublicError::InvalidDealing`] if the internal dealing is invalid.
+    /// * [`IDkgVerifyDealingPublicError::InvalidSignature`] if the signature on the dealing is invalid.
     fn verify_dealing_public(
         &self,
         params: &IDkgTranscriptParams,
@@ -204,22 +231,22 @@ pub trait IDkgProtocol {
     ///   Otherwise, calling this method may result in a security vulnerability!
     ///
     /// # Errors
-    /// * `IDkgVerifyDealingPrivateError::NotAReceiver` if the caller isn't in the
+    /// * [`IDkgVerifyDealingPrivateError::NotAReceiver`] if the caller isn't in the
     ///   dealing's receivers. Only receivers can perform private verification of dealings.
-    /// * `IDkgVerifyDealingPrivateError::InvalidDealing` if the decrypted shares are not consistent
+    /// * [`IDkgVerifyDealingPrivateError::InvalidDealing`] if the decrypted shares are not consistent
     ///    with polynomial commitment.
-    /// * `IDkgVerifyDealingPrivateError::InvalidArgument` if some argument cannot be parsed correctly.
-    /// * `IDkgVerifyDealingPrivateError::PrivateKeyNotFound` if the secret key store of the node
+    /// * [`IDkgVerifyDealingPrivateError::InvalidArgument`] if some argument cannot be parsed correctly.
+    /// * [`IDkgVerifyDealingPrivateError::PrivateKeyNotFound`] if the secret key store of the node
     ///    does not contain the secret key necessary to decrypt the ciphertext.
-    /// * `IDkgVerifyDealingPrivateError::RegistryError` if the registry client returned an error.
-    /// * `IDkgVerifyDealingPrivateError::PublicKeyNotInRegistry` if the encryption key of the
+    /// * [`IDkgVerifyDealingPrivateError::RegistryError`] if the registry client returned an error.
+    /// * [`IDkgVerifyDealingPrivateError::PublicKeyNotInRegistry`] if the encryption key of the
     ///    receiver is not in the registry.
-    /// * `IDkgVerifyDealingPrivateError::MalformedPublicKey` if the public key of one of the receivers
+    /// * [`IDkgVerifyDealingPrivateError::MalformedPublicKey`] if the public key of one of the receivers
     ///    is not well formed.
-    /// * `IDkgVerifyDealingPrivateError::UnsupportedAlgorithm` if the `params.algorithm_id` is not supported
-    /// * `IDkgVerifyDealingPrivateError::InternalError` if the an internal error occurs.
-    /// * `IDkgVerifyDealingPrivateError::CspVaultRpcError` if there is an RPC error reported when
-    ///    connecting with the vault.
+    /// * [`IDkgVerifyDealingPrivateError::UnsupportedAlgorithm`] if the `params.algorithm_id` is not supported
+    /// * [`IDkgVerifyDealingPrivateError::InternalError`] if the an internal error occurs.
+    /// * [`IDkgVerifyDealingPrivateError::TransientInternalError`] if there was a transient internal
+    ///   error, e.g., when communicating with the remote CSP vault.
     fn verify_dealing_private(
         &self,
         params: &IDkgTranscriptParams,
@@ -233,9 +260,9 @@ pub trait IDkgProtocol {
     /// *  public dealing verification is successful for all dealings in `initial_dealings`
     ///
     /// # Errors
-    /// * `IDkgVerifyInitialDealingsError::MismatchingTranscriptParams` if the
+    /// * [`IDkgVerifyInitialDealingsError::MismatchingTranscriptParams`] if the
     ///   `params` are equal to the params of `initial_dealings`.
-    /// * `IDkgVerifyInitialDealingsError::PublicVerificationFailure` if public
+    /// * [`IDkgVerifyInitialDealingsError::PublicVerificationFailure`] if public
     ///   dealing verification fails for some dealing in `initial_dealings`.
     fn verify_initial_dealings(
         &self,
@@ -248,8 +275,27 @@ pub trait IDkgProtocol {
     /// Performs the following on each dealing:
     /// * Checks consistency with the params
     /// * Checks that the multisignature was computed by at least
-    /// `IDkgTranscriptParams::verification_threshold` receivers
+    ///   `IDkgTranscriptParams::verification_threshold` receivers
     /// * Verifies the (combined) multisignature
+    ///
+    /// # Errors
+    /// * [`IDkgCreateTranscriptError::SerializationError`] if there was an error deserializing the
+    ///   internal iDKG transcript in `params.operation_type`; if there was an error deserializing
+    ///   the internal dealings from the signed `dealings`; or if there was an error serializing
+    ///   the created transcript.
+    /// * [`IDkgCreateTranscriptError::InternalError`] if there was an internal error creating the
+    ///   transcript, likely due to invalid input.
+    /// * [`IDkgCreateTranscriptError::DealerNotAllowed`] if a `NodeId` of a dealer in `dealings`
+    ///   is not included in the list of allowed dealers in `params`.
+    /// * [`IDkgCreateTranscriptError::SignerNotAllowed`] if a `NodeId` of a signer in `dealings`
+    ///   is not included in the list of allowed receivers in `params`.
+    /// * [`IDkgCreateTranscriptError::UnsatisfiedCollectionThreshold`] if the number of `dealings`
+    ///   is less than the collection threshold specified in `params`.
+    /// * [`IDkgCreateTranscriptError::UnsatisfiedVerificationThreshold`] if the number of signers
+    ///   in any dealing in `dealings` is less than the verification threshold specified in
+    ///   `params`.
+    /// * [`IDkgCreateTranscriptError::InvalidSignatureBatch`] if there was an error verifying any
+    ///   of the signatures in any of the dealings in `dealings`.
     fn create_transcript(
         &self,
         params: &IDkgTranscriptParams,
@@ -260,6 +306,18 @@ pub trait IDkgProtocol {
     ///
     /// Also checks that each multisignature was computed by at least
     /// `IDkgTranscriptParams::verification_threshold` receivers.
+    ///
+    /// # Errors
+    /// * [`IDkgVerifyTranscriptError::InvalidArgument`] if there was an error verifying the
+    ///   transcript due to invalid arguments, e.g., an invalid algorithm, insufficient number of
+    ///   dealings, an unexpected commitment type wrt. the dealing type, etc.
+    /// * [`IDkgVerifyTranscriptError::InvalidDealingSignatureBatch`] if there was an error
+    ///   verifying any of the signatures in any of the dealings in `dealings`.
+    /// * [`IDkgVerifyTranscriptError::SerializationError`] if there was an error deserializing the
+    ///   internal transcript in `transcript`, or if there was an error deserializing any of the
+    ///   internal dealings in the verified dealings in `transcript`.
+    /// * [`IDkgVerifyTranscriptError::InvalidTranscript`] if the re-creation of an internal
+    ///   transcript does not match the internal transcript in `transcript`.
     fn verify_transcript(
         &self,
         params: &IDkgTranscriptParams,
@@ -277,9 +335,33 @@ pub trait IDkgProtocol {
     /// * Stores the recombined secret in the local canister secret key store
     ///
     /// # Returns
-    /// * `Ok([])` if decryption succeeded
+    /// * `Ok([])` if decryption succeeded, if the secret share had already been stored in the
+    ///   canister secret keystore, or if this node is not a receiver of the `transcript`.
     /// * `Ok(Vec<IDkgComplaints>)` if some dealings require Openings
-    /// * `Err` if a fatal error occurred
+    ///
+    /// # Errors
+    /// * [`IDkgLoadTranscriptError::InvalidArguments`] if there was an error decrypting
+    ///   ciphertexts, or an error combining openings.
+    /// * [`IDkgLoadTranscriptError::PublicKeyNotFound`] if the public key of this receiver was not
+    ///   found in the registry.
+    /// * [`IDkgLoadTranscriptError::SerializationError`] if there was an error deserializing a
+    ///   dealing from the signed and verified dealings in `transcript`; if there was an error
+    ///   deserializing the internal transcript in `transcript`; if there was an error
+    ///   serializing any of the generated internal complaints; if there was an error deserializing
+    ///   the `MEGaPublicKeySet` from the secret keystore, or if the key with the computed `KeyId`
+    ///   was not of the expected type.
+    /// * [`IDkgLoadTranscriptError::PrivateKeyNotFound`] if the private key corresponding to this
+    ///   receiver's public key was not found in the canister secret keystore.
+    /// * [`IDkgLoadTranscriptError::InternalError`] if there was an internal error while loading
+    ///   the transcript, e.g., an error writing to the canister secret keystore.
+    /// * [`IDkgLoadTranscriptError::MalformedPublicKey`] if this receiver's public key in the
+    ///   registry is malformed.
+    /// * [`IDkgLoadTranscriptError::UnsupportedAlgorithm`] if this receiver's public key in the
+    ///   registry has an unsupported algorithm.
+    /// * [`IDkgLoadTranscriptError::RegistryError`] if there was an error retrieving this
+    ///   receiver's public key from the registry.
+    /// * [`IDkgLoadTranscriptError::TransientInternalError`] if there was a transient internal
+    ///   error, e.g., when communicating with the remote CSP vault.
     fn load_transcript(
         &self,
         transcript: &IDkgTranscript,
@@ -296,31 +378,31 @@ pub trait IDkgProtocol {
     ///     polynomial commitment.
     ///
     /// # Errors
-    /// * `IDkgVerifyComplaintError::InvalidComplaint` if the complaint is invalid.
-    /// * `IDkgVerifyComplaintError::InvalidArguments` if one or more arguments
+    /// * [`IDkgVerifyComplaintError::InvalidComplaint`] if the complaint is invalid.
+    /// * [`IDkgVerifyComplaintError::InvalidArguments`] if one or more arguments
     ///   are invalid.
-    /// * `IDkgVerifyComplaintError::InvalidArgumentsMismatchingTranscriptIDs` if
+    /// * [`IDkgVerifyComplaintError::InvalidArgumentsMismatchingTranscriptIDs`] if
     ///   the transcript IDs in the transcript and the complaint do not match (i.e.,
     ///   are not equal).
-    /// * `IDkgVerifyComplaintError::InvalidArgumentsMissingDealingInTranscript`
+    /// * [`IDkgVerifyComplaintError::InvalidArgumentsMissingDealingInTranscript`]
     ///   if the (verified) dealings in the transcript do not contain a dealing
     ///   whose dealer ID matches the complaint's dealer ID.
-    /// * `IDkgVerifyComplaintError::InvalidArgumentsMissingComplainerInTranscript`
+    /// * [`IDkgVerifyComplaintError::InvalidArgumentsMissingComplainerInTranscript`]
     ///   if the transcript's receivers do not contain a receiver whose ID matches
     ///   the complaint's complainer ID.
-    /// * `IDkgVerifyComplaintError::ComplainerPublicKeyNotInRegistry` if the
+    /// * [`IDkgVerifyComplaintError::ComplainerPublicKeyNotInRegistry`] if the
     ///   complainer's (MEGa) public key cannot be found in the registry.
-    /// * `IDkgVerifyComplaintError::MalformedComplainerPublicKey` if the
+    /// * [`IDkgVerifyComplaintError::MalformedComplainerPublicKey`] if the
     ///   complainer's (MEGa) public key fetched from the registry is malformed.
-    /// * `IDkgVerifyComplaintError::UnsupportedComplainerPublicKeyAlgorithm` if
+    /// * [`IDkgVerifyComplaintError::UnsupportedComplainerPublicKeyAlgorithm`] if
     ///   the algorithm of the complainer's (MEGa) public key in the registry is
     ///   not supported.
-    /// * `IDkgVerifyComplaintError::SerializationError` if the (internal raw)
+    /// * [`IDkgVerifyComplaintError::SerializationError`] if the (internal raw)
     ///   complaint cannot be deserialized, or if the dealing corresponding to the
     ///   complaint's dealer ID cannot be deserialized from the transcript.
-    /// * `IDkgVerifyComplaintError::Registry` if the registry client returns an
+    /// * [`IDkgVerifyComplaintError::Registry`] if the registry client returns an
     ///   error, e.g., because the transcript's `registry_version` is not available.
-    /// * `IDkgVerifyComplaintError::InternalError` if an internal error occurred
+    /// * [`IDkgVerifyComplaintError::InternalError`] if an internal error occurred
     ///   during the verification.
     fn verify_complaint(
         &self,
@@ -331,6 +413,23 @@ pub trait IDkgProtocol {
 
     /// Generate an opening for the dealing given in `complaint`,
     /// reported by `complainer_id`.
+    ///
+    /// # Errors
+    /// * [`IDkgOpenTranscriptError::PrivateKeyNotFound`] if the private key corresponding to this
+    ///   receiver's public key was not found in the canister secret keystore.
+    /// * [`IDkgOpenTranscriptError::PublicKeyNotFound`] if the public key of this receiver was not
+    ///   found in the registry.
+    /// * [`IDkgOpenTranscriptError::MissingDealingInTranscript`] if the `transcript` does not
+    ///   contain a dealing with the `NodeId` of the dealer accused in the `complaint`.
+    /// * [`IDkgOpenTranscriptError::RegistryError`] if there was an error retrieving this
+    ///   receiver's public key from the registry.
+    /// * [`IDkgOpenTranscriptError::InternalError`] if there was an internal error while verifying
+    ///   the complaint; if there was an error serializing the internal opening; if this node is
+    ///   not a receiver in the `transcript`; if there was an error deserializing a signed dealing;
+    ///   or if this receiver's public key in the registry is malformed, or has an unsupported
+    ///   algorithm.
+    /// * [`IDkgOpenTranscriptError::TransientInternalError`] if there was a transient internal
+    ///   error, e.g., when communicating with the remote CSP vault.
     fn open_transcript(
         &self,
         transcript: &IDkgTranscript,
@@ -340,6 +439,19 @@ pub trait IDkgProtocol {
 
     /// Verify that an opening corresponds to the complaint,
     /// and matches the commitment in the transcript.
+    ///
+    /// # Errors
+    /// * [`IDkgVerifyOpeningError::TranscriptIdMismatch`] if the transcript ID in the `transcript`
+    ///   does not match the one in the `opening` and/or the `complaint`.
+    /// * [`IDkgVerifyOpeningError::DealerIdMismatch`] if the dealer ID in the `opening` does not
+    ///   match the one in the `complaint`.
+    /// * [`IDkgVerifyOpeningError::MissingDealingInTranscript`] if the `transcript` does not
+    ///   contain a dealing with the `NodeId` of the dealer accused in the `complaint`.
+    /// * [`IDkgVerifyOpeningError::MissingOpenerInReceivers`] if the ID of the `opener` does not
+    ///   exist as a receiver in the `transcript`.
+    /// * [`IDkgVerifyOpeningError::InternalError`] if there was an internal error verifying the
+    ///   `opening`; if there was an error deserializing the internal `opening`; or if there was an
+    ///   error deserializing a signed dealing.
     fn verify_opening(
         &self,
         transcript: &IDkgTranscript,
@@ -354,6 +466,30 @@ pub trait IDkgProtocol {
     /// # Preconditions
     /// * For each (complaint, (opener, opening)) tuple, it holds that
     ///   `verify_opening(transcript, opener, opening, complaint).is_ok()`
+    ///
+    /// # Errors
+    /// * [`IDkgLoadTranscriptError::InsufficientOpenings`] if, in any of the complaints, there are
+    ///   less openings than the reconstruction threshold specified in the `transcript`.
+    /// * [`IDkgLoadTranscriptError::InvalidArguments`] if there was an error decrypting
+    ///   ciphertexts, or an error combining openings.
+    /// * [`IDkgLoadTranscriptError::PublicKeyNotFound`] if the public key of this receiver was not
+    ///   found in the registry.
+    /// * [`IDkgLoadTranscriptError::SerializationError`] if there was an error deserializing a
+    ///   dealing from the signed and verified dealings in `transcript`; if there was an error
+    ///   deserializing the internal transcript in `transcript`; or if there was an error
+    ///   serializing any of the generated internal complaints.
+    /// * [`IDkgLoadTranscriptError::PrivateKeyNotFound`] if the private key corresponding to this
+    ///   receiver's public key was not found in the canister secret keystore.
+    /// * [`IDkgLoadTranscriptError::InternalError`] if there was an internal error while loading
+    ///   the transcript, e.g., an error writing to the canister secret keystore.
+    /// * [`IDkgLoadTranscriptError::MalformedPublicKey`] if this receiver's public key in the
+    ///   registry is malformed.
+    /// * [`IDkgLoadTranscriptError::UnsupportedAlgorithm`] if this receiver's public key in the
+    ///   registry has an unsupported algorithm.
+    /// * [`IDkgLoadTranscriptError::RegistryError`] if there was an error retrieving this
+    ///   receiver's public key from the registry.
+    /// * [`IDkgLoadTranscriptError::TransientInternalError`] if there was a transient internal
+    ///   error, e.g., when communicating with the remote CSP vault.
     fn load_transcript_with_openings(
         &self,
         transcript: &IDkgTranscript,
@@ -374,30 +510,73 @@ pub trait IDkgProtocol {
     ///   IDKG threshold keys not identified by a transcript will be removed.
     ///
     /// # Errors
-    /// * `IDkgRetainThresholdKeysError::InternalError` if an internal error such as
+    /// * [`IDkgRetainThresholdKeysError::InternalError`] if an internal error such as
     ///   an RPC error communicating with a remote CSP vault occurs
-    /// * `IDkgRetainThresholdKeysError::SerializationError` if a transcript cannot
+    /// * [`IDkgRetainThresholdKeysError::SerializationError`] if a transcript cannot
     ///   be serialized into a key id to identify the IDKG threshold secret key
+    /// * [`IDkgRetainKeysError::TransientInternalError`] if there is a transient error
+    ///   retaining the active transcripts
     fn retain_active_transcripts(
         &self,
         active_transcripts: &HashSet<IDkgTranscript>,
     ) -> Result<(), IDkgRetainKeysError>;
 }
 
-/// A Crypto Component interface to generate ECDSA threshold signature shares.
+/// A Crypto Component interface to generate threshold ECDSA signature shares during the
+/// online phase of the threshold ECDSA protocol. During the offline phase, nodes precompute
+/// quadruples of IDKG transcripts. Each of these quadruples is then used by the nodes to
+/// reply to a single signing request, and then it is discarded.
+///
+/// # Protocol Overview:
+/// The threshold signing protocol is non-interactive, which means that the nodes participating
+/// to the protocol only need to compute a signature share and publish it. Shares can then be
+/// publicly verified by anybody and combined into a single ECDSA signature.
 pub trait ThresholdEcdsaSigner {
-    /// Generate a signature share.
-    fn sign_share(
+    /// Create a threshold ECDSA signature share.
+    ///
+    /// # Prerequisites
+    /// This method depends on the key material for the IDKG transcripts specified in
+    /// `ThresholdEcdsaSigInputs` to be present in the canister secret key store of the
+    /// crypto component. To initialize this key material the transcripts must be loaded
+    /// using the method [`IDkgProtocol::load_transcript`].
+    ///
+    /// # Errors
+    /// * [`ThresholdEcdsaSignShareError::InternalError`] if there was an internal error creating the
+    ///   signature share, likely due to invalid input.
+    /// * [`ThresholdEcdsaSignShareError::NotAReceiver`] if the caller isn't in the
+    ///   transcripts' receivers. Only receivers can create signature shares.
+    /// * [`ThresholdEcdsaSignShareError::SerializationError`] if there was an error deserializing the
+    ///   transcripts or serializing the signature share.
+    /// * [`ThresholdEcdsaSignShareError::SecretSharesNotFound`] if the secret shares necessary
+    ///   for creating the dealing could not be found in the canister secret key store. Calling
+    ///   [`IDkgProtocol::load_transcript`] may be necessary.
+    /// * [`ThresholdEcdsaSignShareError::TransientInternalError`] if there was a transient internal
+    ///   error, e.g., when communicating with the remote CSP vault.
+    fn create_sig_share(
         &self,
         inputs: &ThresholdEcdsaSigInputs,
-    ) -> Result<ThresholdEcdsaSigShare, ThresholdEcdsaSignShareError>;
+    ) -> Result<ThresholdEcdsaSigShare, ThresholdEcdsaCreateSigShareError>;
 }
 
-/// A Crypto Component interface to perform public operations in the ECDSA
-/// threshold signature scheme.
+/// A Crypto Component interface to perform public operations during the online phase of the
+/// threshold ECDSA protocol. During the online phase, nodes compute and advertise shares of
+/// the signatures. These interfaces can be used to verify the shares, combine them into a
+/// single ECDSA signature, and verify the combined signature. All these operations can be
+/// performed publicly and do not require private information.
 pub trait ThresholdEcdsaSigVerifier {
-    /// Verify that the given signature share was correctly created from
-    /// `inputs`.
+    /// Verify a threshold ECDSA signature share.
+    ///
+    /// # Errors
+    /// * [`ThresholdEcdsaVerifySigShareError::InternalError`] if there was an internal error while
+    ///   verifying the signature share, likely due to invalid input.
+    /// * [`ThresholdEcdsaVerifySigShareError::SerializationError`] if there was an error deserializing the
+    ///   transcripts or the signature share.
+    /// * [`ThresholdEcdsaVerifySigShareError::InvalidSignatureShare`] if the signature share is not
+    ///   valid.
+    /// * [`ThresholdEcdsaVerifySigShareError::InvalidArgumentMissingSignerInTranscript`] if the signer
+    ///   was not eligible according to the key transcript.
+    /// * [`ThresholdEcdsaVerifySigShareError::InvalidArguments`] if some arguments are invalid, e.g.,
+    ///   wrong algorithm id.
     fn verify_sig_share(
         &self,
         signer: NodeId,
@@ -405,19 +584,148 @@ pub trait ThresholdEcdsaSigVerifier {
         share: &ThresholdEcdsaSigShare,
     ) -> Result<(), ThresholdEcdsaVerifySigShareError>;
 
-    /// Combine the given signature shares into a conventional ECDSA signature.
+    /// Combine the given threshold ECDSA signature shares into a conventional ECDSA signature.
+    ///
+    /// All of the signature shares must have been generated with respect to the same ThresholdEcdsaSigInputs
     ///
     /// The signature is returned as raw bytes.
+    ///
+    /// # Errors
+    /// * [`ThresholdEcdsaCombineSigSharesError::InternalError`] if there was an internal error while
+    ///   combining the signature shares, likely due to invalid input.
+    /// * [`ThresholdEcdsaCombineSigSharesError::UnsatisfiedReconstructionThreshold`] if the number
+    ///   of signature shares was not sufficient to reconstruct an ECDSA signature.
+    /// * [`ThresholdEcdsaCombineSigSharesError::SerializationError`] if there was an error deserializing the
+    ///   transcripts or the signature shares.
+    /// * [`ThresholdEcdsaCombineSigSharesError::SignerNotAllowed`] if one or more of the singers were
+    ///   not eligible according to the key transcript.
     fn combine_sig_shares(
         &self,
         inputs: &ThresholdEcdsaSigInputs,
         shares: &BTreeMap<NodeId, ThresholdEcdsaSigShare>,
     ) -> Result<ThresholdEcdsaCombinedSignature, ThresholdEcdsaCombineSigSharesError>;
 
-    /// Verify that a combined signature was properly created from the inputs.
+    /// Verify a combined ECDSA signature and its consistency with the input. In particular it verifies that
+    /// the signature is computed from the `kappa` transcript, which is the presignature computed in the offline phase
+    /// of the protocol. This helps ensuring each instance of the signing protocol computes fresh signatures.
+    ///
+    /// # Errors
+    /// * [`ThresholdEcdsaVerifyCombinedSignatureError::InternalError`] if there was an internal error while
+    ///   verifying the combined signature, likely due to invalid input.
+    /// * [`ThresholdEcdsaVerifyCombinedSignatureError::InvalidSignature`] if the signature is not valid.
+    /// * [`ThresholdEcdsaVerifyCombinedSignatureError::SerializationError`] if there was an error deserializing the
+    ///   transcripts or the signature.
+    /// * [`ThresholdEcdsaVerifyCombinedSignatureError::InvalidArguments`] if some arguments are invalid, e.g.,
+    ///   wrong algorithm id.
     fn verify_combined_sig(
         &self,
         inputs: &ThresholdEcdsaSigInputs,
         signature: &ThresholdEcdsaCombinedSignature,
     ) -> Result<(), ThresholdEcdsaVerifyCombinedSignatureError>;
+}
+
+/// A Crypto Component interface to generate threshold Schnorr signature shares during the
+/// online phase of the threshold Schnorr protocol. During the offline phase, nodes precompute
+/// presignature IDKG transcripts. Each of these presignatures is then used by the nodes to
+/// reply to a single signing request, and then the presignature is discarded.
+///
+/// # Protocol Overview:
+/// The threshold signing protocol is non-interactive, which means that the nodes participating
+/// to the protocol only need to compute a signature share and publish it. Shares can then be
+/// publicly verified by anybody and combined into a single Schnorr signature.
+pub trait ThresholdSchnorrSigner {
+    /// Create a threshold Schnorr signature share.
+    ///
+    /// # Prerequisites
+    /// This method depends on the key material for the IDKG transcripts specified in
+    /// `ThresholdSchnorrSigInputs` to be present in the canister secret key store of the
+    /// crypto component. To initialize this key material the transcripts must be loaded
+    /// using the method [`IDkgProtocol::load_transcript`].
+    ///
+    /// # Errors
+    /// * [`ThresholdSchnorrCreateSigShareError::InternalError`] if there was an internal error creating the
+    ///   signature share, likely due to invalid input.
+    /// * [`ThresholdSchnorrCreateSigShareError::NotAReceiver`] if the caller isn't in the
+    ///   transcripts' receivers. Only receivers can create signature shares.
+    /// * [`ThresholdSchnorrCreateSigShareError::SerializationError`] if there was an error deserializing the
+    ///   transcripts or serializing the signature share.
+    /// * [`ThresholdSchnorrCreateSigShareError::SecretSharesNotFound`] if the secret shares necessary
+    ///   for creating the dealing could not be found in the canister secret key store. Calling
+    ///   [`IDkgProtocol::load_transcript`] may be necessary.
+    /// * [`ThresholdSchnorrCreateSigShareError::TransientInternalError`] if there was a transient internal
+    ///   error, e.g., when communicating with the remote vault.
+    fn create_sig_share(
+        &self,
+        inputs: &ThresholdSchnorrSigInputs,
+    ) -> Result<ThresholdSchnorrSigShare, ThresholdSchnorrCreateSigShareError>;
+}
+
+/// A Crypto Component interface to perform public operations during the online phase of the
+/// threshold Schnorr protocol. During the online phase, nodes compute and advertise shares of
+/// the signatures. These interfaces can be used to verify the shares, combine them into a
+/// single Schnorr signature, and verify the combined signature. All these operations can be
+/// performed publicly and do not require private information.
+pub trait ThresholdSchnorrSigVerifier {
+    /// Verify a threshold Schnorr signature share.
+    ///
+    /// # Errors
+    /// * [`ThresholdSchnorrVerifySigShareError::InternalError`] if there was an internal error while
+    ///   verifying the signature share, likely due to invalid input.
+    /// * [`ThresholdSchnorrVerifySigShareError::SerializationError`] if there was an error deserializing the
+    ///   transcripts or the signature share.
+    /// * [`ThresholdSchnorrVerifySigShareError::InvalidSignatureShare`] if the signature share is not
+    ///   valid.
+    /// * [`ThresholdSchnorrVerifySigShareError::InvalidArgumentMissingSignerInTranscript`] if the signer
+    ///   was not eligible according to the key transcript.
+    /// * [`ThresholdSchnorrVerifySigShareError::InvalidArguments`] if some arguments are invalid, e.g.,
+    ///   wrong algorithm id.
+    fn verify_sig_share(
+        &self,
+        signer: NodeId,
+        inputs: &ThresholdSchnorrSigInputs,
+        share: &ThresholdSchnorrSigShare,
+    ) -> Result<(), ThresholdSchnorrVerifySigShareError>;
+
+    /// Combine the given threshold Schnorr signature shares into a conventional Schnorr signature.
+    ///
+    /// All of the signature shares must have been generated with respect to the same ThresholdSchnorrSigInputs
+    ///
+    /// The signature is returned as raw bytes.
+    ///
+    /// # Errors
+    /// * [`ThresholdSchnorrCombineSigSharesError::InternalError`] if there was an internal error while
+    ///   combining the signature shares, likely due to invalid input.
+    /// * [`ThresholdSchnorrCombineSigSharesError::UnsatisfiedReconstructionThreshold`] if the number
+    ///   of signature shares was not sufficient to reconstruct a Schnorr signature.
+    /// * [`ThresholdSchnorrCombineSigSharesError::SerializationError`] if there was an error deserializing the
+    ///   transcripts or the signature shares.
+    /// * [`ThresholdSchnorrCombineSigSharesError::SignerNotAllowed`] if one or more of the singers were
+    ///   not eligible according to the key transcript.
+    fn combine_sig_shares(
+        &self,
+        inputs: &ThresholdSchnorrSigInputs,
+        shares: &BTreeMap<NodeId, ThresholdSchnorrSigShare>,
+    ) -> Result<ThresholdSchnorrCombinedSignature, ThresholdSchnorrCombineSigSharesError>;
+
+    /// Verify a combined Schnorr signature and its consistency with the input.
+    /// In particular, it verifies that the signature is computed from the
+    /// presignature transcript, which is computed in the offline phase of the
+    /// protocol. This helps ensuring each instance of the signing protocol
+    /// computes fresh signatures.
+    ///
+    /// # Errors
+    /// * [`ThresholdSchnorrVerifyCombinedSigError::InternalError`] if
+    ///   there was an internal error while verifying the combined signature,
+    ///   likely due to invalid input.
+    /// * [`ThresholdSchnorrVerifyCombinedSigError::InvalidSignature`] if
+    ///   the signature is not valid.
+    /// * [`ThresholdSchnorrVerifyCombinedSigError::SerializationError`]
+    ///   if there was an error deserializing the transcripts or the signature.
+    /// * [`ThresholdSchnorrVerifyCombinedSigError::InvalidArguments`] if
+    ///   some arguments were invalid, e.g., wrong algorithm ID.
+    fn verify_combined_sig(
+        &self,
+        inputs: &ThresholdSchnorrSigInputs,
+        signature: &ThresholdSchnorrCombinedSignature,
+    ) -> Result<(), ThresholdSchnorrVerifyCombinedSigError>;
 }

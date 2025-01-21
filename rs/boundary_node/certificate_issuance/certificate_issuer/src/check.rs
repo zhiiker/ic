@@ -3,10 +3,8 @@ use async_trait::async_trait;
 use candid::Principal;
 use flate2::bufread::GzDecoder;
 use ic_agent::Agent;
-use ic_response_verification::{
-    types::{Request, Response},
-    verify_request_response_pair, MIN_VERIFICATION_VERSION,
-};
+use ic_http_certification::{HttpRequest, HttpResponse};
+use ic_response_verification::{verify_request_response_pair, MIN_VERIFICATION_VERSION};
 use ic_utils::{
     call::SyncCall,
     interfaces::http_request::{HeaderField, HttpRequestCanister},
@@ -82,9 +80,24 @@ impl Check for Checker {
         let txt_src = format!("_acme-challenge.{}.", name);
 
         match self.resolver.lookup(&txt_src, RecordType::TXT).await {
-            Ok(_) => Err(CheckError::ExistingDnsTxtChallenge {
-                src: txt_src.to_owned(),
-            }),
+            Ok(lookup) => {
+                // If there's no TXT, resolver can also follow a CNAME.
+                if lookup.record_iter().any(|rec| {
+                    !rec.name()
+                        .to_string()
+                        .trim_end_matches('.')
+                        .ends_with(&self.delegation_domain.trim_end_matches('.'))
+                }) {
+                    // There's an existing challenge response. Return error.
+                    Err(CheckError::ExistingDnsTxtChallenge {
+                        src: txt_src.to_owned(),
+                    })
+                } else {
+                    // There's no challenge response, but the resolver followed the CNAME and we have a challenge response under our domain.
+                    // This is ok, as we will just overwrite this record later.
+                    Ok(())
+                }
+            }
             Err(err) => match err.kind() {
                 ResolveErrorKind::NoRecordsFound { .. } => Ok(()),
                 _ => Err(CheckError::UnexpectedError(anyhow!(
@@ -158,14 +171,10 @@ impl Check for Checker {
             })?;
 
         // Phase 4 - Ensure canister mentions known domain.
-        let request = Request {
-            method: String::from("GET"),
-            url: String::from("/.well-known/ic-domains"),
-            headers: vec![],
-        };
+        let request = HttpRequest::get("/.well-known/ic-domains").build();
 
         let (response,) = HttpRequestCanister::create(&self.agent, canister_id)
-            .http_request(&request.method, &request.url, vec![], vec![], None)
+            .http_request(&request.method(), &request.url(), vec![], vec![], None)
             .call()
             .await
             .map_err(|_| CheckError::KnownDomainsUnavailable {
@@ -183,27 +192,24 @@ impl Check for Checker {
         }?;
 
         // Check response certification
-        let response_for_verification = Response {
-            status_code: response.status_code,
-            headers: response
+        let response_for_verification = HttpResponse::ok(
+            // body
+            response.body.clone(),
+            // headers
+            response
                 .headers
                 .iter()
                 .map(|field| (field.0.to_string(), field.1.to_string()))
                 .collect::<Vec<(String, String)>>(),
-            body: response.body.clone(),
-        };
+        )
+        .with_upgrade(response.upgrade.unwrap_or_default())
+        .build();
         let max_cert_time_offset_ns = 300_000_000_000;
         let current_time_ns = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
             .as_nanos();
-        let ic_public_key =
-            &self
-                .agent
-                .read_root_key()
-                .map_err(|_| CheckError::KnownDomainsUnavailable {
-                    id: canister_id.to_string(),
-                })?;
+        let ic_public_key = &self.agent.read_root_key();
         verify_request_response_pair(
             request,
             response_for_verification,
@@ -247,7 +253,7 @@ impl Check for Checker {
 
         // Search for name in response body
         if !body.lines().any(|ln| match ln {
-            Ok(ln) => ln.eq(name),
+            Ok(ln) => ln.trim().eq(name),
             _ => false,
         }) {
             return Err(CheckError::MissingKnownDomains {

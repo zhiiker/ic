@@ -2,9 +2,14 @@
 //! Internet Computer.
 mod errors;
 
-pub use errors::{WasmEngineError, WasmError, WasmInstrumentationError, WasmValidationError};
-use ic_types::CountBytes;
+pub use errors::{
+    doc_ref, AsErrorHelp, ErrorHelp, WasmEngineError, WasmError, WasmInstrumentationError,
+    WasmValidationError,
+};
+use ic_types::MemoryDiskBytes;
 use ic_utils::byte_slice_fmt::truncate_and_format;
+use ic_validate_eq::ValidateEq;
+use ic_validate_eq_derive::ValidateEq;
 use std::{
     fmt,
     path::{Path, PathBuf},
@@ -18,6 +23,13 @@ const WASM_HASH_LENGTH: usize = 32;
 /// Wasm modules used for execution.
 #[derive(Clone)]
 pub struct BinaryEncodedWasm(Arc<Vec<u8>>);
+
+impl std::fmt::Debug for BinaryEncodedWasm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Ignore the actual binary contents when debug formatting.
+        f.debug_tuple("BinaryEncodedWasm").finish()
+    }
+}
 
 impl BinaryEncodedWasm {
     pub fn new(wasm: Vec<u8>) -> Self {
@@ -40,9 +52,10 @@ impl BinaryEncodedWasm {
 ///   * Gzip-compressed Wasm modules (magic number \1f\8b\08)
 // We don't derive `Serialize` and `Deserialize` because this is a binary that is serialized by
 // writing it to a file when creating checkpoints.
-#[derive(Clone)]
+#[derive(Clone, ValidateEq)]
 pub struct CanisterModule {
     // The Wasm binary.
+    #[validate_eq(Ignore)]
     module: ModuleStorage,
     // The Sha256 hash of the binary.
     module_hash: [u8; WASM_HASH_LENGTH],
@@ -51,7 +64,7 @@ pub struct CanisterModule {
 impl CanisterModule {
     pub fn new(bytes: Vec<u8>) -> Self {
         let module = ModuleStorage::Memory(Arc::new(bytes));
-        let module_hash = ic_crypto_sha::Sha256::hash(module.as_slice());
+        let module_hash = ic_crypto_sha2::Sha256::hash(module.as_slice());
         Self {
             module,
             module_hash,
@@ -63,7 +76,7 @@ impl CanisterModule {
         // It should only be necessary to compute the hash here when
         // loading checkpoints written by older replica versions
         let module_hash =
-            module_hash.map_or_else(|| ic_crypto_sha::Sha256::hash(module.as_slice()), |h| h.0);
+            module_hash.map_or_else(|| ic_crypto_sha2::Sha256::hash(module.as_slice()), |h| h.0);
         Ok(Self {
             module,
             module_hash,
@@ -127,10 +140,14 @@ impl std::hash::Hash for CanisterModule {
 }
 
 /// The hash of an __uninstrumented__ canister wasm.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct WasmHash([u8; WASM_HASH_LENGTH]);
 
 impl WasmHash {
+    pub fn to_slice(&self) -> [u8; WASM_HASH_LENGTH] {
+        self.0
+    }
+
     pub fn to_vec(&self) -> Vec<u8> {
         self.0.to_vec()
     }
@@ -148,10 +165,45 @@ impl From<[u8; WASM_HASH_LENGTH]> for WasmHash {
     }
 }
 
-impl CountBytes for WasmHash {
-    fn count_bytes(&self) -> usize {
+impl TryFrom<Vec<u8>> for WasmHash {
+    type Error = Vec<u8>;
+
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        let array: [u8; WASM_HASH_LENGTH] = value.try_into()?;
+        Ok(Self::from(array))
+    }
+}
+
+impl MemoryDiskBytes for WasmHash {
+    fn memory_bytes(&self) -> usize {
         self.0.len()
     }
+
+    fn disk_bytes(&self) -> usize {
+        0
+    }
+}
+
+impl std::fmt::Display for WasmHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        for byte in self.0 {
+            write!(f, "{:2x}", byte)?;
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn wasmhash_display() {
+    let hash = WasmHash([0; WASM_HASH_LENGTH]);
+    let expected: String = "00".repeat(WASM_HASH_LENGTH);
+    assert_eq!(expected, format!("{}", hash));
+    let hash = WasmHash([11; WASM_HASH_LENGTH]);
+    let expected: String = "0b".repeat(WASM_HASH_LENGTH);
+    assert_eq!(expected, format!("{}", hash));
+    let hash = WasmHash([255; WASM_HASH_LENGTH]);
+    let expected: String = "ff".repeat(WASM_HASH_LENGTH);
+    assert_eq!(expected, format!("{}", hash));
 }
 
 // We introduce another enum instead of making `BinaryEncodedWasm` an enum to

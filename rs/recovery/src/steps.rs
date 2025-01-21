@@ -1,33 +1,26 @@
-use crate::admin_helper::IcAdmin;
-use crate::command_helper::exec_cmd;
-use crate::error::{RecoveryError, RecoveryResult};
-use crate::file_sync_helper::{create_dir, read_dir, remove_dir, rsync, rsync_with_retries};
-use crate::ssh_helper::SshHelper;
-use crate::util::{block_on, parse_hex_str};
 use crate::{
-    get_member_ips, get_node_heights_from_metrics, replay_helper, ADMIN, CHECKPOINTS,
-    IC_CERTIFICATIONS_PATH, IC_STATE, NEW_IC_STATE, READONLY,
-};
-use crate::{
-    Recovery, IC_CHECKPOINTS_PATH, IC_DATA_PATH, IC_JSON5_PATH, IC_REGISTRY_LOCAL_STORE,
-    IC_STATE_EXCLUDES,
+    admin_helper::IcAdmin,
+    command_helper::exec_cmd,
+    error::{RecoveryError, RecoveryResult},
+    file_sync_helper::{clear_dir, create_dir, read_dir, rsync, rsync_with_retries},
+    get_member_ips, get_node_heights_from_metrics,
+    registry_helper::RegistryHelper,
+    replay_helper,
+    ssh_helper::SshHelper,
+    util::{block_on, parse_hex_str},
+    Recovery, UploadMethod, ADMIN, CHECKPOINTS, IC_CERTIFICATIONS_PATH, IC_CHECKPOINTS_PATH,
+    IC_DATA_PATH, IC_JSON5_PATH, IC_REGISTRY_LOCAL_STORE, IC_STATE, IC_STATE_EXCLUDES,
+    NEW_IC_STATE, OLD_IC_STATE, READONLY,
 };
 use ic_artifact_pool::certification_pool::CertificationPoolImpl;
-use ic_base_types::CanisterId;
+use ic_base_types::{CanisterId, NodeId, PrincipalId};
 use ic_config::artifact_pool::ArtifactPoolConfig;
 use ic_interfaces::certification::CertificationPool;
 use ic_metrics::MetricsRegistry;
-use ic_registry_client::client::RegistryClientImpl;
 use ic_replay::cmd::{GetRecoveryCupCmd, SubCommand};
-use ic_types::artifact::CertificationMessage;
-use ic_types::{Height, SubnetId};
+use ic_types::{consensus::certification::CertificationMessage, Height, SubnetId};
 use slog::{debug, info, warn, Logger};
-use std::collections::HashMap;
-use std::net::IpAddr;
-use std::path::PathBuf;
-use std::process::Command;
-use std::sync::Arc;
-use std::{thread, time};
+use std::{collections::HashMap, net::IpAddr, path::PathBuf, process::Command, thread, time};
 
 /// Subnet recovery is composed of several steps. Each recovery step comprises a
 /// certain input state of which both its execution, and its description is
@@ -39,6 +32,12 @@ use std::{thread, time};
 pub trait Step {
     fn descr(&self) -> String;
     fn exec(&self) -> RecoveryResult<()>;
+}
+
+impl<T: Step + 'static> From<T> for Box<dyn Step> {
+    fn from(step: T) -> Self {
+        Box::new(step)
+    }
 }
 
 /// A step containing an ic-admin proposal or query to be executed.
@@ -64,9 +63,10 @@ impl Step for AdminStep {
 pub struct DownloadCertificationsStep {
     pub logger: Logger,
     pub subnet_id: SubnetId,
-    pub registry_client: Arc<RegistryClientImpl>,
+    pub registry_helper: RegistryHelper,
     pub work_dir: PathBuf,
     pub require_confirmation: bool,
+    pub auto_retry: bool,
     pub key_file: Option<PathBuf>,
     pub admin: bool,
 }
@@ -82,7 +82,7 @@ impl Step for DownloadCertificationsStep {
     fn exec(&self) -> RecoveryResult<()> {
         let user = if self.admin { ADMIN } else { READONLY };
         let cert_path = format!("{IC_DATA_PATH}/{IC_CERTIFICATIONS_PATH}");
-        let ips = get_member_ips(self.registry_client.clone(), self.subnet_id)?;
+        let ips = get_member_ips(&self.registry_helper, self.subnet_id)?;
         let downloaded_at_least_once = ips.iter().fold(false, |success, ip| {
             let data_src = format!("{user}@[{ip}]:{cert_path}");
             let target = self.work_dir.join("certifications").join(ip.to_string());
@@ -99,16 +99,17 @@ impl Step for DownloadCertificationsStep {
                 &target.display().to_string(),
                 self.require_confirmation,
                 self.key_file.as_ref(),
+                self.auto_retry,
                 5,
             )
-            .map_err(|e| warn!(self.logger, "Failed to download certifications: {:?}", e));
+            .map_err(|e| warn!(self.logger, "Skipping download: {:?}", e));
 
             success || res.is_ok()
         });
 
         if !downloaded_at_least_once {
             Err(RecoveryError::invalid_output_error(
-                "Failed to download certifications from any node.".into(),
+                "Failed to download certifications from any node.",
             ))
         } else {
             Ok(())
@@ -138,6 +139,7 @@ impl Step for MergeCertificationPoolsStep {
             .flat_map(|r| r.map_err(|e| warn!(self.logger, "Failed to read dir: {:?}", e)))
             .map(|dir| {
                 let pool = CertificationPoolImpl::new(
+                    NodeId::from(PrincipalId::new_anonymous()),
                     ArtifactPoolConfig::new(dir.path()),
                     self.logger.clone().into(),
                     MetricsRegistry::new(),
@@ -150,6 +152,7 @@ impl Step for MergeCertificationPoolsStep {
 
         // Analyze and move full certifications
         let new_pool = CertificationPoolImpl::new(
+            NodeId::from(PrincipalId::new_anonymous()),
             ArtifactPoolConfig::new(self.work_dir.join("data/ic_consensus_pool")),
             self.logger.clone().into(),
             MetricsRegistry::new(),
@@ -160,7 +163,7 @@ impl Step for MergeCertificationPoolsStep {
             "Moving certifications of all nodes to new pool."
         );
         pools.iter().for_each(|(ip, p)| {
-            p.persistent_pool.certifications().get_all().for_each(|c| {
+            p.validated.certifications().get_all().for_each(|c| {
                 if let Some(cert) = new_pool.certification_at_height(c.height) {
                     if cert != c {
                         warn!(
@@ -176,18 +179,18 @@ impl Step for MergeCertificationPoolsStep {
                         "Height {}: inserting certification from node {ip}", c.height
                     );
                     new_pool
-                        .persistent_pool
+                        .validated
                         .insert(CertificationMessage::Certification(c))
                 }
             })
         });
 
-        let max_full_cert = new_pool.persistent_pool.certifications().get_highest().ok();
+        let max_full_cert = new_pool.validated.certifications().get_highest().ok();
 
         if let Some(cert) = max_full_cert.as_ref() {
             info!(
                 self.logger,
-                "Maximum full certification height accross all nodes: {}, hash: {:?}",
+                "Maximum full certification height across all nodes: {}, hash: {:?}",
                 cert.height,
                 cert.signed.content.hash
             );
@@ -196,17 +199,12 @@ impl Step for MergeCertificationPoolsStep {
         // Analyze and move shares
         let max_cert_share = pools
             .values()
-            .flat_map(|p| {
-                p.persistent_pool
-                    .certification_shares()
-                    .get_highest_iter()
-                    .next()
-            })
+            .flat_map(|p| p.validated.certification_shares().get_highest_iter().next())
             .max_by_key(|c| c.height);
 
         let min_share_height = pools
             .values()
-            .flat_map(|p| p.persistent_pool.certification_shares().height_range())
+            .flat_map(|p| p.validated.certification_shares().height_range())
             .map(|range| range.min.get())
             .min();
 
@@ -247,7 +245,7 @@ impl Step for MergeCertificationPoolsStep {
                     "Inserting share from node {ip}: {:?}", s.signed
                 );
                 new_pool
-                    .persistent_pool
+                    .validated
                     .insert(CertificationMessage::CertificationShare(s))
             });
         }
@@ -265,6 +263,7 @@ pub struct DownloadIcStateStep {
     pub keep_downloaded_state: bool,
     pub require_confirmation: bool,
     pub key_file: Option<PathBuf>,
+    pub additional_excludes: Vec<String>,
 }
 
 impl Step for DownloadIcStateStep {
@@ -301,9 +300,7 @@ impl Step for DownloadIcStateStep {
         if ssh_helper.wait_for_access().is_err() {
             ssh_helper.account = ADMIN.to_string();
             if !ssh_helper.can_connect() {
-                return Err(RecoveryError::invalid_output_error(
-                    "SSH access denied".to_string(),
-                ));
+                return Err(RecoveryError::invalid_output_error("SSH access denied"));
             }
         }
 
@@ -318,7 +315,12 @@ impl Step for DownloadIcStateStep {
             ssh_helper.account, self.node_ip, IC_JSON5_PATH
         );
 
-        let mut excludes = IC_STATE_EXCLUDES.to_vec();
+        let mut excludes: Vec<&str> = IC_STATE_EXCLUDES
+            .iter()
+            .copied()
+            .chain(self.additional_excludes.iter().map(|x| x.as_str()))
+            .collect();
+
         let res = ssh_helper
             .ssh(format!(
                 r"echo $(ls {}/{} | sort | awk 'n>=1 {{ print a[n%1] }} {{ a[n++%1]=$0 }}');",
@@ -356,7 +358,7 @@ impl Step for DownloadIcStateStep {
 
         rsync(
             &self.logger,
-            vec![],
+            Vec::<String>::default(),
             &config_src,
             target,
             self.require_confirmation,
@@ -390,6 +392,7 @@ pub struct ReplayStep {
     pub config: PathBuf,
     pub subcmd: Option<ReplaySubCmd>,
     pub canister_caller_id: Option<CanisterId>,
+    pub replay_until_height: Option<u64>,
     pub result: PathBuf,
 }
 
@@ -397,10 +400,13 @@ impl Step for ReplayStep {
     fn descr(&self) -> String {
         let checkpoint_path = self.work_dir.join("data").join(IC_CHECKPOINTS_PATH);
         let mut base = format!(
-            "Delete old checkpoints found in {}, and execute:\nic-replay {} --subnet-id {:?}",
+            "Delete old checkpoints found in {}, and execute:\nic-replay {} --subnet-id {:?}{}",
             checkpoint_path.display(),
             self.config.display(),
             self.subnet_id,
+            self.replay_until_height
+                .map(|h| format!(" --replay-until-height {h}"))
+                .unwrap_or_default()
         );
         if let Some(subcmd) = &self.subcmd {
             base.push_str(&subcmd.descr);
@@ -411,67 +417,44 @@ impl Step for ReplayStep {
     fn exec(&self) -> RecoveryResult<()> {
         let checkpoint_path = self.work_dir.join("data").join(IC_CHECKPOINTS_PATH);
 
-        let checkpoints = Recovery::get_checkpoint_names(&checkpoint_path)?;
+        let checkpoint_height =
+            Recovery::remove_all_but_highest_checkpoints(&checkpoint_path, &self.logger)?;
 
-        let checkpoint_heights = checkpoints
-            .iter()
-            .map(|c| parse_hex_str(c))
-            .collect::<RecoveryResult<Vec<u64>>>()?;
+        let state_params = block_on(replay_helper::replay(
+            self.subnet_id,
+            self.config.clone(),
+            self.canister_caller_id,
+            self.work_dir.join("data"),
+            self.subcmd.as_ref().map(|c| c.cmd.clone()),
+            self.replay_until_height,
+            self.result.clone(),
+        ))?;
 
-        let delete_checkpoints = |except: &u64| {
-            Recovery::get_checkpoint_names(&checkpoint_path)?
-                .iter()
-                .filter(|c| parse_hex_str(c).unwrap() != *except)
-                .map(|c| {
-                    info!(self.logger, "Deleting checkpoint {}", c);
-                    remove_dir(&checkpoint_path.join(c))
-                })
-                .collect::<RecoveryResult<Vec<_>>>()
-        };
+        let latest_height = state_params.height;
+        let state_hash = state_params.hash;
 
-        if let Some(max) = checkpoint_heights.iter().max() {
-            delete_checkpoints(max)?;
-            let height = Height::from(*max);
+        info!(self.logger, "Checkpoint height: {}", checkpoint_height);
+        info!(self.logger, "Height after replay: {}", latest_height);
 
-            let state_params = block_on(replay_helper::replay(
-                self.subnet_id,
-                self.config.clone(),
-                self.canister_caller_id,
-                self.work_dir.join("data"),
-                self.subcmd.as_ref().map(|c| c.cmd.clone()),
-                self.result.clone(),
-            ))?;
-
-            let latest_height = state_params.height;
-            let state_hash = state_params.hash;
-
-            info!(self.logger, "Checkpoint height: {}", height);
-            info!(self.logger, "Height after replay: {}", latest_height);
-
-            if latest_height < height {
-                return Err(RecoveryError::invalid_output_error(
-                    "Replay height and checkpoint height diverged.".to_string(),
-                ));
-            }
-
-            info!(self.logger, "State hash: {}", state_hash);
-
-            info!(self.logger, "Deleting old checkpoints");
-            delete_checkpoints(&latest_height.get())?;
-
-            return Ok(());
+        if latest_height < checkpoint_height {
+            return Err(RecoveryError::invalid_output_error(
+                "Replay height and checkpoint height diverged.",
+            ));
         }
 
-        Err(RecoveryError::invalid_output_error(
-            "Did not find any checkpoints".to_string(),
-        ))
+        info!(self.logger, "State hash: {}", state_hash);
+
+        info!(self.logger, "Deleting old checkpoints");
+        Recovery::remove_all_but_highest_checkpoints(&checkpoint_path, &self.logger)?;
+
+        Ok(())
     }
 }
 
 pub struct ValidateReplayStep {
     pub logger: Logger,
     pub subnet_id: SubnetId,
-    pub registry_client: Arc<RegistryClientImpl>,
+    pub registry_helper: RegistryHelper,
     pub work_dir: PathBuf,
     pub extra_batches: u64,
 }
@@ -485,26 +468,19 @@ impl Step for ValidateReplayStep {
         let latest_height =
             replay_helper::read_output(self.work_dir.join(replay_helper::OUTPUT_FILE_NAME))?.height;
 
-        let heights = get_node_heights_from_metrics(
-            &self.logger,
-            self.registry_client.clone(),
-            self.subnet_id,
-        )?;
+        let heights =
+            get_node_heights_from_metrics(&self.logger, &self.registry_helper, self.subnet_id)?;
         let cert_height = &heights
             .iter()
             .max_by_key(|v| v.certification_height)
             .map(|v| v.certification_height)
-            .ok_or_else(|| {
-                RecoveryError::OutputError("No certification heights found".to_string())
-            })?;
+            .ok_or_else(|| RecoveryError::invalid_output_error("No certification heights found"))?;
 
         let finalization_height = &heights
             .iter()
             .max_by_key(|v| v.finalization_height)
             .map(|v| v.finalization_height)
-            .ok_or_else(|| {
-                RecoveryError::invalid_output_error("No finalization heights found".to_string())
-            })?;
+            .ok_or_else(|| RecoveryError::invalid_output_error("No finalization heights found"))?;
 
         info!(self.logger, "Certification height: {}", cert_height);
         info!(
@@ -518,14 +494,13 @@ impl Step for ValidateReplayStep {
         }
         if latest_height.get() - self.extra_batches < cert_height.get() {
             return Err(RecoveryError::invalid_output_error(
-                "Replay height smaller than certification height.".to_string(),
+                "Replay height smaller than certification height.",
             ));
         }
 
         if latest_height.get() - self.extra_batches < finalization_height.get() {
             return Err(RecoveryError::invalid_output_error(
-                "There exists a node with finalization height greater than the replay height."
-                    .to_string(),
+                "There exists a node with finalization height greater than the replay height.",
             ));
         }
 
@@ -537,115 +512,171 @@ impl Step for ValidateReplayStep {
 
 pub struct UploadAndRestartStep {
     pub logger: Logger,
-    pub node_ip: IpAddr,
+    pub upload_method: UploadMethod,
     pub work_dir: PathBuf,
     pub data_src: PathBuf,
     pub require_confirmation: bool,
     pub key_file: Option<PathBuf>,
+    pub check_ic_replay_height: bool,
 }
 
+impl UploadAndRestartStep {
+    const CMD_STOP_REPLICA: &str = "sudo systemctl stop ic-replica;";
+    // Note that on older versions of IC-OS this service does not exist.
+    // So try this operation, but ignore possible failure if service
+    // does not exist on the affected version.
+    const CMD_RESTART_REPLICA: &str = "\
+        (sudo systemctl restart setup-permissions || true);\
+        sudo systemctl start ic-replica;\
+        sudo systemctl status ic-replica;";
+
+    /// Sets the right state permissions on `target`, by copying the
+    /// permissions of the src path, removing executable permission and
+    /// giving read permissions for the target path to group and others.
+    fn cmd_set_permissions(src: &str, target: &str) -> String {
+        let mut set_permissions = String::new();
+        set_permissions.push_str(&format!("sudo chmod -R --reference={} {};", src, target));
+        set_permissions.push_str(&format!("sudo chown -R --reference={} {};", src, target));
+        set_permissions.push_str(&format!(
+            r"sudo find {} -type f -exec chmod a-x {{}} \;;",
+            target
+        ));
+        set_permissions.push_str(&format!(
+            r"sudo find {} -type f -exec chmod go+r {{}} \;;",
+            target
+        ));
+        set_permissions
+    }
+}
 impl Step for UploadAndRestartStep {
     fn descr(&self) -> String {
-        format!("Stopping replica {}, uploading and replacing state from {}, set access rights, restart replica.", self.node_ip, self.data_src.display())
+        let replica = match self.upload_method {
+            UploadMethod::Remote(ip) => &format!("replica {ip}"),
+            UploadMethod::Local => "local replica",
+        };
+        format!(
+            "Stopping {replica}, uploading and replacing state from {}, set access \
+            rights, restart replica.",
+            self.data_src.display()
+        )
     }
 
     fn exec(&self) -> RecoveryResult<()> {
         let account = ADMIN;
-        let ssh_helper = SshHelper::new(
-            self.logger.clone(),
-            account.to_string(),
-            self.node_ip,
-            self.require_confirmation,
-            self.key_file.clone(),
-        );
-
         let checkpoint_path = self.data_src.join(CHECKPOINTS);
         let checkpoints = Recovery::get_checkpoint_names(&checkpoint_path)?;
 
-        if checkpoints.len() != 1 {
+        let [max_checkpoint] = checkpoints.as_slice() else {
             return Err(RecoveryError::invalid_output_error(
-                "Found multiple checkpoints in upload directory".to_string(),
+                "Found multiple checkpoints in upload directory",
             ));
+        };
+
+        if self.check_ic_replay_height {
+            let replay_height =
+                replay_helper::read_output(self.work_dir.join(replay_helper::OUTPUT_FILE_NAME))?
+                    .height;
+
+            if parse_hex_str(max_checkpoint)? != replay_height.get() {
+                return Err(RecoveryError::invalid_output_error(format!(
+                    "Latest checkpoint height ({}) doesn't match replay output ({})",
+                    max_checkpoint, replay_height
+                )));
+            }
         }
-
-        let max_checkpoint = checkpoints.into_iter().max().ok_or_else(|| {
-            RecoveryError::invalid_output_error("No checkpoints found".to_string())
-        })?;
-        let replay_height =
-            replay_helper::read_output(self.work_dir.join(replay_helper::OUTPUT_FILE_NAME))?.height;
-
-        if parse_hex_str(&max_checkpoint)? != replay_height.get() {
-            return Err(RecoveryError::invalid_output_error(format!(
-                "Latest checkpoint height ({}) doesn't match replay output ({})",
-                max_checkpoint, replay_height
-            )));
-        }
-
-        let ic_checkpoints_path = format!("{}/{}", IC_DATA_PATH, IC_CHECKPOINTS_PATH);
-        // upload directory to create
-        let upload_dir = format!("{}/{}", IC_DATA_PATH, NEW_IC_STATE);
-        // path of highest checkpoint on upload node
-        let copy_from = format!(
-            "{}/$(ls {} | sort | tail -1)",
-            ic_checkpoints_path, ic_checkpoints_path
-        );
-        // path and name of checkpoint after replay
-        let copy_to = format!("{}/{}/{}", upload_dir, CHECKPOINTS, max_checkpoint);
-        let cp = format!("sudo cp -r {} {}", copy_from, copy_to);
-
-        info!(
-            self.logger,
-            "Creating remote directory and copying previous checkpoint..."
-        );
-        if let Some(res) = ssh_helper.ssh(format!(
-            "sudo mkdir -p {}/{}; {}; sudo chown -R {} {};",
-            upload_dir, CHECKPOINTS, cp, account, upload_dir
-        ))? {
-            info!(self.logger, "{}", res);
-        }
-
-        let target = format!("{}@[{}]:{}/", account, self.node_ip, upload_dir);
-        let src = format!("{}/", self.data_src.display());
-        info!(self.logger, "Uploading state...");
-        rsync(
-            &self.logger,
-            IC_STATE_EXCLUDES.to_vec(),
-            &src,
-            &target,
-            self.require_confirmation,
-            self.key_file.as_ref(),
-        )?;
 
         let ic_state_path = format!("{}/{}", IC_DATA_PATH, IC_STATE);
-        info!(self.logger, "Restarting replica...");
-        let mut replace_state = String::new();
-        replace_state.push_str("sudo systemctl stop ic-replica;");
-        replace_state.push_str(&format!(
-            "sudo chmod -R --reference={} {};",
-            ic_state_path, upload_dir
-        ));
-        replace_state.push_str(&format!(
-            "sudo chown -R --reference={} {};",
-            ic_state_path, upload_dir
-        ));
-        replace_state.push_str(&format!("sudo rm -r {};", ic_state_path));
-        replace_state.push_str(&format!("sudo mv {} {};", upload_dir, ic_state_path));
-        replace_state.push_str(&format!(
-            r"sudo find {} -type f -exec chmod a-x {{}} \;;",
-            ic_state_path
-        ));
-        replace_state.push_str(&format!(
-            r"sudo find {} -type f -exec chmod go+r {{}} \;;",
-            ic_state_path
-        ));
-        // Note that on older versions of IC-OS this service does not exist.
-        // So try this operation, but ignore possible failure if service
-        // does not exist on the affected version.
-        replace_state.push_str("(sudo systemctl restart setup-permissions || true);");
-        replace_state.push_str("sudo systemctl start ic-replica;");
-        replace_state.push_str("sudo systemctl status ic-replica;");
+        let src = format!("{}/", self.data_src.display());
 
-        ssh_helper.ssh(replace_state)?;
+        // Decide: remote or local recovery
+        if let UploadMethod::Remote(node_ip) = self.upload_method {
+            // For remote recoveries, we copy the source directory via rsync.
+            // To improve rsync times, we copy the latest checkpoint to the
+            // upload directory.
+            let upload_dir = format!("{}/{}", IC_DATA_PATH, NEW_IC_STATE);
+            let ic_checkpoints_path = format!("{}/{}", IC_DATA_PATH, IC_CHECKPOINTS_PATH);
+            // path of highest checkpoint on upload node
+            let copy_from = format!(
+                "{}/$(ls {} | sort | tail -1)",
+                ic_checkpoints_path, ic_checkpoints_path
+            );
+            // path and name of checkpoint after replay
+            let copy_to = format!("{}/{}/{}", upload_dir, CHECKPOINTS, max_checkpoint);
+            let cp = format!("sudo cp -r {} {}", copy_from, copy_to);
+            let cmd_create_and_copy_checkpoint_dir = format!(
+                "sudo mkdir -p {}/{}; {}; sudo chown -R {} {};",
+                upload_dir, CHECKPOINTS, cp, account, upload_dir
+            );
+
+            let ssh_helper = SshHelper::new(
+                self.logger.clone(),
+                account.to_string(),
+                node_ip,
+                self.require_confirmation,
+                self.key_file.clone(),
+            );
+            info!(
+                self.logger,
+                "Creating remote directory and copying previous checkpoint..."
+            );
+            if let Some(res) = ssh_helper.ssh(cmd_create_and_copy_checkpoint_dir)? {
+                info!(self.logger, "{}", res);
+            }
+            let target = format!("{}@[{}]:{}/", account, node_ip, upload_dir);
+            info!(self.logger, "Uploading state...");
+            rsync(
+                &self.logger,
+                IC_STATE_EXCLUDES.to_vec(),
+                &src,
+                &target,
+                self.require_confirmation,
+                self.key_file.as_ref(),
+            )?;
+
+            let cmd_set_permissions = Self::cmd_set_permissions(&ic_state_path, &upload_dir);
+            let cmd_replace_state = format!(
+                "sudo rm -r {}; sudo mv {} {};",
+                ic_state_path, upload_dir, ic_state_path
+            );
+
+            info!(self.logger, "Restarting replica...");
+            ssh_helper.ssh(Self::CMD_STOP_REPLICA.to_string())?;
+            ssh_helper.ssh(cmd_set_permissions)?;
+            ssh_helper.ssh(cmd_replace_state)?;
+            ssh_helper.ssh(Self::CMD_RESTART_REPLICA.to_string())?;
+        } else {
+            info!(self.logger, "Stopping replica...");
+            exec_cmd(Command::new("bash").arg("-c").arg(Self::CMD_STOP_REPLICA))?;
+
+            info!(self.logger, "Setting file permissions...");
+            let cmd_set_permissions = Self::cmd_set_permissions(&ic_state_path, &src);
+            exec_cmd(Command::new("bash").arg("-c").arg(cmd_set_permissions))?;
+
+            // For local recoveries we first backup the original state, and
+            // then simply `mv` the new state to the upload directory. No
+            // rsync is needed, and thus no checkpoint copying.
+            let backup_path = format!("{}/{}", self.work_dir.display(), OLD_IC_STATE);
+            info!(self.logger, "Moving original state into {}...", backup_path);
+            let mut cmd_backup_state = Command::new("sudo");
+            cmd_backup_state.arg("mv");
+            cmd_backup_state.arg(&ic_state_path);
+            cmd_backup_state.arg(backup_path);
+            exec_cmd(&mut cmd_backup_state)?;
+
+            info!(self.logger, "Moving state locally...");
+            let mut mv_to_target = Command::new("sudo");
+            mv_to_target.arg("mv");
+            mv_to_target.arg(src);
+            mv_to_target.arg(ic_state_path);
+            exec_cmd(&mut mv_to_target)?;
+
+            info!(self.logger, "Restarting replica...");
+            exec_cmd(
+                Command::new("bash")
+                    .arg("-c")
+                    .arg(Self::CMD_RESTART_REPLICA),
+            )?;
+        }
         Ok(())
     }
 }
@@ -684,11 +715,11 @@ pub struct CleanupStep {
 
 impl Step for CleanupStep {
     fn descr(&self) -> String {
-        format!("Deleting directory {}.", self.recovery_dir.display())
+        format!("Clearing directory {}.", self.recovery_dir.display())
     }
 
     fn exec(&self) -> RecoveryResult<()> {
-        remove_dir(&self.recovery_dir)
+        clear_dir(&self.recovery_dir)
     }
 }
 
@@ -724,7 +755,9 @@ pub struct UpdateLocalStoreStep {
 
 impl Step for UpdateLocalStoreStep {
     fn descr(&self) -> String {
-        format!("Update registry local store by executing:\nic-replay {:?} --subnet-id {:?} update-registry-local-store", self.work_dir.join("ic.json5"), self.subnet_id)
+        format!("Update registry local store by executing:\nic-replay {:?} --subnet-id {:?} update-registry-local-store",
+            self.work_dir.join("ic.json5"),
+            self.subnet_id)
     }
 
     fn exec(&self) -> RecoveryResult<()> {
@@ -734,6 +767,7 @@ impl Step for UpdateLocalStoreStep {
             None,
             self.work_dir.join("data"),
             Some(SubCommand::UpdateRegistryLocalStore),
+            None,
             self.work_dir.join("update_local_store.txt"),
         ))?;
         Ok(())
@@ -751,7 +785,14 @@ pub struct GetRecoveryCUPStep {
 
 impl Step for GetRecoveryCUPStep {
     fn descr(&self) -> String {
-        format!("Set recovery CUP by executing:\nic-replay {:?} --subnet-id {:?} get-recovery-cup {:?} {:?} cup.proto", self.config, self.subnet_id, self.state_hash, self.recovery_height)
+        format!(
+            "Set recovery CUP by executing:\n\
+            ic-replay {} --subnet-id {} get-recovery-cup {} {} cup.proto",
+            self.config.display(),
+            self.subnet_id,
+            self.state_hash,
+            self.recovery_height
+        )
     }
 
     fn exec(&self) -> RecoveryResult<()> {
@@ -767,6 +808,7 @@ impl Step for GetRecoveryCUPStep {
                 registry_store_sha256: None,
                 output_file: self.work_dir.join("cup.proto"),
             })),
+            None,
             self.result.clone(),
         ))?;
         Ok(())
@@ -801,13 +843,16 @@ pub struct CopyIcStateStep {
 
 impl Step for CopyIcStateStep {
     fn descr(&self) -> String {
-        format!("Copying ic_state for upload to: {:?}", self.new_state_dir,)
+        format!(
+            "Copying ic_state for upload to: {}",
+            self.new_state_dir.display()
+        )
     }
 
     fn exec(&self) -> RecoveryResult<()> {
         rsync(
             &self.logger,
-            vec![],
+            Vec::<String>::default(),
             &format!("{}/", self.work_dir.display()),
             &format!("{}/", self.new_state_dir.display()),
             false,
@@ -819,7 +864,7 @@ impl Step for CopyIcStateStep {
 
 pub struct UploadCUPAndTar {
     pub logger: Logger,
-    pub registry_client: Arc<RegistryClientImpl>,
+    pub registry_helper: RegistryHelper,
     pub subnet_id: SubnetId,
     pub require_confirmation: bool,
     pub key_file: Option<PathBuf>,
@@ -834,7 +879,7 @@ cd {};
 OWNER_UID=$(sudo stat -c '%u' /var/lib/ic/data/ic_registry_local_store);
 GROUP_UID=$(sudo stat -c '%g' /var/lib/ic/data/ic_registry_local_store);
 mkdir ic_registry_local_store;
-tar zxf ic_registry_local_store.tar.gz -C ic_registry_local_store;
+tar zxf ic_registry_local_store.tar.zst -C ic_registry_local_store;
 sudo chown -R "$OWNER_UID:$GROUP_UID" ic_registry_local_store;
 OWNER_UID=$(sudo stat -c '%u' /var/lib/ic/data/cups);
 GROUP_UID=$(sudo stat -c '%g' /var/lib/ic/data/cups);
@@ -861,7 +906,7 @@ impl Step for UploadCUPAndTar {
     }
 
     fn exec(&self) -> RecoveryResult<()> {
-        let ips = get_member_ips(self.registry_client.clone(), self.subnet_id)?;
+        let ips = get_member_ips(&self.registry_helper, self.subnet_id)?;
 
         ips.into_iter()
             .map(|ip| {
@@ -892,7 +937,7 @@ impl Step for UploadCUPAndTar {
 
                 rsync(
                     &self.logger,
-                    vec![],
+                    Vec::<String>::default(),
                     &format!("{}/cup.proto", self.work_dir.display()),
                     &target,
                     self.require_confirmation,
@@ -901,8 +946,11 @@ impl Step for UploadCUPAndTar {
 
                 rsync(
                     &self.logger,
-                    vec![],
-                    &format!("{}/ic_registry_local_store.tar.gz", self.work_dir.display()),
+                    Vec::<String>::default(),
+                    &format!(
+                        "{}/ic_registry_local_store.tar.zst",
+                        self.work_dir.display()
+                    ),
                     &target,
                     self.require_confirmation,
                     self.key_file.as_ref(),
@@ -978,7 +1026,7 @@ impl Step for DownloadRegistryStoreStep {
 
         rsync(
             &self.logger,
-            vec![],
+            Vec::<String>::default(),
             &data_src,
             &format!("{}/", self.work_dir.display()),
             self.require_confirmation,
@@ -1026,7 +1074,7 @@ impl Step for UploadAndHostTarStep {
         let src = format!("{}", self.tar.display());
         rsync(
             &self.logger,
-            vec![],
+            Vec::<String>::default(),
             &src,
             &target,
             self.require_confirmation,
@@ -1041,10 +1089,8 @@ impl Step for UploadAndHostTarStep {
 
 #[cfg(test)]
 mod tests {
-    use ic_test_utilities::{
-        consensus::fake::{Fake, FakeSigner},
-        types::ids::node_test_id,
-    };
+    use ic_test_utilities_consensus::fake::{Fake, FakeSigner};
+    use ic_test_utilities_types::ids::node_test_id;
     use ic_types::{
         consensus::certification::{Certification, CertificationContent, CertificationShare},
         crypto::{CryptoHash, Signed},
@@ -1054,7 +1100,7 @@ mod tests {
 
     use super::*;
 
-    fn make_certifcation(height: u64, hash: Vec<u8>) -> CertificationMessage {
+    fn make_certification(height: u64, hash: Vec<u8>) -> CertificationMessage {
         CertificationMessage::Certification(Certification {
             height: Height::from(height),
             signed: Signed {
@@ -1080,11 +1126,13 @@ mod tests {
         let tmp = tempfile::tempdir().expect("Could not create a temp dir");
         let work_dir = tmp.path().to_path_buf();
         let pool1 = CertificationPoolImpl::new(
+            node_test_id(0),
             ArtifactPoolConfig::new(work_dir.join("certifications/ip1")),
             logger.clone().into(),
             MetricsRegistry::new(),
         );
         let pool2 = CertificationPoolImpl::new(
+            node_test_id(0),
             ArtifactPoolConfig::new(work_dir.join("certifications/ip2")),
             logger.clone().into(),
             MetricsRegistry::new(),
@@ -1119,50 +1167,47 @@ mod tests {
 
         // Add two different certifications for height 1 to both pools,
         // only one of them should be kept after the merge.
-        let cert1 = make_certifcation(1, vec![1, 2, 3]);
-        let cert1_2 = make_certifcation(1, vec![4, 5, 6]);
-        pool1.persistent_pool.insert(cert1);
-        pool2.persistent_pool.insert(cert1_2);
+        let cert1 = make_certification(1, vec![1, 2, 3]);
+        let cert1_2 = make_certification(1, vec![4, 5, 6]);
+        pool1.validated.insert(cert1);
+        pool2.validated.insert(cert1_2);
 
         // Add the same certification for height 2 to both pools,
         // it should only exists in the merged pool once.
-        let cert2 = make_certifcation(2, vec![1, 2, 3]);
-        pool1.persistent_pool.insert(cert2.clone());
-        pool2.persistent_pool.insert(cert2);
+        let cert2 = make_certification(2, vec![1, 2, 3]);
+        pool1.validated.insert(cert2.clone());
+        pool2.validated.insert(cert2);
 
         // Add two more certifications for heights 3 and 4, one to each pool.
-        let cert3 = make_certifcation(3, vec![1, 2, 3]);
-        let cert4 = make_certifcation(4, vec![1, 2, 3]);
-        pool1.persistent_pool.insert(cert4);
-        pool2.persistent_pool.insert(cert3);
+        let cert3 = make_certification(3, vec![1, 2, 3]);
+        let cert4 = make_certification(4, vec![1, 2, 3]);
+        pool1.validated.insert(cert4);
+        pool2.validated.insert(cert3);
 
         // Add a share at height 3 to one pool. It should not be added to the
         // merged pool as it is lower than the highest full certification (4).
         let share3 = make_share(3, vec![1], 1);
-        pool1.persistent_pool.insert(share3);
+        pool1.validated.insert(share3);
 
         step.exec().expect("Failed to execute step.");
 
         let new_pool = CertificationPoolImpl::new(
+            node_test_id(0),
             ArtifactPoolConfig::new(work_dir.join("data/ic_consensus_pool")),
             logger.clone().into(),
             MetricsRegistry::new(),
         );
 
         assert_eq!(
-            new_pool.persistent_pool.certifications().get_all().count(),
+            new_pool.validated.certifications().get_all().count(),
             4 // One for each height 1-4
         );
         assert_eq!(
-            new_pool
-                .persistent_pool
-                .certification_shares()
-                .get_all()
-                .count(),
+            new_pool.validated.certification_shares().get_all().count(),
             0
         );
         let range = new_pool
-            .persistent_pool
+            .validated
             .certifications()
             .height_range()
             .expect("no height range");
@@ -1180,45 +1225,42 @@ mod tests {
             work_dir: work_dir.clone(),
         };
 
-        // Add a full certification at height 4
-        let cert4 = make_certifcation(4, vec![1, 2, 3]);
+        // Add a full certification at height 4.
+        let cert4 = make_certification(4, vec![1, 2, 3]);
 
-        // Shares below or equal to the heighest full share should be ignored.
+        // Shares below or equal to the highest full share should be ignored.
         let share3 = make_share(3, vec![3], 1);
         let share4 = make_share(4, vec![4], 2);
 
-        // These shares should be included in the new pool
+        // These shares should be included in the new pool.
         let share5 = make_share(5, vec![5], 1);
         let share6 = make_share(6, vec![6], 1);
         let share6_2 = make_share(6, vec![6, 2], 2);
 
-        pool1.persistent_pool.insert(cert4);
-        pool1.persistent_pool.insert(share3);
-        pool1.persistent_pool.insert(share4);
-        pool1.persistent_pool.insert(share5.clone());
-        pool1.persistent_pool.insert(share6_2);
+        pool1.validated.insert(cert4);
+        pool1.validated.insert(share3);
+        pool1.validated.insert(share4);
+        pool1.validated.insert(share5.clone());
+        pool1.validated.insert(share6_2);
 
-        pool2.persistent_pool.insert(share5);
-        pool2.persistent_pool.insert(share6);
+        pool2.validated.insert(share5);
+        pool2.validated.insert(share6);
 
         step.exec().expect("Failed to execute step.");
 
         let new_pool = CertificationPoolImpl::new(
+            node_test_id(0),
             ArtifactPoolConfig::new(work_dir.join("data/ic_consensus_pool")),
             logger.clone().into(),
             MetricsRegistry::new(),
         );
 
         assert_eq!(
-            new_pool
-                .persistent_pool
-                .certification_shares()
-                .get_all()
-                .count(),
+            new_pool.validated.certification_shares().get_all().count(),
             3 // share5, share6, share6_2
         );
         let range = new_pool
-            .persistent_pool
+            .validated
             .certification_shares()
             .height_range()
             .expect("no height range");

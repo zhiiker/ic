@@ -1,13 +1,20 @@
 use async_trait::async_trait;
 use candid::{Decode, Encode};
+use cycles_minting_canister::{IcpXdrConversionRate, IcpXdrConversionRateCertifiedResponse};
 use futures::future::FutureExt;
 use ic_base_types::{CanisterId, PrincipalId};
+use ic_ledger_core::tokens::CheckedSub;
 use ic_nervous_system_common::{cmc::CMC, ledger::IcpLedger, NervousSystemError};
-use ic_nns_common::pb::v1::{NeuronId, ProposalId};
-use ic_nns_common::types::UpdateIcpXdrConversionRatePayload;
-use ic_nns_constants::{GOVERNANCE_CANISTER_ID, LEDGER_CANISTER_ID, SNS_WASM_CANISTER_ID};
+use ic_nns_common::{
+    pb::v1::{NeuronId, ProposalId},
+    types::UpdateIcpXdrConversionRatePayload,
+};
+use ic_nns_constants::{
+    CYCLES_MINTING_CANISTER_ID, GOVERNANCE_CANISTER_ID, LEDGER_CANISTER_ID, REGISTRY_CANISTER_ID,
+    SNS_WASM_CANISTER_ID,
+};
 use ic_nns_governance::{
-    governance::{Environment, Governance, HeapGrowthPotential},
+    governance::{Environment, Governance, HeapGrowthPotential, RngError},
     pb::v1::{
         manage_neuron, manage_neuron::NeuronIdOrSubaccount, manage_neuron_response, proposal,
         ExecuteNnsFunction, GovernanceError, ManageNeuron, ManageNeuronResponse, Motion,
@@ -19,18 +26,25 @@ use ic_sns_swap::pb::v1 as sns_swap_pb;
 use ic_sns_wasm::pb::v1::{DeployedSns, ListDeployedSnsesRequest, ListDeployedSnsesResponse};
 use icp_ledger::{AccountIdentifier, Subaccount, Tokens};
 use lazy_static::lazy_static;
+use maplit::hashmap;
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
-use std::collections::hash_map::Entry;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::collections::VecDeque;
-use std::convert::TryFrom;
-use std::convert::TryInto;
-use std::sync::Arc;
-use std::sync::Mutex;
+use registry_canister::pb::v1::NodeProvidersMonthlyXdrRewards;
+use std::{
+    collections::{hash_map::Entry, BTreeMap, HashMap},
+    convert::{TryFrom, TryInto},
+    sync::{Arc, Mutex},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 const DEFAULT_TEST_START_TIMESTAMP_SECONDS: u64 = 999_111_000_u64;
+pub const NODE_PROVIDER_REWARD: u64 = 10_000;
+
+#[cfg(feature = "tla")]
+use ic_nns_governance::governance::tla::{
+    self, account_to_tla, tla_function, Destination, ToTla, TLA_INSTRUMENTATION_STATE,
+};
+use ic_nns_governance::{tla_log_request, tla_log_response};
 
 lazy_static! {
     pub(crate) static ref SNS_ROOT_CANISTER_ID: PrincipalId = PrincipalId::new_user_test_id(213599);
@@ -57,15 +71,12 @@ pub struct FakeAccount {
 
 type LedgerMap = HashMap<AccountIdentifier, u64>;
 
-type CallCanisterResult = Result<Vec<u8>, (Option<i32>, String)>;
-
 /// The state required for fake implementations of `Environment` and
 /// `Ledger`.
 pub struct FakeState {
     pub now: u64,
     pub rng: ChaCha20Rng,
     pub accounts: LedgerMap,
-    pub call_canister_method_results: VecDeque<CallCanisterResult>,
 }
 
 impl Default for FakeState {
@@ -86,7 +97,6 @@ impl Default for FakeState {
             // different places doesn't conflict.
             rng: ChaCha20Rng::seed_from_u64(9539),
             accounts: HashMap::new(),
-            call_canister_method_results: vec![Ok(vec![])].into(),
         }
     }
 }
@@ -95,6 +105,7 @@ impl Default for FakeState {
 /// advanced, and ledger accounts manipulated.
 pub struct FakeDriver {
     pub state: Arc<Mutex<FakeState>>,
+    pub error_on_next_ledger_call: Arc<Mutex<Option<NervousSystemError>>>,
 }
 
 /// Create a default mock driver.
@@ -102,6 +113,7 @@ impl Default for FakeDriver {
     fn default() -> Self {
         Self {
             state: Arc::new(Mutex::new(Default::default())),
+            error_on_next_ledger_call: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -151,9 +163,9 @@ impl FakeDriver {
             let accounts = &mut self.state.lock().unwrap().accounts;
             let minting = accounts.entry(FakeDriver::minting_account()).or_default();
             assert!(old_supply >= Tokens::from_e8s(*minting));
-            let old_in_use = (old_supply - Tokens::from_e8s(*minting)).unwrap();
+            let old_in_use = old_supply.checked_sub(&Tokens::from_e8s(*minting)).unwrap();
             assert!(supply >= old_in_use);
-            *minting = (supply - old_in_use).unwrap().get_e8s();
+            *minting = supply.checked_sub(&old_in_use).unwrap().get_e8s();
         }
         self
     }
@@ -171,6 +183,7 @@ impl FakeDriver {
     pub fn get_fake_env(&self) -> Box<dyn Environment> {
         Box::new(FakeDriver {
             state: Arc::clone(&self.state),
+            error_on_next_ledger_call: Arc::clone(&self.error_on_next_ledger_call),
         })
     }
 
@@ -178,12 +191,14 @@ impl FakeDriver {
     pub fn get_fake_ledger(&self) -> Box<dyn IcpLedger> {
         Box::new(FakeDriver {
             state: Arc::clone(&self.state),
+            error_on_next_ledger_call: Arc::clone(&self.error_on_next_ledger_call),
         })
     }
 
     pub fn get_fake_cmc(&self) -> Box<dyn CMC> {
         Box::new(FakeDriver {
             state: Arc::clone(&self.state),
+            error_on_next_ledger_call: Arc::clone(&self.error_on_next_ledger_call),
         })
     }
 
@@ -231,10 +246,18 @@ impl FakeDriver {
             num_accounts
         );
     }
+
+    pub fn fail_next_ledger_call(&self) {
+        self.error_on_next_ledger_call
+            .lock()
+            .unwrap()
+            .replace(NervousSystemError::new());
+    }
 }
 
 #[async_trait]
 impl IcpLedger for FakeDriver {
+    #[cfg_attr(feature = "tla", tla_function(async_trait_fn = true))]
     async fn transfer_funds(
         &self,
         amount_e8s: u64,
@@ -254,6 +277,30 @@ impl IcpLedger for FakeDriver {
             "Issuing ledger transfer from account {} (subaccount {}) to account {} amount {} fee {}",
             from_account, from_subaccount.as_ref().map_or_else(||"None".to_string(), ToString::to_string), to_account, amount_e8s, fee_e8s
         );
+        tla_log_request!(
+            "WaitForTransfer",
+            Destination::new("ledger"),
+            "Transfer",
+            tla::TlaValue::Record(BTreeMap::from([
+                ("amount".to_string(), amount_e8s.to_tla_value()),
+                ("fee".to_string(), fee_e8s.to_tla_value()),
+                ("from".to_string(), account_to_tla(from_account)),
+                ("to".to_string(), account_to_tla(to_account)),
+            ]))
+        );
+
+        if let Some(err) = self.error_on_next_ledger_call.lock().unwrap().take() {
+            println!("Failing the ledger transfer because we were instructed to fail the next ledger call");
+            tla_log_response!(
+                Destination::new("ledger"),
+                tla::TlaValue::Variant {
+                    tag: "Fail".to_string(),
+                    value: Box::new(tla::TlaValue::Constant("UNIT".to_string()))
+                }
+            );
+            return Err(err);
+        }
+
         let accounts = &mut self.state.try_lock().unwrap().accounts;
 
         let from_e8s = accounts
@@ -264,6 +311,13 @@ impl IcpLedger for FakeDriver {
 
         if !is_minting_operation {
             if *from_e8s < requested_e8s {
+                tla_log_response!(
+                    Destination::new("ledger"),
+                    tla::TlaValue::Variant {
+                        tag: "Fail".to_string(),
+                        value: Box::new(tla::TlaValue::Constant("UNIT".to_string()))
+                    }
+                );
                 return Err(NervousSystemError::new_with_message(format!(
                     "Insufficient funds. Available {} requested {}",
                     *from_e8s, requested_e8s
@@ -273,11 +327,22 @@ impl IcpLedger for FakeDriver {
         }
 
         *accounts.entry(to_account).or_default() += amount_e8s;
+        tla_log_response!(
+            Destination::new("ledger"),
+            tla::TlaValue::Variant {
+                tag: "TransferOk".to_string(),
+                value: Box::new(tla::TlaValue::Constant("UNIT".to_string()))
+            }
+        );
 
         Ok(0)
     }
 
     async fn total_supply(&self) -> Result<Tokens, NervousSystemError> {
+        if let Some(err) = self.error_on_next_ledger_call.lock().unwrap().take() {
+            return Err(err);
+        }
+
         Ok(self.get_supply())
     }
 
@@ -285,8 +350,37 @@ impl IcpLedger for FakeDriver {
         &self,
         account: AccountIdentifier,
     ) -> Result<Tokens, NervousSystemError> {
+        tla_log_request!(
+            "WaitForBalanceQuery",
+            Destination::new("ledger"),
+            "AccountBalance",
+            tla::TlaValue::Record(BTreeMap::from([(
+                "account".to_string(),
+                account_to_tla(account)
+            )]))
+        );
+
+        if let Some(err) = self.error_on_next_ledger_call.lock().unwrap().take() {
+            tla_log_response!(
+                Destination::new("ledger"),
+                tla::TlaValue::Variant {
+                    tag: "Fail".to_string(),
+                    value: Box::new(tla::TlaValue::Constant("UNIT".to_string())),
+                }
+            );
+            return Err(err);
+        }
+
         let accounts = &mut self.state.try_lock().unwrap().accounts;
+
         let account_e8s = accounts.get(&account).unwrap_or(&0);
+        tla_log_response!(
+            Destination::new("ledger"),
+            tla::TlaValue::Variant {
+                tag: "BalanceQueryOk".to_string(),
+                value: Box::new(account_e8s.to_tla_value()),
+            }
+        );
         Ok(Tokens::from_e8s(*account_e8s))
     }
 
@@ -308,14 +402,22 @@ impl Environment for FakeDriver {
         self.state.try_lock().unwrap().now
     }
 
-    fn random_u64(&mut self) -> u64 {
-        self.state.try_lock().unwrap().rng.next_u64()
+    fn random_u64(&mut self) -> Result<u64, RngError> {
+        Ok(self.state.try_lock().unwrap().rng.next_u64())
     }
 
-    fn random_byte_array(&mut self) -> [u8; 32] {
+    fn random_byte_array(&mut self) -> Result<[u8; 32], RngError> {
         let mut bytes = [0u8; 32];
         self.state.try_lock().unwrap().rng.fill_bytes(&mut bytes);
-        bytes
+        Ok(bytes)
+    }
+
+    fn seed_rng(&mut self, _seed: [u8; 32]) {
+        todo!()
+    }
+
+    fn get_rng_seed(&self) -> Option<[u8; 32]> {
+        todo!()
     }
 
     fn execute_nns_function(
@@ -332,7 +434,7 @@ impl Environment for FakeDriver {
     }
 
     async fn call_canister_method(
-        &mut self,
+        &self,
         target: CanisterId,
         method_name: &str,
         request: Vec<u8>,
@@ -375,6 +477,22 @@ impl Environment for FakeDriver {
                         neuron_minimum_stake_e8s: Some(123_456_789),
                         confirmation_text: None,
                         restricted_countries: None,
+
+                        min_participants: None, // TODO[NNS1-2339]
+                        min_icp_e8s: None,      // TODO[NNS1-2339]
+                        max_icp_e8s: None,      // TODO[NNS1-2339]
+                        min_direct_participation_icp_e8s: None, // TODO[NNS1-2339]
+                        max_direct_participation_icp_e8s: None, // TODO[NNS1-2339]
+                        min_participant_icp_e8s: None, // TODO[NNS1-2339]
+                        max_participant_icp_e8s: None, // TODO[NNS1-2339]
+                        swap_start_timestamp_seconds: None, // TODO[NNS1-2339]
+                        swap_due_timestamp_seconds: None, // TODO[NNS1-2339]
+                        sns_token_e8s: None,    // TODO[NNS1-2339]
+                        neuron_basket_construction_parameters: None, // TODO[NNS1-2339]
+                        nns_proposal_id: None,  // TODO[NNS1-2339]
+                        should_auto_finalize: Some(true),
+                        neurons_fund_participation_constraints: None,
+                        neurons_fund_participation: None,
                     }),
                     ..Default::default() // Not realistic, but sufficient for tests.
                 }),
@@ -423,6 +541,37 @@ impl Environment for FakeDriver {
                     canister_id: Some(*SNS_LEDGER_INDEX_CANISTER_ID),
                     status: None,
                 }),
+            })
+            .unwrap());
+        }
+
+        if method_name == "get_node_providers_monthly_xdr_rewards" {
+            assert_eq!(PrincipalId::from(target), REGISTRY_CANISTER_ID.get());
+
+            return Ok(Encode!(&Ok::<NodeProvidersMonthlyXdrRewards, String>(
+                NodeProvidersMonthlyXdrRewards {
+                    rewards: hashmap! {
+                        PrincipalId::new_user_test_id(1).to_string() => NODE_PROVIDER_REWARD,
+                    },
+                    registry_version: Some(5)
+                }
+            ))
+            .unwrap());
+        }
+
+        if method_name == "get_average_icp_xdr_conversion_rate" {
+            assert_eq!(PrincipalId::from(target), CYCLES_MINTING_CANISTER_ID.get());
+
+            return Ok(Encode!(&IcpXdrConversionRateCertifiedResponse {
+                data: IcpXdrConversionRate {
+                    timestamp_seconds: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs(),
+                    xdr_permyriad_per_icp: 1 // Below the minimum exchange rate limit
+                },
+                hash_tree: vec![],
+                certificate: vec![],
             })
             .unwrap());
         }
@@ -493,7 +642,7 @@ pub fn register_vote_assert_success(
 
 /// When testing proposals, three different proposal topics available:
 /// Governance, NetworkEconomics, and ExchangeRate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum ProposalTopicBehavior {
     Governance,
     NetworkEconomics,
@@ -502,7 +651,7 @@ pub enum ProposalTopicBehavior {
 
 /// A struct to help setting up tests concisely thanks to a concise format to
 /// specifies who proposes something and who votes on that proposal.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct ProposalNeuronBehavior {
     /// Neuron id of the proposer.
     pub proposer: u64,
@@ -542,17 +691,20 @@ impl ProposalNeuronBehavior {
                 })
             }
         };
-        let pid = tokio_test::block_on(gov.make_proposal(
-            &NeuronId { id: self.proposer },
-            &principal(self.proposer),
-            &Proposal {
-                title: Some("A Reasonable Title".to_string()),
-                summary,
-                action: Some(action),
-                ..Default::default()
-            },
-        ))
-        .unwrap();
+        let pid = gov
+            .make_proposal(
+                &NeuronId { id: self.proposer },
+                &principal(self.proposer),
+                &Proposal {
+                    title: Some("A Reasonable Title".to_string()),
+                    summary,
+                    action: Some(action),
+                    ..Default::default()
+                },
+            )
+            .now_or_never()
+            .unwrap()
+            .unwrap();
         // Vote
         for (voter, vote) in &self.votes {
             register_vote_assert_success(
@@ -570,7 +722,7 @@ impl ProposalNeuronBehavior {
 impl From<&str> for ProposalNeuronBehavior {
     /// Format: <neuron_behaviour>* <proposal_topic>?
     ///
-    /// neuron_behaviour: each subsequentcharacter corresponds to the
+    /// neuron_behaviour: each subsequent character corresponds to the
     /// behavior of one neuron, in order.
     ///
     /// "-" means "does not vote"

@@ -1,11 +1,11 @@
 use ic_error_types::{ErrorCode, UserError};
-use ic_ic00_types::{
+use ic_management_canister_types::{
     BitcoinGetSuccessorsArgs, BitcoinGetSuccessorsResponse, BitcoinSendTransactionInternalArgs,
     Payload,
 };
 use ic_replicated_state::{
     metadata_state::subnet_call_context_manager::{
-        BitcoinGetSuccessorsContext, BitcoinSendTransactionInternalContext,
+        BitcoinGetSuccessorsContext, BitcoinSendTransactionInternalContext, SubnetCallContext,
     },
     ReplicatedState,
 };
@@ -36,14 +36,13 @@ pub fn get_successors(
             match get_successors_request {
                 BitcoinGetSuccessorsArgs::Initial(payload) => {
                     // Insert request into subnet call contexts.
-                    state
-                        .metadata
-                        .subnet_call_context_manager
-                        .push_bitcoin_get_successors_request(BitcoinGetSuccessorsContext {
+                    state.metadata.subnet_call_context_manager.push_context(
+                        SubnetCallContext::BitcoinGetSuccessors(BitcoinGetSuccessorsContext {
                             request: request.clone(),
                             payload,
                             time: state.time(),
-                        });
+                        }),
+                    );
 
                     Ok(None)
                 }
@@ -83,7 +82,7 @@ pub fn send_transaction_internal(
     privileged_access: &[CanisterId],
     request: &Request,
     state: &mut ReplicatedState,
-) -> Result<Option<Vec<u8>>, UserError> {
+) -> Result<(), UserError> {
     if !privileged_access.contains(&request.sender()) {
         return Err(UserError::new(
             ErrorCode::CanisterRejectedMessage,
@@ -94,18 +93,17 @@ pub fn send_transaction_internal(
     match BitcoinSendTransactionInternalArgs::decode(request.method_payload()) {
         Ok(send_transaction_internal_request) => {
             // Insert request into subnet call contexts.
-            state
-                .metadata
-                .subnet_call_context_manager
-                .push_bitcoin_send_transaction_internal_request(
+            state.metadata.subnet_call_context_manager.push_context(
+                SubnetCallContext::BitcoinSendTransactionInternal(
                     BitcoinSendTransactionInternalContext {
                         request: request.clone(),
                         payload: send_transaction_internal_request,
                         time: state.time(),
                     },
-                );
+                ),
+            );
 
-            Ok(None)
+            Ok(())
         }
         Err(err) => Err(err),
     }
@@ -113,17 +111,20 @@ pub fn send_transaction_internal(
 
 #[cfg(test)]
 mod tests {
-    use ic_ic00_types::{BitcoinGetSuccessorsArgs, Method, Payload as Ic00Payload, IC_00};
-    use ic_test_utilities::types::ids::canister_test_id;
+    use ic_management_canister_types::{
+        BitcoinGetSuccessorsArgs, Method, Payload as Ic00Payload, IC_00,
+    };
     use ic_test_utilities::universal_canister::{call_args, wasm};
     use ic_test_utilities_execution_environment::ExecutionTestBuilder;
+    use ic_test_utilities_types::ids::canister_test_id;
     use ic_types::{CanisterId, PrincipalId};
     use std::str::FromStr;
 
     #[test]
     fn clears_state_of_former_bitcoin_canisters() {
-        let bitcoin_canister_id =
-            CanisterId::new(PrincipalId::from_str("rwlgt-iiaaa-aaaaa-aaaaa-cai").unwrap()).unwrap();
+        let bitcoin_canister_id = CanisterId::unchecked_from_principal(
+            PrincipalId::from_str("rwlgt-iiaaa-aaaaa-aaaaa-cai").unwrap(),
+        );
 
         let mut test = ExecutionTestBuilder::new()
             // Set the bitcoin canister to be the ID of the canister about to be created.

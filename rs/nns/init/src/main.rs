@@ -1,21 +1,21 @@
 use canister_test::{RemoteTestRuntime, Runtime};
 use clap::Parser;
 use ic_base_types::{PrincipalId, SubnetId};
-use ic_canister_client::{Agent, Sender};
+use ic_canister_client::{Agent, HttpClientConfig, Sender};
 use ic_nns_common::pb::v1::NeuronId;
 use ic_nns_constants::REGISTRY_CANISTER_ID;
-use ic_nns_governance::pb::v1::Governance as GovernanceProto;
-use ic_nns_init::make_hsm_sender;
-use ic_nns_init::set_up_env_vars_for_all_canisters;
+use ic_nns_governance_api::pb::v1::Governance as GovernanceProto;
+use ic_nns_init::{make_hsm_sender, set_up_env_vars_for_all_canisters};
 use ic_nns_test_utils::{
     common::{NnsInitPayloads, NnsInitPayloadsBuilder},
     itest_helpers::NnsCanisters,
 };
 use prost::Message;
-use std::fs;
-use std::io::Write;
-use std::path::Path;
-use std::path::PathBuf;
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
 use url::Url;
 
 #[derive(Debug, Parser)]
@@ -32,13 +32,13 @@ struct CliArgs {
     /// canister.
     ///
     /// Optional: defaults to the current directory.
-    #[clap(long, parse(from_os_str))]
+    #[clap(long)]
     wasm_dir: Option<PathBuf>,
 
     /// Path to a .csv file for initialising the `neurons` canister.
     ///
     /// Optional: defaults to creating canisters with test neurons.
-    #[clap(long, parse(from_os_str))]
+    #[clap(long)]
     initial_neurons: Option<PathBuf>,
 
     /// Path to the file containing the initial registry required for NNS
@@ -99,12 +99,12 @@ struct CliArgs {
 
     /// Create the ledger with existing accounts with 1_000_000_000 tokens in on
     /// behalf of these principals.
-    #[clap(long, multiple_values(true))]
+    #[clap(long, num_args(1..))]
     initialize_ledger_with_test_accounts_for_principals: Vec<PrincipalId>,
 
     /// Create the ledger with existing accounts with 1_000_000_000 tokens on
     /// the specified ledger accounts.
-    #[clap(long, multiple_values(true))]
+    #[clap(long, num_args(1..))]
     initialize_ledger_with_test_accounts: Vec<String>,
 
     /// If set, instead of installing the NNS, ic-nns-init will only output
@@ -124,12 +124,16 @@ struct CliArgs {
     months_to_release_ect_gtc_neurons: Option<u8>,
 
     /// The subnets to which SNS may be deployed
-    #[clap(long, multiple_values(true))]
+    #[clap(long, num_args(1..))]
     sns_subnet: Vec<PrincipalId>,
 
     /// Pass specified_id to provisional_create_canister_with_cycles when creating canisters.
     #[clap(long)]
     pass_specified_id: bool,
+
+    /// If set, HTTP/2 is used for connections to the IC. By default, HTTP/1.1 is used.
+    #[clap(long)]
+    http2_only: bool,
 }
 
 const LOG_PREFIX: &str = "[ic-nns-init] ";
@@ -186,15 +190,20 @@ async fn main() {
 
         let url = args.url.expect("Url must be provided to install canister.");
 
+        let http_client_config = HttpClientConfig {
+            http2_only: args.http2_only,
+            ..HttpClientConfig::default()
+        };
         let agent = if args.use_hsm {
             let sender = make_hsm_sender(&args.hsm_slot, &args.key_id, &args.pin);
-            Agent::new(url.clone(), sender)
+            Agent::new_with_http_client_config(url.clone(), sender, http_client_config)
         } else {
             // Use the special identity that has superpowers, like calling
             // ic00::Method::ProvisionalCreateCanisterWithCycles.
-            Agent::new(
+            Agent::new_with_http_client_config(
                 url.clone(),
                 Sender::from_keypair(&ic_test_identity::TEST_IDENTITY_KEYPAIR),
+                http_client_config,
             )
         };
 

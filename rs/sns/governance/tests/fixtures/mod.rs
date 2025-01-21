@@ -3,16 +3,15 @@ use async_trait::async_trait;
 use futures::future::FutureExt;
 use ic_base_types::{CanisterId, PrincipalId};
 use ic_ledger_core::Tokens;
+use ic_nervous_system_clients::ledger_client::ICRC1Ledger;
 use ic_nervous_system_common::{cmc::CMC, NervousSystemError, E8};
 use ic_sns_governance::{
     governance::{Governance, ValidGovernanceProto},
-    ledger::ICRC1Ledger,
     pb::v1::{
         get_neuron_response, get_proposal_response,
-        governance::{MaturityModulation, Mode, SnsMetadata},
-        manage_neuron,
+        governance::{MaturityModulation, Mode, SnsMetadata, Version},
         manage_neuron::{
-            AddNeuronPermissions, MergeMaturity, RegisterVote, RemoveNeuronPermissions,
+            self, AddNeuronPermissions, MergeMaturity, RegisterVote, RemoveNeuronPermissions,
         },
         manage_neuron_response::{
             self, AddNeuronPermissionsResponse, FollowResponse, MergeMaturityResponse,
@@ -20,9 +19,10 @@ use ic_sns_governance::{
         },
         neuron::{DissolveState, Followees},
         proposal::Action,
-        GetNeuron, GetProposal, Governance as GovernanceProto, GovernanceError, ManageNeuron,
-        ManageNeuronResponse, NervousSystemParameters, Neuron, NeuronId, NeuronPermission,
-        NeuronPermissionList, NeuronPermissionType, Proposal, ProposalData, ProposalId, Vote,
+        GetMaturityModulationRequest, GetMaturityModulationResponse, GetNeuron, GetProposal,
+        Governance as GovernanceProto, GovernanceError, ManageNeuron, ManageNeuronResponse,
+        NervousSystemParameters, Neuron, NeuronId, NeuronPermission, NeuronPermissionList,
+        NeuronPermissionType, Proposal, ProposalData, ProposalId, Vote,
     },
     types::Environment,
 };
@@ -37,7 +37,7 @@ use std::{
 
 pub mod environment_fixture;
 
-const DEFAULT_TEST_START_TIMESTAMP_SECONDS: u64 = 999_111_000_u64;
+pub const DEFAULT_TEST_START_TIMESTAMP_SECONDS: u64 = 999_111_000_u64;
 
 /// Constructs a neuron id from a principal_id and memo. This is a
 /// convenient helper method in tests.
@@ -90,11 +90,6 @@ impl ICRC1Ledger for LedgerFixture {
             amount_e8s,
             fee_e8s
         );
-
-        let _to_e8s = ledger_fixture_state
-            .accounts
-            .get(&to)
-            .ok_or_else(|| NervousSystemError::new_with_message("Target account doesn't exist"))?;
 
         // Only change SNS governance's SNS token balance when transferring from
         // a non-default account. This is because when transferring from the
@@ -205,15 +200,15 @@ impl LedgerFixtureBuilder {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct CmcFixture {
-    maturity_modulation: i32,
+    pub maturity_modulation: Arc<Mutex<i32>>,
 }
 
 impl CmcFixture {
     pub fn new(maturity_modulation: i32) -> Self {
         Self {
-            maturity_modulation,
+            maturity_modulation: Arc::new(Mutex::new(maturity_modulation)),
         }
     }
 }
@@ -221,7 +216,7 @@ impl CmcFixture {
 #[async_trait]
 impl CMC for CmcFixture {
     async fn neuron_maturity_modulation(&mut self) -> Result<i32, String> {
-        Ok(self.maturity_modulation)
+        Ok(*self.maturity_modulation.try_lock().unwrap())
     }
 }
 
@@ -402,7 +397,7 @@ impl NeuronBuilder {
 /// The GovernanceState is used to capture all of the salient details of the Governance
 /// canister, so that we can compute the "delta", or what changed between
 /// actions.
-#[derive(Clone, Default, comparable::Comparable, Debug)]
+#[derive(Clone, Debug, Default, comparable::Comparable)]
 #[compare_default]
 pub struct GovernanceState {
     pub now: u64,
@@ -421,6 +416,7 @@ pub struct GovernanceCanisterFixture {
     pub environment_fixture: EnvironmentFixture,
     pub icp_ledger_fixture: LedgerFixture,
     pub sns_ledger_fixture: LedgerFixture,
+    pub cmc_fixture: CmcFixture,
     pub governance: Governance,
     pub(crate) initial_state: Option<GovernanceState>,
 }
@@ -433,6 +429,13 @@ impl GovernanceCanisterFixture {
             .lock()
             .unwrap()
             .now += delta_seconds;
+        self
+    }
+
+    /// Ensures that SNS upgrade features are not going to produce any external calls that are
+    /// orthogonal to this test scenario, as they would require setting up mock responses.
+    pub fn temporarily_disable_sns_upgrades(&mut self) -> &mut Self {
+        assert!(self.governance.acquire_upgrade_periodic_task_lock());
         self
     }
 
@@ -468,7 +471,7 @@ impl GovernanceCanisterFixture {
         }
     }
 
-    pub fn run_periodic_tasks(&mut self) -> &mut Self {
+    pub fn run_periodic_tasks_now(&mut self) -> &mut Self {
         self.governance.run_periodic_tasks().now_or_never();
         self
     }
@@ -743,7 +746,7 @@ impl GovernanceCanisterFixture {
         }
     }
 
-    pub fn get_sale_canister_id(&self) -> PrincipalId {
+    pub fn get_swap_canister_id(&self) -> PrincipalId {
         self.governance
             .proto
             .swap_canister_id
@@ -794,6 +797,11 @@ impl GovernanceCanisterFixture {
             manage_neuron_response::Command::Error(governance_error) => Err(governance_error),
             _ => panic!("Unexpected command response when making a proposal"),
         }
+    }
+
+    pub fn get_maturity_modulation(&mut self) -> GetMaturityModulationResponse {
+        self.governance
+            .get_maturity_modulation(GetMaturityModulationRequest::default())
     }
 }
 
@@ -852,6 +860,7 @@ impl Default for GovernanceCanisterFixtureBuilder {
                     current_basis_points: Some(0),
                     updated_at_timestamp_seconds: Some(1),
                 }),
+                deployed_version: Some(Version::default()),
                 ..Default::default()
             },
             sns_ledger_transforms: Vec::default(),
@@ -907,13 +916,15 @@ impl GovernanceCanisterFixtureBuilder {
             environment_fixture: environment_fixture.clone(),
             icp_ledger_fixture,
             sns_ledger_fixture,
+            cmc_fixture: self.cmc_fixture.clone(),
             governance: Governance::new(
                 valid_governance,
                 Box::new(environment_fixture),
                 sns_ledger,
                 icp_ledger,
                 Box::new(self.cmc_fixture),
-            ),
+            )
+            .enable_test_features(),
             initial_state: None,
         };
         governance.capture_state();

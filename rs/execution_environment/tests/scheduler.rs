@@ -1,5 +1,8 @@
-use ic_state_machine_tests::{Cycles, IngressStatus, PrincipalId, StateMachine};
+use ic_base_types::PrincipalId;
+use ic_state_machine_tests::StateMachine;
 use ic_test_utilities_metrics::fetch_int_counter_vec;
+use ic_types::ingress::IngressStatus;
+use ic_types::Cycles;
 use ic_universal_canister::{call_args, wasm, UNIVERSAL_CANISTER_WASM};
 use maplit::btreemap;
 
@@ -11,7 +14,7 @@ fn scheduler_observes_inducted_messages_to_self() {
 
     let a_id = sm
         .install_canister_with_cycles(
-            UNIVERSAL_CANISTER_WASM.into(),
+            UNIVERSAL_CANISTER_WASM.to_vec(),
             vec![],
             None,
             INITIAL_CYCLES_BALANCE,
@@ -19,9 +22,7 @@ fn scheduler_observes_inducted_messages_to_self() {
         .unwrap();
 
     // Canister A calls self
-    let a_calls_self_wasm = wasm()
-        .call_simple(a_id.get(), "update", call_args())
-        .build();
+    let a_calls_self_wasm = wasm().inter_update(a_id, call_args()).build();
     let ingress_id = sm.send_ingress(
         PrincipalId::new_anonymous(),
         a_id,
@@ -49,7 +50,7 @@ fn scheduler_observes_inducted_messages_to_others() {
 
     let a_id = sm
         .install_canister_with_cycles(
-            UNIVERSAL_CANISTER_WASM.into(),
+            UNIVERSAL_CANISTER_WASM.to_vec(),
             vec![],
             None,
             INITIAL_CYCLES_BALANCE,
@@ -57,7 +58,7 @@ fn scheduler_observes_inducted_messages_to_others() {
         .unwrap();
     let b_id = sm
         .install_canister_with_cycles(
-            UNIVERSAL_CANISTER_WASM.into(),
+            UNIVERSAL_CANISTER_WASM.to_vec(),
             vec![],
             None,
             INITIAL_CYCLES_BALANCE,
@@ -65,9 +66,7 @@ fn scheduler_observes_inducted_messages_to_others() {
         .unwrap();
 
     // Canister A calls canister B
-    let a_calls_b_wasm = wasm()
-        .call_simple(b_id.get(), "update", call_args())
-        .build();
+    let a_calls_b_wasm = wasm().inter_update(b_id, call_args()).build();
     let ingress_id = sm.send_ingress(PrincipalId::new_anonymous(), a_id, "update", a_calls_b_wasm);
 
     assert!(matches!(

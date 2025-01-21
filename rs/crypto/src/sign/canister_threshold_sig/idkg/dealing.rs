@@ -2,12 +2,16 @@
 
 use crate::sign::basic_sig::{BasicSigVerifierInternal, BasicSignerInternal};
 use crate::sign::canister_threshold_sig::idkg::utils::{
-    get_mega_pubkey, idkg_encryption_keys_from_registry, MegaKeyFromRegistryError,
+    fetch_idkg_dealing_encryption_public_key_from_registry, key_id_from_mega_public_key_or_panic,
+    retrieve_mega_public_key_from_registry, MegaKeyFromRegistryError,
 };
 use ic_base_types::RegistryVersion;
-use ic_crypto_internal_csp::api::{CspIDkgProtocol, CspSigner};
-use ic_crypto_internal_threshold_sig_ecdsa::{
-    IDkgDealingInternal, IDkgTranscriptOperationInternal,
+use ic_crypto_internal_csp::api::CspSigner;
+use ic_crypto_internal_csp::vault::api::{
+    CspVault, IDkgCreateDealingVaultError, IDkgDealingInternalBytes,
+};
+use ic_crypto_internal_threshold_sig_canister_threshold_sig::{
+    publicly_verify_dealing, IDkgDealingInternal, IDkgTranscriptOperationInternal,
 };
 use ic_interfaces_registry::RegistryClient;
 use ic_types::crypto::canister_threshold_sig::error::{
@@ -15,14 +19,19 @@ use ic_types::crypto::canister_threshold_sig::error::{
     IDkgVerifyInitialDealingsError,
 };
 use ic_types::crypto::canister_threshold_sig::idkg::{
-    IDkgDealing, IDkgTranscriptParams, InitialIDkgDealings, SignedIDkgDealing,
+    IDkgDealing, IDkgReceivers, IDkgTranscriptParams, InitialIDkgDealings, SignedIDkgDealing,
 };
 use ic_types::signature::BasicSignature;
 use ic_types::NodeId;
 use std::convert::TryFrom;
+use std::sync::Arc;
 
-pub fn create_dealing<C: CspIDkgProtocol + CspSigner>(
+#[cfg(test)]
+mod tests;
+
+pub fn create_dealing<C: CspSigner>(
     csp_client: &C,
+    vault: &Arc<dyn CspVault>,
     self_node_id: &NodeId,
     registry: &dyn RegistryClient,
     params: &IDkgTranscriptParams,
@@ -34,37 +43,34 @@ pub fn create_dealing<C: CspIDkgProtocol + CspSigner>(
                 node_id: *self_node_id,
             })?;
 
-    let receiver_keys = idkg_encryption_keys_from_registry(
-        params.receivers(),
-        registry,
-        params.registry_version(),
-    )?;
-    let receiver_keys_vec = receiver_keys.values().cloned().collect::<Vec<_>>();
+    let key_protos = params
+        .receivers()
+        .iter()
+        .map(|(_index, receiver)| {
+            fetch_idkg_dealing_encryption_public_key_from_registry(
+                &receiver,
+                registry,
+                params.registry_version(),
+            )
+        })
+        .collect::<Result<Vec<_>, MegaKeyFromRegistryError>>()?;
 
-    let csp_operation_type = IDkgTranscriptOperationInternal::try_from(params.operation_type())
-        .map_err(|e| IDkgCreateDealingError::SerializationError {
-            internal_error: format!("{:?}", e),
+    let internal_dealing = vault
+        .idkg_create_dealing(
+            params.algorithm_id(),
+            params.context_data(),
+            self_index,
+            params.reconstruction_threshold(),
+            key_protos,
+            params.operation_type().clone(),
+        )
+        .map_err(|e| {
+            idkg_create_dealing_vault_error_into_idkg_create_dealing_error(e, params.receivers())
         })?;
-
-    let internal_dealing = csp_client.idkg_create_dealing(
-        params.algorithm_id(),
-        &params.context_data(),
-        self_index,
-        params.reconstruction_threshold(),
-        &receiver_keys_vec,
-        &csp_operation_type,
-    )?;
-
-    let internal_dealing_raw =
-        internal_dealing
-            .serialize()
-            .map_err(|e| IDkgCreateDealingError::SerializationError {
-                internal_error: format!("{:?}", e),
-            })?;
 
     let unsigned_dealing = IDkgDealing {
         transcript_id: params.transcript_id(),
-        internal_dealing_raw,
+        internal_dealing_raw: internal_dealing.into_vec(),
     };
 
     sign_dealing(
@@ -93,8 +99,8 @@ fn sign_dealing<S: CspSigner>(
         })
 }
 
-pub fn verify_dealing_private<C: CspIDkgProtocol>(
-    csp_client: &C,
+pub fn verify_dealing_private(
+    vault: &Arc<dyn CspVault>,
     self_node_id: &NodeId,
     registry: &dyn RegistryClient,
     params: &IDkgTranscriptParams,
@@ -107,14 +113,6 @@ pub fn verify_dealing_private<C: CspIDkgProtocol>(
             params.transcript_id(),
         )));
     }
-    let internal_dealing =
-        IDkgDealingInternal::deserialize(&signed_dealing.idkg_dealing().internal_dealing_raw)
-            .map_err(|e| {
-                IDkgVerifyDealingPrivateError::InvalidArgument(format!(
-                    "failed to deserialize internal dealing: {:?}",
-                    e
-                ))
-            })?;
     let dealer_index = params
         .dealer_index(signed_dealing.dealer_id())
         .ok_or_else(|| {
@@ -126,15 +124,16 @@ pub fn verify_dealing_private<C: CspIDkgProtocol>(
     let self_receiver_index = params
         .receiver_index(*self_node_id)
         .ok_or(IDkgVerifyDealingPrivateError::NotAReceiver)?;
-    let self_mega_pubkey = get_mega_pubkey(self_node_id, registry, params.registry_version())?;
+    let self_mega_pubkey =
+        retrieve_mega_public_key_from_registry(self_node_id, registry, params.registry_version())?;
 
-    csp_client.idkg_verify_dealing_private(
+    vault.idkg_verify_dealing_private(
         params.algorithm_id(),
-        &internal_dealing,
+        IDkgDealingInternalBytes::from(signed_dealing.idkg_dealing().dealing_to_bytes()),
         dealer_index,
         self_receiver_index,
-        &self_mega_pubkey,
-        &params.context_data(),
+        key_id_from_mega_public_key_or_panic(&self_mega_pubkey),
+        params.context_data(),
     )
 }
 
@@ -161,7 +160,7 @@ impl From<MegaKeyFromRegistryError> for IDkgVerifyDealingPrivateError {
     }
 }
 
-pub fn verify_dealing_public<C: CspIDkgProtocol + CspSigner>(
+pub fn verify_dealing_public<C: CspSigner>(
     csp_client: &C,
     registry: &dyn RegistryClient,
     params: &IDkgTranscriptParams,
@@ -213,7 +212,7 @@ pub fn verify_dealing_public<C: CspIDkgProtocol + CspSigner>(
 
     let number_of_receivers = params.receivers().count();
 
-    csp_client.idkg_verify_dealing_public(
+    publicly_verify_dealing(
         params.algorithm_id(),
         &internal_dealing,
         &internal_operation,
@@ -222,9 +221,12 @@ pub fn verify_dealing_public<C: CspIDkgProtocol + CspSigner>(
         number_of_receivers,
         &params.context_data(),
     )
+    .map_err(|e| IDkgVerifyDealingPublicError::InvalidDealing {
+        reason: format!("{:?}", e),
+    })
 }
 
-pub fn verify_initial_dealings<C: CspIDkgProtocol + CspSigner>(
+pub fn verify_initial_dealings<C: CspSigner>(
     csp_client: &C,
     registry: &dyn RegistryClient,
     params: &IDkgTranscriptParams,
@@ -252,4 +254,54 @@ pub fn verify_initial_dealings<C: CspIDkgProtocol + CspSigner>(
         })?;
     }
     Ok(())
+}
+
+fn idkg_create_dealing_vault_error_into_idkg_create_dealing_error(
+    e: IDkgCreateDealingVaultError,
+    receivers: &IDkgReceivers,
+) -> IDkgCreateDealingError {
+    match e{
+        IDkgCreateDealingVaultError::MalformedPublicKey {
+            receiver_index,
+            key_bytes,
+        } => {
+            receivers.iter().nth(receiver_index as usize).map_or_else(
+                || IDkgCreateDealingError::InternalError {
+                internal_error: format!("node index {receiver_index} out of bounds for malformed public key {key_bytes:?}"),
+            },
+             |(_, node_id)|  {
+                IDkgCreateDealingError::MalformedPublicKey {
+                    node_id,
+                    key_bytes: key_bytes.clone(),
+                }}
+            )
+        }
+        IDkgCreateDealingVaultError::UnsupportedAlgorithm(algorithm_id) => {
+            IDkgCreateDealingError::UnsupportedAlgorithm {
+                algorithm_id,
+            }
+        }
+        IDkgCreateDealingVaultError::TransientInternalError(internal_error) => {
+            IDkgCreateDealingError::TransientInternalError {
+                internal_error,
+            }
+        }
+        IDkgCreateDealingVaultError::SerializationError(internal_error) => {
+            IDkgCreateDealingError::SerializationError {
+                internal_error,
+            }
+        }
+        IDkgCreateDealingVaultError::InternalError(internal_error) => {
+            IDkgCreateDealingError::InternalError {
+                internal_error,
+            }
+        }
+        IDkgCreateDealingVaultError::SecretSharesNotFound {
+            commitment_string,
+        } => {
+            IDkgCreateDealingError::SecretSharesNotFound {
+                commitment_string,
+            }
+        }
+    }
 }

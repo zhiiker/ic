@@ -8,9 +8,11 @@ use ic_interfaces_registry::{RegistryDataProvider, ZERO_REGISTRY_VERSION};
 use ic_nns_constants::NNS_CANISTER_WASMS;
 use ic_registry_local_store::{ChangelogEntry, KeyMutation, LocalStoreImpl, LocalStoreReader};
 use ic_registry_proto_data_provider::ProtoRegistryDataProvider;
-use ic_registry_transport::pb::v1::RegistryAtomicMutateRequest;
-use ic_registry_transport::pb::v1::{registry_mutation, RegistryMutation};
-use ic_registry_transport::{delete, upsert};
+use ic_registry_transport::{
+    delete,
+    pb::v1::{registry_mutation, RegistryAtomicMutateRequest, RegistryMutation},
+    upsert,
+};
 use ic_sys::utility_command::{UtilityCommand, UtilityCommandError};
 use std::path::Path;
 
@@ -83,71 +85,6 @@ pub fn read_initial_mutations_from_local_store_dir(
         .collect()
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-    use ic_base_types::RegistryVersion;
-    use ic_registry_local_store::Changelog;
-    use ic_registry_local_store::LocalStoreWriter;
-    use tempfile::TempDir;
-
-    /// In this test, a directory written by the `LocalStore::store` function is
-    /// read, and we assert that the mutations being read are as expected.
-    #[test]
-    fn can_read_local_store() {
-        let tempdir = TempDir::new().unwrap();
-        let store = LocalStoreImpl::new(tempdir.path());
-        let changelog: Changelog = vec![
-            vec![
-                KeyMutation {
-                    key: "rapper's delight".to_string(),
-                    value: Some(b"1980".to_vec()),
-                },
-                KeyMutation {
-                    key: "the message".to_string(),
-                    value: Some(b"1982".to_vec()),
-                },
-            ],
-            vec![KeyMutation {
-                key: "212".to_string(),
-                value: Some(b"2011".to_vec()),
-            }],
-            vec![KeyMutation {
-                key: "some key to delete".to_string(),
-                value: None,
-            }],
-        ];
-        changelog.iter().enumerate().for_each(|(i, c)| {
-            store
-                .store(RegistryVersion::from((i + 1) as u64), c.clone())
-                .unwrap()
-        });
-
-        let path = tempdir.path().to_path_buf();
-        let mutation_requests = read_initial_mutations_from_local_store_dir(&path);
-        assert_eq!(
-            mutation_requests,
-            vec![
-                RegistryAtomicMutateRequest {
-                    mutations: vec![
-                        upsert(b"rapper's delight", "1980"),
-                        upsert(b"the message", "1982")
-                    ],
-                    preconditions: vec![]
-                },
-                RegistryAtomicMutateRequest {
-                    mutations: vec![upsert(b"212", "2011"),],
-                    preconditions: vec![]
-                },
-                RegistryAtomicMutateRequest {
-                    mutations: vec![delete(b"some key to delete"),],
-                    preconditions: vec![]
-                },
-            ]
-        );
-    }
-}
-
 /// Given params to read a HSM, return a `Sender` that uses this HSM to sign
 /// requests.
 pub fn make_hsm_sender(hsm_slot: &str, key_id: &str, pin: &str) -> Sender {
@@ -213,20 +150,89 @@ pub fn make_hsm_sender(hsm_slot: &str, key_id: &str, pin: &str) -> Sender {
 /// NNS canisters, and sets an environment variable pointing at each of them so
 /// that they can be found later.
 pub fn set_up_env_vars_for_all_canisters<P: AsRef<Path>>(wasm_dir: P) {
-    for canister in &NNS_CANISTER_WASMS {
-        // Can it be found?
-        let file_part = format!("{}.wasm", canister);
-        let mut path = wasm_dir.as_ref().to_path_buf();
-        path.push(file_part.as_str());
-        assert!(
-            path.is_file(),
-            "The provided --wasm-dir, '{}', must contain all NNS canister wasms, but it misses {}",
+    'outer: for canister in &NNS_CANISTER_WASMS {
+        // Can either .wasm.gz or .wasm be found?
+        for ext in &[".wasm.gz", ".wasm"] {
+            let file_part = format!("{}{}", canister, ext);
+            let mut path = wasm_dir.as_ref().to_path_buf();
+            path.push(file_part.as_str());
+            if path.is_file() {
+                // Sets up the env var following the pattern expected by
+                // WASM::from_location_specified_by_env_var
+                std::env::set_var(Wasm::env_var_name(canister, &[]), path.to_str().unwrap());
+                continue 'outer;
+            }
+        }
+        // if no file is found, panic!
+        panic!(
+            "The provided --wasm-dir, '{}', must contain all NNS canister wasms, but there is {}.wasm.gz or {}.wasm",
             wasm_dir.as_ref().display(),
-            file_part
+            canister,
+            canister
         );
+    }
+}
 
-        // Sets up the env var following the pattern expected by
-        // WASM::from_location_specified_by_env_var
-        std::env::set_var(Wasm::env_var_name(canister, &[]), path.to_str().unwrap());
+#[cfg(test)]
+mod test {
+    use super::*;
+    use ic_base_types::RegistryVersion;
+    use ic_registry_local_store::{Changelog, LocalStoreWriter};
+    use tempfile::TempDir;
+
+    /// In this test, a directory written by the `LocalStore::store` function is
+    /// read, and we assert that the mutations being read are as expected.
+    #[test]
+    fn can_read_local_store() {
+        let tempdir = TempDir::new().unwrap();
+        let store = LocalStoreImpl::new(tempdir.path());
+        let changelog: Changelog = vec![
+            vec![
+                KeyMutation {
+                    key: "rapper's delight".to_string(),
+                    value: Some(b"1980".to_vec()),
+                },
+                KeyMutation {
+                    key: "the message".to_string(),
+                    value: Some(b"1982".to_vec()),
+                },
+            ],
+            vec![KeyMutation {
+                key: "212".to_string(),
+                value: Some(b"2011".to_vec()),
+            }],
+            vec![KeyMutation {
+                key: "some key to delete".to_string(),
+                value: None,
+            }],
+        ];
+        changelog.iter().enumerate().for_each(|(i, c)| {
+            store
+                .store(RegistryVersion::from((i + 1) as u64), c.clone())
+                .unwrap()
+        });
+
+        let path = tempdir.path().to_path_buf();
+        let mutation_requests = read_initial_mutations_from_local_store_dir(&path);
+        assert_eq!(
+            mutation_requests,
+            vec![
+                RegistryAtomicMutateRequest {
+                    mutations: vec![
+                        upsert(b"rapper's delight", "1980"),
+                        upsert(b"the message", "1982")
+                    ],
+                    preconditions: vec![]
+                },
+                RegistryAtomicMutateRequest {
+                    mutations: vec![upsert(b"212", "2011"),],
+                    preconditions: vec![]
+                },
+                RegistryAtomicMutateRequest {
+                    mutations: vec![delete(b"some key to delete"),],
+                    preconditions: vec![]
+                },
+            ]
+        );
     }
 }

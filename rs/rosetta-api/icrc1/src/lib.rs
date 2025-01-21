@@ -1,358 +1,85 @@
-pub mod blocks;
-mod compact_account;
-pub mod endpoints;
-pub mod hash;
+#![allow(clippy::disallowed_types)]
 
-use ciborium::tag::Required;
-use ic_base_types::PrincipalId;
-use ic_ledger_canister_core::ledger::{LedgerContext, LedgerTransaction, TxApplyError};
-pub use ic_ledger_core::tokens::Tokens;
-use ic_ledger_core::{
-    balances::Balances,
-    block::{BlockType, EncodedBlock, FeeCollector, HashOf},
-    timestamp::TimeStamp,
-};
-use icrc_ledger_types::icrc1::account::Account;
-use icrc_ledger_types::icrc1::transfer::Memo;
+use anyhow::{bail, Context};
+use common::storage::storage_client::StorageClient;
+use common::storage::types::MetadataEntry;
+use ic_base_types::CanisterId;
+use icrc_ledger_agent::Icrc1Agent;
+use icrc_ledger_types::icrc::generic_metadata_value::MetadataValue;
+use icrc_ledger_types::icrc3::archive::ArchiveInfo;
 use num_traits::ToPrimitive;
-use serde::{Deserialize, Serialize};
+use rosetta_core::objects::Currency;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+use tokio::sync::Mutex as AsyncMutex;
+pub mod common;
+pub mod construction_api;
+pub mod data_api;
+pub mod ledger_blocks_synchronization;
 
-use std::collections::HashMap;
-
-#[derive(Serialize, Deserialize, Clone, Hash, Debug, PartialEq, Eq, PartialOrd, Ord)]
-#[serde(tag = "op")]
-pub enum Operation {
-    #[serde(rename = "mint")]
-    Mint {
-        #[serde(with = "compact_account")]
-        to: Account,
-        #[serde(rename = "amt")]
-        amount: u64,
-    },
-    #[serde(rename = "xfer")]
-    Transfer {
-        #[serde(with = "compact_account")]
-        from: Account,
-        #[serde(with = "compact_account")]
-        to: Account,
-        #[serde(rename = "amt")]
-        amount: u64,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        fee: Option<u64>,
-    },
-    #[serde(rename = "burn")]
-    Burn {
-        #[serde(with = "compact_account")]
-        from: Account,
-        #[serde(rename = "amt")]
-        amount: u64,
-    },
+pub struct AppState {
+    pub icrc1_agent: Arc<Icrc1Agent>,
+    pub ledger_id: CanisterId,
+    pub synched: Arc<Mutex<Option<bool>>>,
+    pub archive_canister_ids: Arc<AsyncMutex<Vec<ArchiveInfo>>>,
+    pub storage: Arc<StorageClient>,
+    pub metadata: Metadata,
 }
 
-#[derive(Serialize, Deserialize, Clone, Hash, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Transaction {
-    #[serde(flatten)]
-    pub operation: Operation,
-
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "ts")]
-    pub created_at_time: Option<u64>,
-
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub memo: Option<Memo>,
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub struct Metadata {
+    pub symbol: String,
+    pub decimals: u8,
 }
 
-impl LedgerTransaction for Transaction {
-    type AccountId = Account;
-    type SpenderId = PrincipalId;
-
-    fn burn(
-        from: Account,
-        amount: Tokens,
-        created_at_time: Option<TimeStamp>,
-        memo: Option<u64>,
-    ) -> Self {
-        Self {
-            operation: Operation::Burn {
-                from,
-                amount: amount.get_e8s(),
-            },
-            created_at_time: created_at_time.map(|t| t.as_nanos_since_unix_epoch()),
-            memo: memo.map(Memo::from),
+impl From<Metadata> for Currency {
+    fn from(value: Metadata) -> Self {
+        Currency {
+            symbol: value.symbol,
+            decimals: value.decimals as u32,
+            metadata: None,
         }
     }
+}
 
-    fn created_at_time(&self) -> Option<TimeStamp> {
-        self.created_at_time
-            .map(TimeStamp::from_nanos_since_unix_epoch)
+impl Metadata {
+    const METADATA_DECIMALS_KEY: &'static str = "icrc1:decimals";
+    const METADATA_SYMBOL_KEY: &'static str = "icrc1:symbol";
+
+    pub fn from_args(symbol: String, decimals: u8) -> Self {
+        Self { symbol, decimals }
     }
 
-    fn hash(&self) -> HashOf<Self> {
-        let mut cbor_bytes = vec![];
-        ciborium::ser::into_writer(self, &mut cbor_bytes)
-            .expect("bug: failed to encode a transaction");
-        hash::hash_cbor(&cbor_bytes)
-            .map(HashOf::new)
-            .unwrap_or_else(|err| {
-                panic!(
-                    "bug: transaction CBOR {} is not hashable: {}",
-                    hex::encode(&cbor_bytes),
-                    err
-                )
+    pub fn from_metadata_entries(entries: &[MetadataEntry]) -> anyhow::Result<Self> {
+        let entries = entries
+            .iter()
+            .map(|entry| {
+                let value = entry.value()?;
+                Ok((entry.key.clone(), value))
             })
-    }
+            .collect::<anyhow::Result<HashMap<_, _>>>()?;
 
-    fn apply<C>(
-        &self,
-        context: &mut C,
-        _now: TimeStamp,
-        effective_fee: Tokens,
-    ) -> Result<(), TxApplyError>
-    where
-        C: LedgerContext<AccountId = Self::AccountId>,
-    {
-        let fee_collector = context.fee_collector().map(|fc| fc.fee_collector);
-        let fee_collector = fee_collector.as_ref();
-        match &self.operation {
-            Operation::Transfer {
-                from,
-                to,
-                amount,
-                fee,
-            } => context.balances_mut().transfer(
-                from,
-                to,
-                Tokens::from_e8s(*amount),
-                fee.map(Tokens::from_e8s).unwrap_or(effective_fee),
-                fee_collector,
-            )?,
-            Operation::Burn { from, amount } => context
-                .balances_mut()
-                .burn(from, Tokens::from_e8s(*amount))?,
-            Operation::Mint { to, amount } => {
-                context.balances_mut().mint(to, Tokens::from_e8s(*amount))?
-            }
-        }
-        Ok(())
+        let decimals = entries
+            .get(Self::METADATA_DECIMALS_KEY)
+            .context("Could not find decimals in metadata entries.")
+            .map(|value| match value {
+                MetadataValue::Nat(decimals) => decimals
+                    .0
+                    .to_u8()
+                    .context("Decimals cannot fit into an u8."),
+                _ => bail!("Could not extract decimals from metadata."),
+            })??;
+
+        let symbol = entries
+            .get(Self::METADATA_SYMBOL_KEY)
+            .context("Could not find symbol in metadata entries.")
+            .map(|value| match value {
+                MetadataValue::Text(symbol) => Ok(symbol.clone()),
+                _ => bail!("Could not extract symbol from metadata."),
+            })??;
+
+        Ok(Self { symbol, decimals })
     }
 }
-
-impl Transaction {
-    pub fn mint(
-        to: Account,
-        amount: Tokens,
-        created_at_time: Option<TimeStamp>,
-        memo: Option<Memo>,
-    ) -> Self {
-        Self {
-            operation: Operation::Mint {
-                to,
-                amount: amount.get_e8s(),
-            },
-            created_at_time: created_at_time.map(|t| t.as_nanos_since_unix_epoch()),
-            memo,
-        }
-    }
-
-    pub fn transfer(
-        from: Account,
-        to: Account,
-        amount: Tokens,
-        fee: Option<Tokens>,
-        created_at_time: Option<TimeStamp>,
-        memo: Option<Memo>,
-    ) -> Self {
-        Self {
-            operation: Operation::Transfer {
-                from,
-                to,
-                amount: amount.get_e8s(),
-                fee: fee.map(Tokens::get_e8s),
-            },
-            created_at_time: created_at_time.map(|t| t.as_nanos_since_unix_epoch()),
-            memo,
-        }
-    }
-}
-
-impl TryFrom<icrc_ledger_types::icrc3::transactions::Transaction> for Transaction {
-    type Error = String;
-    fn try_from(
-        value: icrc_ledger_types::icrc3::transactions::Transaction,
-    ) -> Result<Self, Self::Error> {
-        if let Some(mint) = value.mint {
-            let amount = mint
-                .amount
-                .0
-                .to_u64()
-                .ok_or_else(|| "Could not convert Nat to u64".to_owned())?;
-            let operation = Operation::Mint {
-                to: mint.to,
-                amount,
-            };
-            return Ok(Self {
-                operation,
-                created_at_time: mint.created_at_time,
-                memo: mint.memo,
-            });
-        }
-        if let Some(burn) = value.burn {
-            let amount = burn
-                .amount
-                .0
-                .to_u64()
-                .ok_or_else(|| "Could not convert Nat to u64".to_owned())?;
-            let operation = Operation::Burn {
-                from: burn.from,
-                amount,
-            };
-            return Ok(Self {
-                operation,
-                created_at_time: burn.created_at_time,
-                memo: burn.memo,
-            });
-        }
-        if let Some(transfer) = value.transfer {
-            let amount = transfer
-                .amount
-                .0
-                .to_u64()
-                .ok_or_else(|| "Could not convert Nat to u64".to_owned())?;
-            match transfer.fee {
-                Some(fee) => {
-                    let fee = fee
-                        .0
-                        .to_u64()
-                        .ok_or_else(|| "Could not convert Nat to u64".to_owned())?;
-
-                    let operation = Operation::Transfer {
-                        to: transfer.to,
-                        amount,
-                        from: transfer.from,
-                        fee: Some(fee),
-                    };
-                    return Ok(Self {
-                        operation,
-                        created_at_time: transfer.created_at_time,
-                        memo: transfer.memo,
-                    });
-                }
-                None => {
-                    let operation = Operation::Transfer {
-                        to: transfer.to,
-                        amount,
-                        from: transfer.from,
-                        fee: None,
-                    };
-                    return Ok(Self {
-                        operation,
-                        created_at_time: transfer.created_at_time,
-                        memo: transfer.memo,
-                    });
-                }
-            }
-        }
-        Err("Transaction has neither mint, burn nor transfer operation".to_owned())
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Hash, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Block {
-    #[serde(rename = "phash")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_hash: Option<HashOf<EncodedBlock>>,
-
-    #[serde(rename = "tx")]
-    pub transaction: Transaction,
-
-    #[serde(rename = "fee")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effective_fee: Option<u64>,
-
-    #[serde(rename = "ts")]
-    pub timestamp: u64,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "fee_col")]
-    #[serde(with = "compact_account::opt")]
-    pub fee_collector: Option<Account>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "fee_col_block")]
-    pub fee_collector_block_index: Option<u64>,
-}
-
-type TaggedBlock = Required<Block, 55799>;
-
-impl BlockType for Block {
-    type Transaction = Transaction;
-    type AccountId = Account;
-
-    fn encode(self) -> EncodedBlock {
-        let mut bytes = vec![];
-        let value: TaggedBlock = Required(self);
-        ciborium::ser::into_writer(&value, &mut bytes).expect("bug: failed to encode a block");
-        EncodedBlock::from_vec(bytes)
-    }
-
-    fn decode(encoded_block: EncodedBlock) -> Result<Self, String> {
-        let bytes = encoded_block.into_vec();
-        let tagged_block: TaggedBlock = ciborium::de::from_reader(&bytes[..])
-            .map_err(|e| format!("failed to decode a block: {}", e))?;
-        Ok(tagged_block.0)
-    }
-
-    fn block_hash(encoded_block: &EncodedBlock) -> HashOf<EncodedBlock> {
-        hash::hash_cbor(encoded_block.as_slice())
-            .map(HashOf::new)
-            .unwrap_or_else(|err| {
-                panic!(
-                    "bug: encoded block {} is not hashable cbor: {}",
-                    hex::encode(encoded_block.as_slice()),
-                    err
-                )
-            })
-    }
-
-    fn parent_hash(&self) -> Option<HashOf<EncodedBlock>> {
-        self.parent_hash
-    }
-
-    fn timestamp(&self) -> TimeStamp {
-        TimeStamp::from_nanos_since_unix_epoch(self.timestamp)
-    }
-
-    fn from_transaction(
-        parent_hash: Option<HashOf<EncodedBlock>>,
-        transaction: Self::Transaction,
-        timestamp: TimeStamp,
-        effective_fee: Tokens,
-        fee_collector: Option<FeeCollector<Self::AccountId>>,
-    ) -> Self {
-        let effective_fee = if let Operation::Transfer { fee, .. } = &transaction.operation {
-            fee.is_none().then_some(effective_fee.get_e8s())
-        } else {
-            None
-        };
-        let (fee_collector, fee_collector_block_index) = match fee_collector {
-            Some(FeeCollector {
-                fee_collector,
-                block_index: None,
-            }) => (Some(fee_collector), None),
-            Some(FeeCollector { block_index, .. }) => (None, block_index),
-            None => (None, None),
-        };
-        Self {
-            parent_hash,
-            transaction,
-            effective_fee,
-            timestamp: timestamp.as_nanos_since_unix_epoch(),
-            fee_collector,
-            fee_collector_block_index,
-        }
-    }
-}
-
-pub type LedgerBalances = Balances<HashMap<Account, Tokens>>;

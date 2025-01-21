@@ -1,36 +1,35 @@
 //! Replica -- Internet Computer
 
-use ic_async_utils::{abort_on_panic, shutdown_signal};
-use ic_config::{subnet_config::SubnetConfigs, Config};
-use ic_crypto_sha::Sha256;
-use ic_crypto_tls_interfaces::TlsHandshake;
+use ic_config::Config;
+use ic_crypto_sha2::Sha256;
+use ic_http_endpoints_async_utils::{abort_on_panic, shutdown_signal};
 use ic_http_endpoints_metrics::MetricsHttpEndpoint;
-use ic_interfaces_registry::{LocalStoreCertifiedTimeReader, RegistryClient};
 use ic_logger::{info, new_replica_logger_from_config};
 use ic_metrics::MetricsRegistry;
-use ic_onchain_observability_server::spawn_onchain_observability_grpc_server_and_register_metrics;
-use ic_registry_client_helpers::subnet::SubnetRegistry;
 use ic_replica::setup;
 use ic_sys::PAGE_SIZE;
-use ic_types::consensus::CatchUpPackage;
-use ic_types::{replica_version::REPLICA_BINARY_HASH, PrincipalId, ReplicaVersion, SubnetId};
+use ic_tracing::ReloadHandles;
+use ic_tracing_jaeger_exporter::jaeger_exporter;
+use ic_tracing_logging_layer::logging_layer;
+use ic_types::{
+    consensus::CatchUpPackage, replica_version::REPLICA_BINARY_HASH, PrincipalId, ReplicaVersion,
+    SubnetId,
+};
 use nix::unistd::{setpgid, Pid};
-use static_assertions::assert_eq_size;
-use std::{env, io, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
+use std::{env, fs, io, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 use tokio::signal::unix::{signal, SignalKind};
+use tracing_subscriber::{filter::filter_fn, layer::SubscriberExt, Layer};
 
 #[cfg(target_os = "linux")]
 mod jemalloc_metrics;
 
 // On mac jemalloc causes lmdb to segfault
 #[cfg(target_os = "linux")]
-use jemallocator::Jemalloc;
+use tikv_jemallocator::Jemalloc;
 #[cfg(target_os = "linux")]
 #[global_allocator]
-#[cfg(target_os = "linux")]
 static ALLOC: Jemalloc = Jemalloc;
 
-use ic_registry_local_store::LocalStoreImpl;
 #[cfg(feature = "profiler")]
 use pprof::{protos::Message, ProfilerGuard};
 #[cfg(feature = "profiler")]
@@ -43,15 +42,15 @@ use std::io::Write;
 /// Determine sha256 hash of the current replica binary
 ///
 /// Returns tuple (path of the replica binary, hex encoded sha256 of binary)
-fn get_replica_binary_hash() -> std::result::Result<(PathBuf, String), String> {
+fn get_replica_binary_hash() -> Result<(PathBuf, String), String> {
     let mut hasher = Sha256::new();
     let replica_binary_path = env::current_exe()
         .map_err(|e| format!("Failed to determine replica binary path: {:?}", e))?;
 
-    let mut binary_file = std::fs::File::open(&replica_binary_path)
+    let mut binary_file = fs::File::open(&replica_binary_path)
         .map_err(|e| format!("Failed to open replica binary to calculate hash: {:?}", e))?;
 
-    std::io::copy(&mut binary_file, &mut hasher)
+    io::copy(&mut binary_file, &mut hasher)
         .map_err(|e| format!("Failed to calculate hash for replica binary: {:?}", e))?;
 
     Ok((replica_binary_path, hex::encode(hasher.finish())))
@@ -59,8 +58,8 @@ fn get_replica_binary_hash() -> std::result::Result<(PathBuf, String), String> {
 
 fn main() -> io::Result<()> {
     // We do not support 32 bits architectures and probably never will.
-    assert_eq_size!(usize, u64);
-
+    #[cfg(not(target_pointer_width = "64"))]
+    compile_error!("compilation is only allowed for 64-bit targets");
     // Ensure that the hardcoded constant matches the OS page size.
     assert_eq!(ic_sys::sysconf_page_size(), PAGE_SIZE);
 
@@ -75,32 +74,53 @@ fn main() -> io::Result<()> {
         eprintln!("Failed to setup a new process group for replica.");
         // This is a generic exit error. At this point sandboxing is
         // not turned on so we can do a simple exit with cleanup.
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, err));
+        return Err(io::Error::new(io::ErrorKind::Other, err));
     }
 
     #[cfg(feature = "profiler")]
     let guard = pprof::ProfilerGuard::new(100).unwrap();
 
-    // We create 3 separate Tokio runtimes. The main one is for the most important
-    // IC operations (e.g. transport). Then the `http` is for serving user requests.
-    // This is also crucial because IC upgrades go through this code path.
-    // The 3rd one is for XNet.
-    // In a bug-free system with quotas in place we would use just a single runtime.
-    // We do have 3 currently as risk management measure. We don't want to risk
+    // We create 4 separate Tokio runtimes. The main one is for the most important
+    // IC operations (crypto).
+
+    // In a bug-free system with we would use just a single runtime.
+    // We do have 4 currently as risk management measure. We don't want to risk
     // a potential bug (e.g. blocking some thread) in one component to yield the
     // Tokio scheduler irresponsive and block progress on other components.
-    let rt_main = tokio::runtime::Runtime::new().unwrap();
+
+    // Until NET-1559 is not resolved there must be separate runtimes for the different compoenents as risk mitigation.
+
+    // Async components usually spend most of their time awaiting for I/O operations.
+    // Ideally async components are not CPU intensive so they should not need many OS threads.
+    let rt_worker_threads = std::cmp::max(num_cpus::get() / 4, 2);
+
+    // The runtime is use for inter process communication - crypto, networking adapters, etc.
+    let rt_main = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(rt_worker_threads)
+        .thread_name("Main_Thread".to_string())
+        .enable_all()
+        .build()
+        .unwrap();
+
+    // The runtime is used for P2P.
+    let rt_p2p = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(rt_worker_threads)
+        .thread_name("P2P_Thread".to_string())
+        .enable_all()
+        .build()
+        .unwrap();
+
     // Runtime used for serving user requests.
-    let http_rt_worker_threads = std::cmp::max(num_cpus::get() / 2, 1);
     let rt_http = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(http_rt_worker_threads)
+        .worker_threads(rt_worker_threads)
         .thread_name("HTTP_Thread".to_string())
         .enable_all()
         .build()
         .unwrap();
 
+    // Runtime used for XNet.
     let rt_xnet = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
+        .worker_threads(rt_worker_threads)
         .thread_name("XNet_Thread".to_string())
         .enable_all()
         .build()
@@ -139,6 +159,11 @@ fn main() -> io::Result<()> {
         e.print().expect("Failed to print CLI argument error.");
     }
 
+    // We abort the whole program with a core dump if a single thread panics.
+    // This way we can capture all the context if a critical error
+    // happens.
+    abort_on_panic();
+
     let config_source = setup::get_config_source(&replica_args);
     // Setup temp directory for the configuration.
     let tmpdir = tempfile::Builder::new()
@@ -148,13 +173,16 @@ fn main() -> io::Result<()> {
     let config = Config::load_with_tmpdir(config_source, tmpdir.path().to_path_buf());
 
     let (logger, async_log_guard) = new_replica_logger_from_config(&config.logger);
-
     let metrics_registry = MetricsRegistry::global();
-
     #[cfg(target_os = "linux")]
     metrics_registry.register(jemalloc_metrics::JemallocMetrics::new());
 
-    // Set the replica verison and report as metric
+    let cup_proto = setup::get_catch_up_package(&replica_args, &logger);
+    let cup = cup_proto
+        .as_ref()
+        .map(|proto| CatchUpPackage::try_from(proto).expect("deserializing CUP failed"));
+
+    // Set the replica version and report as metric
     setup::set_replica_version(&replica_args, &logger);
     {
         let g = metrics_registry.int_gauge_vec(
@@ -172,17 +200,13 @@ fn main() -> io::Result<()> {
     }
 
     let (registry, crypto) = setup::setup_crypto_registry(
-        config.clone(),
+        &config,
         rt_main.handle().clone(),
-        Some(&metrics_registry),
+        &metrics_registry,
         logger.clone(),
     );
 
     let node_id = crypto.get_node_id();
-    let cup_proto = setup::get_catch_up_package(&replica_args, &logger);
-    let cup = cup_proto
-        .as_ref()
-        .map(|c| CatchUpPackage::try_from(c).expect("deserializing CUP failed"));
 
     let subnet_id = match &replica_args {
         Ok(args) => {
@@ -198,30 +222,40 @@ fn main() -> io::Result<()> {
         Err(_) => setup::get_subnet_id(node_id, registry.as_ref(), cup.as_ref(), &logger),
     };
 
-    let subnet_type = setup::get_subnet_type(
-        registry.as_ref(),
-        subnet_id,
-        registry.get_latest_version(),
-        &logger,
-    );
-
-    let subnet_config = SubnetConfigs::default().own_subnet_config(subnet_type);
-
-    // Read the root subnet id from registry
-    let root_subnet_id = registry
-        .get_root_subnet_id(
-            cup.as_ref()
-                .map(|c| c.content.registry_version())
-                .unwrap_or_else(|| registry.get_latest_version()),
-        )
-        .expect("cannot read from registry")
-        .expect("cannot find root subnet id");
-
     // Set node_id and subnet_id in the logging context
     let mut context = logger.get_context();
     context.node_id = format!("{}", node_id.get());
     context.subnet_id = format!("{}", subnet_id.get());
     let logger = logger.with_new_context(context);
+
+    // Setup the tracing subscriber
+    //   1. Log to stdout
+    //   2. Layers for generating flamegraphs
+    //   3. Jeager exporter if enabled
+
+    let (logging, _logging_drop_guard) = logging_layer(&config.logger, node_id, subnet_id);
+    // TARPC is way too verbose. Turn it off for now.
+    let logging = logging.with_filter(filter_fn(|metadata| metadata.target() != "tarpc::client"));
+
+    let mut tracing_layers = vec![logging.boxed()];
+
+    let (reload_layer, reload_handle) = tracing_subscriber::reload::Layer::new(vec![]);
+    let tracing_handle = ReloadHandles::new(reload_handle);
+    tracing_layers.push(reload_layer.boxed());
+
+    // TODO: the replica config has empty string instead of a None value for the 'jaeger_addr'. It needs to be fixed.
+    if let Some(jaeger_addr) = &config.tracing.jaeger_addr {
+        match jaeger_exporter(jaeger_addr, "replica", rt_main.handle()) {
+            Ok(layer) => tracing_layers.push(layer.boxed()),
+            Err(err) => info!(logger, "{:?}", err),
+        }
+    }
+
+    let subscriber = tracing_subscriber::registry().with(tracing_layers);
+
+    if let Err(err) = tracing::subscriber::set_global_default(subscriber) {
+        tracing::warn!("Failed to set global subscriber: {:#?}", err);
+    }
 
     info!(logger, "Replica Started");
     info!(logger, "Running in subnetwork {:?}", subnet_id);
@@ -230,63 +264,33 @@ fn main() -> io::Result<()> {
         let _ = REPLICA_BINARY_HASH.set(hash);
     }
 
-    // We abort the whole program with a core dump if a single thread panics.
-    // This way we can capture all the context if a critical error
-    // happens.
-    abort_on_panic();
-
-    setup::create_consensus_pool_dir(&config);
-
     let crypto = Arc::new(crypto);
     let _metrics_endpoint = MetricsHttpEndpoint::new(
         rt_http.handle().clone(),
         config.metrics.clone(),
         metrics_registry.clone(),
-        registry.clone(),
-        Arc::clone(&crypto) as Arc<dyn TlsHandshake + Send + Sync>,
         &logger.inner_logger.root,
     );
 
-    let registry_certified_time_reader: Arc<dyn LocalStoreCertifiedTimeReader> = Arc::new(
-        LocalStoreImpl::new(config.registry_client.local_store.clone()),
-    );
-
     info!(logger, "Constructing IC stack");
-    let (_, _, _p2p_thread_joiner, _, _xnet_endpoint) =
+    let (_, _, _, _p2p_thread_joiner, _xnet_endpoint) =
         ic_replica::setup_ic_stack::construct_ic_stack(
             &logger,
             &metrics_registry,
-            rt_main.handle().clone(),
-            rt_http.handle().clone(),
-            rt_xnet.handle().clone(),
+            rt_main.handle(),
+            rt_p2p.handle(),
+            rt_http.handle(),
+            rt_xnet.handle(),
             config.clone(),
-            subnet_config,
             node_id,
             subnet_id,
-            subnet_type,
-            root_subnet_id,
             registry,
             crypto,
-            cup,
-            registry_certified_time_reader,
+            cup_proto,
+            tracing_handle,
         )?;
 
     info!(logger, "Constructed IC stack");
-
-    // TODO(NET-1366) - remove this flag once confident that starting gRPC is stable
-    if config
-        .adapters_config
-        .onchain_observability_enable_grpc_server
-    {
-        // Spawns a new grpc server in a new task. This will continue to run until the Runtime shuts down.
-        spawn_onchain_observability_grpc_server_and_register_metrics(
-            metrics_registry,
-            rt_main.handle().clone(),
-            config
-                .adapters_config
-                .onchain_observability_uds_metrics_path,
-        );
-    }
 
     std::thread::sleep(Duration::from_millis(5000));
 

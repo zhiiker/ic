@@ -1,31 +1,37 @@
 use async_trait::async_trait;
 use candid::candid_method;
-use dfn_candid::{candid, candid_one, CandidOne};
+use dfn_candid::{candid_one, CandidOne};
 use dfn_core::{
     api::{caller, Funds},
     over, over_async, over_init,
 };
 use ic_base_types::{PrincipalId, SubnetId};
-use ic_ic00_types::{
-    CanisterIdRecord, CanisterInstallMode::Install, CanisterSettingsArgsBuilder,
-    CreateCanisterArgs, InstallCodeArgs, Method, UpdateSettingsArgs,
+use ic_management_canister_types::{
+    CanisterInstallMode::Install, CanisterSettingsArgsBuilder, CreateCanisterArgs, InstallCodeArgs,
+    Method, UpdateSettingsArgs,
 };
-use ic_nervous_system_root::{
-    canister_status::{CanisterStatusResultV2, CanisterStatusType},
-    change_canister_controllers::NnsRootCanisterClientImpl,
+use ic_nervous_system_clients::{
+    canister_id_record::CanisterIdRecord,
+    canister_status::{canister_status, CanisterStatusResultV2, CanisterStatusType},
 };
+use ic_nervous_system_runtime::DfnRuntime;
 use ic_nns_constants::GOVERNANCE_CANISTER_ID;
+use ic_nns_handler_root_interface::client::NnsRootCanisterClientImpl;
 use ic_sns_wasm::{
     canister_api::CanisterApi,
     canister_stable_memory::CanisterStableMemory,
     init::SnsWasmCanisterInitPayload,
     pb::v1::{
-        AddWasmRequest, AddWasmResponse, DeployNewSnsRequest, DeployNewSnsResponse,
-        GetAllowedPrincipalsRequest, GetAllowedPrincipalsResponse, GetNextSnsVersionRequest,
-        GetNextSnsVersionResponse, GetSnsSubnetIdsRequest, GetSnsSubnetIdsResponse, GetWasmRequest,
-        GetWasmResponse, InsertUpgradePathEntriesRequest, InsertUpgradePathEntriesResponse,
-        ListDeployedSnsesRequest, ListDeployedSnsesResponse, ListUpgradeStepsRequest,
-        ListUpgradeStepsResponse, UpdateAllowedPrincipalsRequest, UpdateAllowedPrincipalsResponse,
+        update_allowed_principals_response::UpdateAllowedPrincipalsResult, AddWasmRequest,
+        AddWasmResponse, DeployNewSnsRequest, DeployNewSnsResponse, GetAllowedPrincipalsRequest,
+        GetAllowedPrincipalsResponse, GetDeployedSnsByProposalIdRequest,
+        GetDeployedSnsByProposalIdResponse, GetNextSnsVersionRequest, GetNextSnsVersionResponse,
+        GetProposalIdThatAddedWasmRequest, GetProposalIdThatAddedWasmResponse,
+        GetSnsSubnetIdsRequest, GetSnsSubnetIdsResponse, GetWasmMetadataRequest,
+        GetWasmMetadataResponse, GetWasmRequest, GetWasmResponse, InsertUpgradePathEntriesRequest,
+        InsertUpgradePathEntriesResponse, ListDeployedSnsesRequest, ListDeployedSnsesResponse,
+        ListUpgradeStepsRequest, ListUpgradeStepsResponse, SnsWasmError,
+        UpdateAllowedPrincipalsRequest, UpdateAllowedPrincipalsResponse,
         UpdateSnsSubnetListRequest, UpdateSnsSubnetListResponse,
     },
     sns_wasm::SnsWasmCanister,
@@ -39,7 +45,7 @@ use dfn_core::println;
 pub const LOG_PREFIX: &str = "[SNS-WASM] ";
 
 thread_local! {
-  static SNS_WASM: RefCell<SnsWasmCanister<CanisterStableMemory>> = RefCell::new(SnsWasmCanister::new());
+    static SNS_WASM: RefCell<SnsWasmCanister<CanisterStableMemory>> = RefCell::new(SnsWasmCanister::new());
 }
 
 // TODO possibly determine how to make a single static that is thread-safe?
@@ -63,17 +69,17 @@ impl CanisterApi for CanisterApiImpl {
         target_subnet: SubnetId,
         controller_id: PrincipalId,
         cycles: Cycles,
+        wasm_memory_limit: u64,
     ) -> Result<CanisterId, String> {
+        let settings = CanisterSettingsArgsBuilder::new()
+            .with_controllers(vec![controller_id])
+            .with_wasm_memory_limit(wasm_memory_limit);
         let result: Result<CanisterIdRecord, _> = dfn_core::api::call_with_funds_and_cleanup(
             target_subnet.into(),
             &Method::CreateCanister.to_string(),
             candid_one,
             CreateCanisterArgs {
-                settings: Some(
-                    CanisterSettingsArgsBuilder::new()
-                        .with_controllers(vec![controller_id])
-                        .build(),
-                ),
+                settings: Some(settings.build()),
                 sender_canister_version: Some(dfn_core::api::canister_version()),
             },
             Funds::new(cycles.get().try_into().unwrap()),
@@ -122,7 +128,6 @@ impl CanisterApi for CanisterApiImpl {
             arg: init_payload,
             compute_allocation: None,
             memory_allocation: None,
-            query_allocation: None,
             sender_canister_version: Some(dfn_core::api::canister_version()),
         };
         let install_res: Result<(), (Option<i32>, String)> = dfn_core::call(
@@ -227,7 +232,7 @@ fn handle_call_error(prefix: String) -> impl FnOnce((Option<i32>, String)) -> St
 
 impl CanisterApiImpl {
     async fn stop_canister(&self, canister: CanisterId) -> Result<(), String> {
-        dfn_core::call(
+        () = dfn_core::call(
             CanisterId::ic_00(),
             "stop_canister",
             candid_one,
@@ -246,24 +251,16 @@ impl CanisterApiImpl {
         let mut count = 0;
         // Wait until canister is in the stopped state.
         loop {
-            let status: CanisterStatusResultV2 = dfn_core::call(
-                CanisterId::ic_00(),
-                "canister_status",
-                candid_one,
-                CanisterIdRecord::from(canister),
-            )
-            .await
-            .map_err(|(code, msg)| {
-                format!(
-                    "{}{}",
-                    code.map(|c| format!(
-                        "Unable to get target canister status: error code {}: ",
-                        c
-                    ))
-                    .unwrap_or_default(),
-                    msg
-                )
-            })?;
+            let status: CanisterStatusResultV2 =
+                canister_status::<DfnRuntime>(CanisterIdRecord::from(canister))
+                    .await
+                    .map(CanisterStatusResultV2::from)
+                    .map_err(|(code, msg)| {
+                        format!(
+                            "Unable to get target canister status: error code {}: {}",
+                            code, msg
+                        )
+                    })?;
 
             if status.status() == CanisterStatusType::Stopped {
                 return Ok(());
@@ -294,7 +291,7 @@ fn canister_init() {
 /// In addition to canister_init, this method is called by canister_post_upgrade.
 #[candid_method(init)]
 fn canister_init_(init_payload: SnsWasmCanisterInitPayload) {
-    println!("{}canister_init_", LOG_PREFIX);
+    println!("{}Executing canister init", LOG_PREFIX);
     SNS_WASM.with(|c| {
         c.borrow_mut().set_sns_subnets(init_payload.sns_subnet_ids);
         c.borrow_mut()
@@ -302,7 +299,8 @@ fn canister_init_(init_payload: SnsWasmCanisterInitPayload) {
         c.borrow_mut()
             .set_allowed_principals(init_payload.allowed_principals);
         c.borrow().initialize_stable_memory();
-    })
+    });
+    println!("{}Completed canister init", LOG_PREFIX);
 }
 
 /// Executes some logic before executing an upgrade, including serializing and writing the
@@ -325,14 +323,15 @@ fn canister_post_upgrade() {
     dfn_core::printer::hook();
     println!("{}Executing post upgrade", LOG_PREFIX);
 
-    SNS_WASM.with(|c| c.replace(SnsWasmCanister::<CanisterStableMemory>::from_stable_memory()));
+    SNS_WASM.with(|c| {
+        c.replace(SnsWasmCanister::<CanisterStableMemory>::from_stable_memory());
+    });
 
     println!("{}Completed post upgrade", LOG_PREFIX);
 }
 
 #[export_name = "canister_update add_wasm"]
 fn add_wasm() {
-    println!("{}add_wasm", LOG_PREFIX);
     over(candid_one, add_wasm_)
 }
 
@@ -349,7 +348,6 @@ fn add_wasm_(add_wasm_payload: AddWasmRequest) -> AddWasmResponse {
 
 #[export_name = "canister_update insert_upgrade_path_entries"]
 fn insert_upgrade_path_entries() {
-    println!("{}insert_upgrade_path_entries", LOG_PREFIX);
     over(candid_one, insert_upgrade_path_entries_)
 }
 
@@ -370,7 +368,6 @@ fn insert_upgrade_path_entries_(
 
 #[export_name = "canister_query list_upgrade_steps"]
 fn list_upgrade_steps() {
-    println!("{}list_upgrade_steps", LOG_PREFIX);
     over(candid_one, list_upgrade_steps_)
 }
 
@@ -381,7 +378,6 @@ fn list_upgrade_steps_(payload: ListUpgradeStepsRequest) -> ListUpgradeStepsResp
 
 #[export_name = "canister_query get_wasm"]
 fn get_wasm() {
-    println!("{}get_wasm", LOG_PREFIX);
     over(candid_one, get_wasm_)
 }
 
@@ -390,9 +386,40 @@ fn get_wasm_(get_wasm_payload: GetWasmRequest) -> GetWasmResponse {
     SNS_WASM.with(|sns_wasm| sns_wasm.borrow().get_wasm(get_wasm_payload))
 }
 
+#[export_name = "canister_query get_wasm_metadata"]
+fn get_wasm_metadata() {
+    over(candid_one, get_wasm_metadata_)
+}
+
+#[candid_method(query, rename = "get_wasm_metadata")]
+fn get_wasm_metadata_(
+    get_wasm_metadata_payload: GetWasmMetadataRequest,
+) -> GetWasmMetadataResponse {
+    SNS_WASM.with(|sns_wasm| {
+        sns_wasm
+            .borrow()
+            .get_wasm_metadata(get_wasm_metadata_payload)
+    })
+}
+
+#[export_name = "canister_query get_proposal_id_that_added_wasm"]
+fn get_proposal_id_that_added_wasm() {
+    over(candid_one, get_proposal_id_that_added_wasm_)
+}
+
+#[candid_method(query, rename = "get_proposal_id_that_added_wasm")]
+fn get_proposal_id_that_added_wasm_(
+    get_proposal_id_that_added_wasm_payload: GetProposalIdThatAddedWasmRequest,
+) -> GetProposalIdThatAddedWasmResponse {
+    SNS_WASM.with(|sns_wasm| {
+        sns_wasm
+            .borrow()
+            .get_proposal_id_that_added_wasm(get_proposal_id_that_added_wasm_payload)
+    })
+}
+
 #[export_name = "canister_query get_next_sns_version"]
 fn get_next_sns_version() {
-    println!("{}get_next_sns_version", LOG_PREFIX);
     over(candid_one, get_next_sns_version_)
 }
 
@@ -403,7 +430,6 @@ fn get_next_sns_version_(request: GetNextSnsVersionRequest) -> GetNextSnsVersion
 
 #[export_name = "canister_query get_latest_sns_version_pretty"]
 fn get_latest_sns_version_pretty() {
-    println!("{}get_latest_sns_version_pretty", LOG_PREFIX);
     over(candid_one, get_latest_sns_version_pretty_)
 }
 
@@ -414,7 +440,6 @@ fn get_latest_sns_version_pretty_(_: ()) -> HashMap<String, String> {
 
 #[export_name = "canister_update deploy_new_sns"]
 fn deploy_new_sns() {
-    println!("{}deploy_new_sns", LOG_PREFIX);
     over_async(candid_one, deploy_new_sns_)
 }
 
@@ -432,7 +457,6 @@ async fn deploy_new_sns_(deploy_new_sns: DeployNewSnsRequest) -> DeployNewSnsRes
 
 #[export_name = "canister_query list_deployed_snses"]
 fn list_deployed_snses() {
-    println!("{}list_deployed_snses", LOG_PREFIX);
     over(candid_one, list_deployed_snses_)
 }
 
@@ -443,36 +467,39 @@ fn list_deployed_snses_(request: ListDeployedSnsesRequest) -> ListDeployedSnsesR
 
 #[export_name = "canister_update update_allowed_principals"]
 fn update_allowed_principals() {
-    println!("{}update_allowed_principals", LOG_PREFIX);
     over(candid_one, update_allowed_principals_)
 }
 
 #[candid_method(update, rename = "update_allowed_principals")]
 fn update_allowed_principals_(
-    request: UpdateAllowedPrincipalsRequest,
+    _: UpdateAllowedPrincipalsRequest,
 ) -> UpdateAllowedPrincipalsResponse {
-    SNS_WASM.with(|sns_wasm| {
-        sns_wasm
-            .borrow_mut()
-            .update_allowed_principals(request, caller())
-    })
+    UpdateAllowedPrincipalsResponse {
+        update_allowed_principals_result: Some(UpdateAllowedPrincipalsResult::Error(
+            SnsWasmError {
+                message: "update_allowed_principals is obsolete. For launching an SNS, please \
+                          submit a CreateServiceNervousSystem proposal."
+                    .to_string(),
+            },
+        )),
+    }
 }
 
 #[export_name = "canister_query get_allowed_principals"]
 fn get_allowed_principals() {
-    println!("{}get_allowed_principals", LOG_PREFIX);
     over(candid_one, get_allowed_principals_)
 }
 
 #[candid_method(query, rename = "get_allowed_principals")]
 fn get_allowed_principals_(_request: GetAllowedPrincipalsRequest) -> GetAllowedPrincipalsResponse {
-    SNS_WASM.with(|sns_wasm| sns_wasm.borrow().get_allowed_principals())
+    GetAllowedPrincipalsResponse {
+        allowed_principals: vec![],
+    }
 }
 
 /// Add or remove SNS subnet IDs from the list of subnet IDs that SNS instances will be deployed to
 #[export_name = "canister_update update_sns_subnet_list"]
 fn update_sns_subnet_list() {
-    println!("{}update_sns_subnet_list", LOG_PREFIX);
     over(candid_one, update_sns_subnet_list_)
 }
 
@@ -490,13 +517,24 @@ fn update_sns_subnet_list_(request: UpdateSnsSubnetListRequest) -> UpdateSnsSubn
 /// Return the list of SNS subnet IDs that SNS-WASM will deploy SNS instances to
 #[export_name = "canister_query get_sns_subnet_ids"]
 fn get_sns_subnet_ids() {
-    println!("{}get_sns_subnet_ids", LOG_PREFIX);
     over(candid_one, get_sns_subnet_ids_)
 }
 
 #[candid_method(query, rename = "get_sns_subnet_ids")]
 fn get_sns_subnet_ids_(_request: GetSnsSubnetIdsRequest) -> GetSnsSubnetIdsResponse {
     SNS_WASM.with(|sns_wasm| sns_wasm.borrow().get_sns_subnet_ids())
+}
+
+#[export_name = "canister_query get_deployed_sns_by_proposal_id"]
+fn get_deployed_sns_by_proposal_id() {
+    over(candid_one, get_deployed_sns_by_proposal_id_)
+}
+
+#[candid_method(query, rename = "get_deployed_sns_by_proposal_id")]
+fn get_deployed_sns_by_proposal_id_(
+    request: GetDeployedSnsByProposalIdRequest,
+) -> GetDeployedSnsByProposalIdResponse {
+    SNS_WASM.with(|sns_wasm| sns_wasm.borrow().get_deployed_sns_by_proposal_id(request))
 }
 
 /// SNS-WASM metrics
@@ -545,58 +583,11 @@ fn http_request() {
     dfn_http_metrics::serve_metrics(encode_metrics);
 }
 
-/// This makes this Candid service self-describing, so that for example Candid
-/// UI, but also other tools, can seamlessly integrate with it.
-/// The concrete interface (__get_candid_interface_tmp_hack) is provisional, but
-/// works.
-///
-/// We include the .did file as committed, which means it is included verbatim in
-/// the .wasm; using `candid::export_service` here would involve unnecessary
-/// runtime computation.
-#[export_name = "canister_query __get_candid_interface_tmp_hack"]
-fn expose_candid() {
-    over(candid, |_: ()| include_str!("sns-wasm.did").to_string())
-}
-
-/// When run on native, this prints the candid service definition of this
-/// canister, from the methods annotated with `candid_method` above.
-///
-/// Note that `cargo test` calls `main`, and `export_service` (which defines
-/// `__export_service` in the current scope) needs to be called exactly once. So
-/// in addition to `not(target_arch = "wasm32")` we have a `not(test)` guard here
-/// to avoid calling `export_service`, which we need to call in the test below.
-#[cfg(not(any(target_arch = "wasm32", test)))]
 fn main() {
-    // The line below generates did types and service definition from the
-    // methods annotated with `candid_method` above. The definition is then
-    // obtained with `__export_service()`.
-    candid::export_service!();
-    std::print!("{}", __export_service());
+    // This block is intentionally left blank.
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
-fn main() {}
-
-/// A test that fails if the API was updated but the candid definition was not.
-#[test]
-fn check_wasm_candid_file() {
-    let did_path = std::path::PathBuf::from(
-        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR env var undefined"),
-    )
-    .join("canister/sns-wasm.did");
-
-    let did_contents = String::from_utf8(std::fs::read(did_path).unwrap()).unwrap();
-
-    // See comments in main above
-    candid::export_service!();
-    let expected = __export_service();
-
-    if did_contents != expected {
-        panic!(
-            "Generated candid definition does not match canister/sns-wasm.did. \
-            Run `bazel run :generate_did > canister/sns-wasm.did` (no nix and/or direnv) or \
-            `cargo run --bin sns-wasm-canister > canister/sns-wasm.did` in \
-            rs/nns/sns-wasm to update canister/sns-wasm.did."
-        )
-    }
-}
+// In order for some of the test(s) within this mod to work,
+// this MUST occur at the end.
+#[cfg(test)]
+mod tests;

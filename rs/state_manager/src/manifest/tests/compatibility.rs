@@ -7,12 +7,12 @@
 use crate::manifest::{
     manifest_hash, tests::computation::dummy_file_table_and_chunk_table, DEFAULT_CHUNK_SIZE,
 };
-use ic_protobuf::state::sync::v1 as pb;
-use ic_test_utilities::types::arbitrary;
-use ic_types::state_sync::{
-    encode_manifest, ChunkInfo, FileInfo, Manifest, StateSyncVersion,
-    MAX_SUPPORTED_STATE_SYNC_VERSION,
+use crate::state_sync::types::{
+    encode_manifest, ChunkInfo, FileInfo, Manifest, MAX_SUPPORTED_STATE_SYNC_VERSION,
 };
+use ic_protobuf::state::sync::v1 as pb;
+use ic_state_layout::{SUBNET_QUEUES_FILE, SYSTEM_METADATA_FILE};
+use ic_types::state_sync::StateSyncVersion;
 use proptest::prelude::*;
 
 fn encode_file_info(file_info: &FileInfo) -> Vec<u8> {
@@ -27,6 +27,38 @@ fn encode_chunk_info(chunk_info: &ChunkInfo) -> Vec<u8> {
 
     let pb_chunk_info = pb::ChunkInfo::from(chunk_info.clone());
     pb_chunk_info.encode_to_vec()
+}
+
+prop_compose! {
+    /// Returns an arbitrary [`ChunkInfo`].
+    pub fn arbitrary_chunk_info() (
+        file_index in any::<u32>(),
+        size_bytes in any::<u32>(),
+        offset in any::<u64>(),
+        hash in any::<[u8; 32]>(),
+    ) -> ChunkInfo {
+        ChunkInfo {
+            file_index,
+            size_bytes,
+            offset,
+            hash,
+        }
+    }
+}
+
+prop_compose! {
+    /// Returns an arbitrary [`ChunkInfo`].
+    pub fn arbitrary_file_info() (
+        relative_path in any::<String>(),
+        size_bytes in any::<u64>(),
+        hash in any::<[u8; 32]>(),
+    ) -> FileInfo {
+        FileInfo {
+            relative_path: std::path::PathBuf::from(relative_path),
+            size_bytes,
+            hash,
+        }
+    }
 }
 
 /// Implement the encoding of manifest according to the protobuf specification https://developers.google.com/protocol-buffers/docs/encoding.
@@ -459,12 +491,12 @@ fn testcase_file_table_and_chunk_table() -> (Vec<FileInfo>, Vec<ChunkInfo>) {
         hash: hex_to_hash("981305d7c0b2ace0f53fe822f4075278fa28511e8c34e70f37fd8425af659b36"),
     };
     let file_info_9 = FileInfo {
-        relative_path: "subnet_queues.pbuf".into(),
+        relative_path: SUBNET_QUEUES_FILE.into(),
         size_bytes: 0,
         hash: hex_to_hash("981305d7c0b2ace0f53fe822f4075278fa28511e8c34e70f37fd8425af659b36"),
     };
     let file_info_10 = FileInfo {
-        relative_path: "system_metadata.pbuf".into(),
+        relative_path: SYSTEM_METADATA_FILE.into(),
         size_bytes: 887,
         hash: hex_to_hash("1c134cd6a9d691d3ec74a81eec5462d5af8653be53beb61e26b884958ebd2d05"),
     };
@@ -569,20 +601,20 @@ fn deterministic_manifest_hash() {
 
 proptest! {
     #[test]
-    fn chunk_info_deterministic_encoding(chunk_info in arbitrary::chunk_info()) {
+    fn chunk_info_deterministic_encoding(chunk_info in arbitrary_chunk_info()) {
         assert_eq!(encode_chunk_info(&chunk_info), encode_chunk_info_expected(&chunk_info));
     }
 
     #[test]
-    fn file_info_deterministic_encoding(file_info in arbitrary::file_info()) {
+    fn file_info_deterministic_encoding(file_info in arbitrary_file_info()) {
         assert_eq!(encode_file_info(&file_info), encode_file_info_expected(&file_info));
     }
 
     #[test]
     fn manifest_deterministic_encoding(
         version in 0..=(MAX_SUPPORTED_STATE_SYNC_VERSION as u32),
-        file_table in prop::collection::vec(arbitrary::file_info(), 0..=1000),
-        chunk_table in prop::collection::vec(arbitrary::chunk_info(), 0..=1000)
+        file_table in prop::collection::vec(arbitrary_file_info(), 0..=1000),
+        chunk_table in prop::collection::vec(arbitrary_chunk_info(), 0..=1000)
     ) {
         let manifest = Manifest::new(version.try_into().unwrap(), file_table, chunk_table);
         assert_eq!(encode_manifest(&manifest), encode_manifest_expected(&manifest));

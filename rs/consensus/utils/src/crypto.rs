@@ -3,14 +3,14 @@ use ic_types::{
     canister_http::CanisterHttpResponseMetadata,
     consensus::{
         dkg,
-        ecdsa::{EcdsaComplaintContent, EcdsaOpeningContent},
         hashed::Hashed,
-        Block, CatchUpContent, FinalizationContent, HashedBlock, NotarizationContent,
+        idkg::{IDkgComplaintContent, IDkgOpeningContent},
+        BlockMetadata, CatchUpContent, FinalizationContent, NotarizationContent,
         RandomBeaconContent, RandomTapeContent,
     },
     crypto::{
         canister_threshold_sig::idkg::{IDkgDealing, SignedIDkgDealing},
-        threshold_sig::ni_dkg::{DkgId, NiDkgId},
+        threshold_sig::ni_dkg::NiDkgId,
         CryptoError, CryptoHashOf, CryptoHashable, CryptoResult, Signable, Signed,
     },
     signature::{
@@ -199,7 +199,7 @@ impl<Message: Signable, C: ThresholdSigner<Message> + ThresholdSigVerifier<Messa
         signer: NodeId,
         dkg_id: NiDkgId,
     ) -> CryptoResult<ThresholdSignatureShare<Message>> {
-        self.sign_threshold(message, DkgId::NiDkgId(dkg_id))
+        self.sign_threshold(message, &dkg_id)
             .map(|signature| ThresholdSignatureShare { signature, signer })
     }
 
@@ -212,7 +212,7 @@ where {
         self.verify_threshold_sig_share(
             &message.signature.signature,
             &message.content,
-            DkgId::NiDkgId(dkg_id),
+            &dkg_id,
             message.signature.signer,
         )
     }
@@ -406,7 +406,7 @@ impl<Message: Signable, C: ThresholdSigner<Message> + ThresholdSigVerifier<Messa
                 .iter()
                 .map(|share| (share.signer, share.signature.clone()))
                 .collect(),
-            DkgId::NiDkgId(dkg_id),
+            &dkg_id,
         )
         .map(|signature| ThresholdSignature {
             signer: dkg_id,
@@ -422,7 +422,7 @@ impl<Message: Signable, C: ThresholdSigner<Message> + ThresholdSigVerifier<Messa
         self.verify_threshold_sig_combined(
             &message.signature.signature,
             &message.content,
-            DkgId::NiDkgId(message.signature.signer),
+            &message.signature.signer,
         )
     }
 }
@@ -431,13 +431,13 @@ impl<Message: Signable, C: ThresholdSigner<Message> + ThresholdSigVerifier<Messa
 /// consensus. Anything that implements the Crypto trait automatically
 /// implements this trait.
 pub trait ConsensusCrypto:
-    SignVerify<HashedBlock, BasicSignature<Block>, RegistryVersion>
+    SignVerify<BlockMetadata, BasicSignature<BlockMetadata>, RegistryVersion>
     + SignVerify<NotarizationContent, MultiSignatureShare<NotarizationContent>, RegistryVersion>
     + SignVerify<FinalizationContent, MultiSignatureShare<FinalizationContent>, RegistryVersion>
     + SignVerify<SignedIDkgDealing, BasicSignature<SignedIDkgDealing>, RegistryVersion>
     + SignVerify<IDkgDealing, BasicSignature<IDkgDealing>, RegistryVersion>
-    + SignVerify<EcdsaComplaintContent, BasicSignature<EcdsaComplaintContent>, RegistryVersion>
-    + SignVerify<EcdsaOpeningContent, BasicSignature<EcdsaOpeningContent>, RegistryVersion>
+    + SignVerify<IDkgComplaintContent, BasicSignature<IDkgComplaintContent>, RegistryVersion>
+    + SignVerify<IDkgOpeningContent, BasicSignature<IDkgOpeningContent>, RegistryVersion>
     + SignVerify<RandomBeaconContent, ThresholdSignatureShare<RandomBeaconContent>, NiDkgId>
     + SignVerify<RandomTapeContent, ThresholdSignatureShare<RandomTapeContent>, NiDkgId>
     + SignVerify<CatchUpContent, ThresholdSignatureShare<CatchUpContent>, NiDkgId>
@@ -498,7 +498,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use ic_test_utilities::types::ids::node_test_id;
+    use ic_test_utilities_types::ids::node_test_id;
     use ic_types::{
         crypto::{CombinedMultiSig, CombinedMultiSigOf, IndividualMultiSig, IndividualMultiSigOf},
         messages::MessageId,

@@ -3,10 +3,6 @@ mod secp256k1_conversions;
 mod tests;
 
 use ic_base_types::PrincipalId;
-use ic_crypto_ecdsa_secp256k1::PrivateKey;
-use ic_crypto_internal_types::sign::eddsa::ed25519::SecretKey as Ed25519SecretKey;
-use ic_crypto_utils_basic_sig::conversions::Ed25519PemParseError;
-use ic_crypto_utils_basic_sig::conversions::Ed25519SecretKeyConversions;
 use ic_types::crypto::DOMAIN_IC_REQUEST;
 use ic_types::messages::MessageId;
 use rand::{CryptoRng, Rng, SeedableRng};
@@ -23,12 +19,12 @@ pub type SignMessageId = Arc<dyn Fn(&MessageId) -> Result<Vec<u8>, Box<dyn Error
 /// A secp256k1 key pair
 #[derive(Clone)]
 pub struct Secp256k1KeyPair {
-    sk: ic_crypto_ecdsa_secp256k1::PrivateKey,
+    sk: ic_crypto_secp256k1::PrivateKey,
     /// The public key bytes only.
-    pk: ic_crypto_ecdsa_secp256k1::PublicKey,
+    pk: ic_crypto_secp256k1::PublicKey,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct Ed25519KeyPair {
     pub secret_key: [u8; 32],
     pub public_key: [u8; 32],
@@ -36,40 +32,45 @@ pub struct Ed25519KeyPair {
 
 impl Ed25519KeyPair {
     pub fn generate<R: Rng + CryptoRng>(rng: &mut R) -> Self {
-        let rng = ChaCha20Rng::from_seed(rng.gen());
-        let signing_key = ed25519_consensus::SigningKey::new(rng);
+        let mut rng = ChaCha20Rng::from_seed(rng.gen());
+        let key = ic_crypto_ed25519::PrivateKey::generate_using_rng(&mut rng);
         Self {
-            secret_key: signing_key.to_bytes(),
-            public_key: signing_key.verification_key().to_bytes(),
+            secret_key: key.serialize_raw(),
+            public_key: key.public_key().serialize_raw(),
         }
     }
 
     /// Parses an Ed25519KeyPair from a PEM string.
-    pub fn from_pem(pem: &str) -> Result<Self, Ed25519PemParseError> {
-        let (secret_key, public_key) = Ed25519SecretKey::from_pem(pem)?;
+    pub fn from_pem(pem: &str) -> Result<Self, ic_crypto_ed25519::PrivateKeyDecodingError> {
+        let key = ic_crypto_ed25519::PrivateKey::deserialize_pkcs8_pem(pem)?;
         Ok(Ed25519KeyPair {
-            secret_key: secret_key.0,
-            public_key: public_key.0,
+            secret_key: key.serialize_raw(),
+            public_key: key.public_key().serialize_raw(),
         })
     }
 
+    pub fn to_pem(&self) -> String {
+        let key = ic_crypto_ed25519::PrivateKey::deserialize_raw_32(&self.secret_key);
+        key.serialize_pkcs8_pem(ic_crypto_ed25519::PrivateKeyFormat::Pkcs8v2WithRingBug)
+    }
+
     pub fn sign(&self, msg: &[u8]) -> [u8; 64] {
-        let signing_key = ed25519_consensus::SigningKey::from(self.secret_key);
-        signing_key.sign(msg).to_bytes()
+        let key = ic_crypto_ed25519::PrivateKey::deserialize_raw_32(&self.secret_key);
+        key.sign_message(msg)
     }
 }
 
 impl Secp256k1KeyPair {
     pub fn sign(&self, msg: &[u8]) -> Vec<u8> {
-        self.sk.sign_message(msg)
+        self.sk.sign_message_with_ecdsa(msg).to_vec()
     }
     pub fn generate<R: Rng + CryptoRng>(rng: &mut R) -> Self {
         let mut rng = ChaCha20Rng::from_seed(rng.gen());
-        let sk = PrivateKey::generate_using_rng(&mut rng);
+        let sk = ic_crypto_secp256k1::PrivateKey::generate_using_rng(&mut rng);
         let pk = sk.public_key();
         Self { sk, pk }
     }
-    pub fn get_public_key(&self) -> ic_crypto_ecdsa_secp256k1::PublicKey {
+    pub fn get_public_key(&self) -> ic_crypto_secp256k1::PublicKey {
         self.pk.clone()
     }
 }
@@ -134,9 +135,9 @@ impl Sender {
     pub fn from_secp256k1_keys(
         sk_bytes: &[u8],
         pk_bytes: &[u8],
-    ) -> Result<Self, ic_crypto_ecdsa_secp256k1::KeyDecodingError> {
-        let pk = ic_crypto_ecdsa_secp256k1::PublicKey::deserialize_sec1(pk_bytes)?;
-        let sk = ic_crypto_ecdsa_secp256k1::PrivateKey::deserialize_sec1(sk_bytes)?;
+    ) -> Result<Self, ic_crypto_secp256k1::KeyDecodingError> {
+        let pk = ic_crypto_secp256k1::PublicKey::deserialize_sec1(pk_bytes)?;
+        let sk = ic_crypto_secp256k1::PrivateKey::deserialize_sec1(sk_bytes)?;
         Ok(Sender::SigKeys(SigKeys::EcdsaSecp256k1(Secp256k1KeyPair {
             sk,
             pk,
@@ -188,7 +189,9 @@ impl Sender {
         match self {
             Self::SigKeys(sig_keys) => match sig_keys {
                 SigKeys::Ed25519(key_pair) => Ok(Some(key_pair.sign(&msg).to_vec())),
-                SigKeys::EcdsaSecp256k1(key_pair) => Ok(Some(key_pair.sk.sign_message(&msg))),
+                SigKeys::EcdsaSecp256k1(key_pair) => {
+                    Ok(Some(key_pair.sk.sign_message_with_ecdsa(&msg).to_vec()))
+                }
             },
             Self::ExternalHsm { sign, .. } => sign(&msg).map(Some),
             Self::Anonymous => Ok(None),

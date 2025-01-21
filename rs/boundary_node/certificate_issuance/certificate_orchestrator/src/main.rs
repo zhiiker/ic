@@ -1,17 +1,23 @@
-use std::{cell::RefCell, cmp::Reverse, thread::LocalKey, time::Duration};
+use std::{cell::RefCell, cmp::Reverse, collections::BTreeMap, thread::LocalKey, time::Duration};
 
+use candid::{candid_method, Principal};
 use certificate_orchestrator_interface::{
     BoundedString, CreateRegistrationError, CreateRegistrationResponse, DispenseTaskError,
     DispenseTaskResponse, EncryptedPair, ExportCertificatesCertifiedResponse,
-    ExportCertificatesError, ExportCertificatesResponse, ExportPackage, GetRegistrationError,
-    GetRegistrationResponse, HeaderField, HttpRequest, HttpResponse, Id, InitArg,
-    ListAllowedPrincipalsError, ListAllowedPrincipalsResponse, ModifyAllowedPrincipalError,
-    ModifyAllowedPrincipalResponse, Name, PeekTaskError, PeekTaskResponse, QueueTaskError,
-    QueueTaskResponse, Registration, RemoveRegistrationError, RemoveRegistrationResponse, State,
-    UpdateRegistrationError, UpdateRegistrationResponse, UpdateType, UploadCertificateError,
+    ExportCertificatesError, ExportCertificatesResponse, ExportPackage, GetCertificateError,
+    GetCertificateResponse, GetRegistrationError, GetRegistrationResponse, HeaderField,
+    HttpRequest, HttpResponse, Id, InitArg, ListAllowedPrincipalsError,
+    ListAllowedPrincipalsResponse, ListRegistrationsError, ListRegistrationsResponse,
+    ListTasksError, ListTasksResponse, ModifyAllowedPrincipalError, ModifyAllowedPrincipalResponse,
+    Name, PeekTaskError, PeekTaskResponse, QueueTaskError, QueueTaskResponse, Registration,
+    RemoveRegistrationError, RemoveRegistrationResponse, RemoveTaskError, RemoveTaskResponse,
+    State, UpdateRegistrationError, UpdateRegistrationResponse, UpdateType, UploadCertificateError,
     UploadCertificateResponse,
 };
-use ic_cdk::{api::time, caller, export::Principal, post_upgrade, pre_upgrade, trap};
+use ic_cdk::{
+    api::{id, time},
+    caller, post_upgrade, pre_upgrade, trap,
+};
 use ic_cdk_macros::{init, query, update};
 use ic_cdk_timers::set_timer_interval;
 use ic_stable_structures::{
@@ -20,18 +26,20 @@ use ic_stable_structures::{
 };
 use priority_queue::PriorityQueue;
 use prometheus::{CounterVec, Encoder, Gauge, GaugeVec, Opts, Registry, TextEncoder};
-use work::{Peek, PeekError};
+use work::{Peek, PeekError, TaskRemover};
 
 use crate::{
     acl::{Authorize, AuthorizeError, Authorizer, WithAuthorize},
     certificate::{
-        Export, ExportError, Exporter, Upload, UploadError, Uploader, WithIcCertification,
+        CertGetter, Export, ExportError, Exporter, GetCert, GetCertError, Upload, UploadError,
+        UploadWithIcCertification, Uploader,
     },
     ic_certification::{add_cert, init_cert_tree, set_root_hash},
     id::{Generate, Generator},
+    rate_limiter::WithRateLimit,
     registration::{
         Create, CreateError, Creator, Expire, Expirer, Get, GetError, Getter, Remove, RemoveError,
-        Remover, Update, UpdateError, Updater,
+        Remover, Update, UpdateError, UpdateWithIcCertification, Updater,
     },
     work::{Dispense, DispenseError, Dispenser, Peeker, Queue, QueueError, Queuer, Retrier, Retry},
 };
@@ -41,6 +49,7 @@ mod certificate;
 mod ic_certification;
 mod id;
 mod persistence;
+mod rate_limiter;
 mod registration;
 mod work;
 
@@ -58,8 +67,12 @@ type StableValue<T> = StableMap<(), T>;
 type StorablePrincipal = BoundedString<63>;
 type StorableId = BoundedString<64>;
 
-const REGISTRATION_EXPIRATION_TTL: Duration = Duration::from_secs(60 * 60); // 1 Hour
-const IN_PROGRESS_TTL: Duration = Duration::from_secs(10 * 60); // 10 Minutes
+const MINUTE: u64 = 60;
+const HOUR: u64 = 60 * MINUTE;
+const DAY: u64 = 24 * HOUR;
+
+const REGISTRATION_RATE_LIMIT_RATE: u32 = 5; // 5 subdomain registrations per hour
+const REGISTRATION_RATE_LIMIT_PERIOD: Duration = Duration::from_secs(HOUR); // 1 hour
 
 // Memory
 thread_local! {
@@ -77,6 +90,11 @@ const MEMORY_ID_ENCRYPTED_CERTIFICATES: u8 = 6;
 const MEMORY_ID_TASKS: u8 = 7;
 const MEMORY_ID_EXPIRATIONS: u8 = 8;
 const MEMORY_ID_RETRIES: u8 = 9;
+const MEMORY_ID_REGISTRATION_EXPIRATION_TTL: u8 = 10;
+const MEMORY_ID_IN_PROGRESS_TTL: u8 = 11;
+const MEMORY_ID_MANAGEMENT_TASK_INTERVAL: u8 = 12;
+
+const SUFFIX_LIST_STR: &str = include_str!("../public_suffix_list.dat");
 
 // Metrics
 
@@ -129,6 +147,13 @@ thread_local! {
         CounterVec::new(Opts::new(
             format!("{SERVICE_NAME}_dispense_task_total"), // name
             "number of times dispense_task was called", // help
+        ), &["status"]).unwrap()
+    });
+
+    static COUNTER_REMOVE_TASK_TOTAL: RefCell<CounterVec> = RefCell::new({
+        CounterVec::new(Opts::new(
+            format!("{SERVICE_NAME}_remove_task_total"), // name
+            "number of times remove_task was called", // help
         ), &["status"]).unwrap()
     });
 
@@ -194,6 +219,11 @@ thread_local! {
         });
 
         COUNTER_DISPENSE_TASK_TOTAL.with(|c| {
+            let c = Box::new(c.borrow().to_owned());
+            r.register(c).unwrap();
+        });
+
+        COUNTER_REMOVE_TASK_TOTAL.with(|c| {
             let c = Box::new(c.borrow().to_owned());
             r.register(c).unwrap();
         });
@@ -297,8 +327,12 @@ thread_local! {
 
     static RETRIES: RefCell<PriorityQueue<Id, Reverse<u64>>> = RefCell::new(PriorityQueue::new());
 
+    // Rate limiting for CREATOR
+    static AVAILABLE_TOKENS: RefCell<BTreeMap<String, u32>> = const { RefCell::new(BTreeMap::new()) };
+
     static CREATOR: RefCell<Box<dyn Create>> = RefCell::new({
         let c = Creator::new(&ID_GENERATOR, &REGISTRATIONS, &NAMES, &EXPIRATIONS);
+        let c = WithRateLimit::new(c, REGISTRATION_RATE_LIMIT_RATE, &AVAILABLE_TOKENS, SUFFIX_LIST_STR.parse().unwrap());
         let c = WithAuthorize(c, &MAIN_AUTHORIZER);
         let c = WithMetrics(c, &COUNTER_CREATE_REGISTRATION_TOTAL);
         Box::new(c)
@@ -312,6 +346,7 @@ thread_local! {
 
     static UPDATER: RefCell<Box<dyn Update>> = RefCell::new({
         let u = Updater::new(&REGISTRATIONS, &EXPIRATIONS, &RETRIES);
+        let u = UpdateWithIcCertification::new(u, &ENCRYPTED_CERTIFICATES, &REGISTRATIONS);
         let u = WithAuthorize(u, &MAIN_AUTHORIZER);
         let u = WithMetrics(u, &COUNTER_UPDATE_REGISTRATION_TOTAL);
         Box::new(u)
@@ -323,13 +358,19 @@ thread_local! {
         let r = WithMetrics(r, &COUNTER_REMOVE_REGISTRATION_TOTAL);
         Box::new(r)
     });
+
+    static REGISTRATION_LISTER: RefCell<Box<dyn registration::List>> = RefCell::new({
+        let v = registration::Lister::new(&REGISTRATIONS);
+        let v = WithAuthorize(v, &ROOT_AUTHORIZER);
+        Box::new(v)
+    });
 }
 
 // Certificates
 thread_local! {
     static UPLOADER: RefCell<Box<dyn Upload>> = RefCell::new({
         let u = Uploader::new(&ENCRYPTED_CERTIFICATES, &REGISTRATIONS);
-        let u = WithIcCertification::new(u, &REGISTRATIONS);
+        let u = UploadWithIcCertification::new(u, &REGISTRATIONS);
         let u = WithAuthorize(u, &MAIN_AUTHORIZER);
         let u = WithMetrics(u, &COUNTER_UPLOAD_CERTIFICATE_TOTAL);
         Box::new(u)
@@ -339,6 +380,12 @@ thread_local! {
         let e = Exporter::new(&ENCRYPTED_CERTIFICATES, &REGISTRATIONS);
         let e = WithAuthorize(e, &MAIN_AUTHORIZER);
         Box::new(e)
+    });
+
+    static CERT_GETTER: RefCell<Box<dyn GetCert>> = RefCell::new({
+        let c = CertGetter::new(&ENCRYPTED_CERTIFICATES);
+        let c = WithAuthorize(c, &MAIN_AUTHORIZER);
+        Box::new(c)
     });
 }
 
@@ -359,17 +406,42 @@ thread_local! {
         Box::new(d)
     });
 
+    static TASK_LISTER: RefCell<Box<dyn work::List>> = RefCell::new({
+        let v = work::Lister::new(&TASKS, &REGISTRATIONS);
+        let v = WithAuthorize(v, &ROOT_AUTHORIZER);
+        Box::new(v)
+    });
+
     static DISPENSER: RefCell<Box<dyn Dispense>> = RefCell::new({
         let d = Dispenser::new(&TASKS, &RETRIES);
         let d = WithAuthorize(d, &MAIN_AUTHORIZER);
         let d = WithMetrics(d, &COUNTER_DISPENSE_TASK_TOTAL);
         Box::new(d)
     });
+
+    static TASK_REMOVER: RefCell<Box<dyn work::Remove>> = RefCell::new({
+        let v = TaskRemover::new(&TASKS);
+        let v = WithAuthorize(v, &ROOT_AUTHORIZER);
+        let v = WithMetrics(v, &COUNTER_REMOVE_TASK_TOTAL);
+        Box::new(v)
+    });
 }
 
 // Expirations and retries
 
 thread_local! {
+    static REGISTRATION_EXPIRATION_TTL: RefCell<StableValue<u64>> = RefCell::new(
+        StableValue::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(MEMORY_ID_REGISTRATION_EXPIRATION_TTL))),
+        )
+    );
+
+    static IN_PROGRESS_TTL: RefCell<StableValue<u64>> = RefCell::new(
+        StableValue::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(MEMORY_ID_IN_PROGRESS_TTL))),
+        )
+    );
+
     static EXPIRER: RefCell<Box<dyn Expire>> = RefCell::new({
         let e = Expirer::new(&REMOVER, &EXPIRATIONS);
         Box::new(e)
@@ -381,6 +453,16 @@ thread_local! {
     });
 }
 
+// Management task interval
+
+thread_local! {
+    static MANAGEMENT_TASK_INTERVAL: RefCell<StableValue<u64>> = RefCell::new(
+        StableValue::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(MEMORY_ID_MANAGEMENT_TASK_INTERVAL))),
+        )
+    );
+}
+
 // main() is empty and present because our Bazel build setup requires
 // canisters to be in a main.rs file. Otherwise we would default to a lib.rs
 // as is usually done for canister projects.
@@ -389,21 +471,36 @@ fn main() {}
 // Timers
 
 fn init_timers_fn() {
-    set_timer_interval(
-        Duration::from_secs(60), // 1 Minute
-        || {
-            if let Err(err) = EXPIRER.with(|e| e.borrow().expire(time())) {
-                trap(&format!("failed to run expire: {err}"));
-            }
-        },
-    );
+    let interval =
+        Duration::from_secs(MANAGEMENT_TASK_INTERVAL.with(|s| s.borrow().get(&()).unwrap()));
 
+    set_timer_interval(interval, || {
+        if let Err(err) = EXPIRER.with(|e| e.borrow().expire(time())) {
+            trap(&format!("failed to run expire: {err}"));
+        }
+    });
+
+    set_timer_interval(interval, || {
+        if let Err(err) = RETRIER.with(|r| r.borrow().retry(time())) {
+            trap(&format!("failed to run retry: {err}"));
+        }
+    });
+
+    // update the available tokens for rate limiting
     set_timer_interval(
-        Duration::from_secs(60), // 1 Minute
+        REGISTRATION_RATE_LIMIT_PERIOD / REGISTRATION_RATE_LIMIT_RATE,
         || {
-            if let Err(err) = RETRIER.with(|r| r.borrow().retry(time())) {
-                trap(&format!("failed to run retry: {err}"));
-            }
+            AVAILABLE_TOKENS.with(|at| {
+                let mut at = at.borrow_mut();
+
+                // clean the items with no tokens used
+                at.retain(|_, tokens| *tokens < REGISTRATION_RATE_LIMIT_RATE);
+
+                // add a token to all items left
+                for (_, tokens) in at.iter_mut() {
+                    *tokens += 1;
+                }
+            });
         },
     );
 }
@@ -411,10 +508,14 @@ fn init_timers_fn() {
 // Init / Upgrade
 
 #[init]
+#[candid_method(init)]
 fn init_fn(
     InitArg {
         root_principals,
         id_seed,
+        registration_expiration_ttl,
+        in_progress_ttl,
+        management_task_interval,
     }: InitArg,
 ) {
     ROOT_PRINCIPALS.with(|m| {
@@ -425,8 +526,42 @@ fn init_fn(
     });
 
     ID_SEED.with(|s| {
-        let mut s = s.borrow_mut();
-        s.insert((), id_seed);
+        s.borrow_mut().insert(
+            (),      //
+            id_seed, //
+        )
+    });
+
+    // REGISTRATION_EXPIRATION_TTL
+    REGISTRATION_EXPIRATION_TTL.with(|s| {
+        s.borrow_mut().insert(
+            (),                                             //
+            registration_expiration_ttl.unwrap_or(3 * DAY), //
+        )
+    });
+
+    // IN_PROGRESS_TTL
+    IN_PROGRESS_TTL.with(|s| {
+        s.borrow_mut().insert(
+            (),                                     //
+            in_progress_ttl.unwrap_or(10 * MINUTE), //
+        )
+    });
+
+    // MANAGEMENT_TASK_INTERVAL
+    MANAGEMENT_TASK_INTERVAL.with(|s| {
+        s.borrow_mut().insert(
+            (),                                         //
+            management_task_interval.unwrap_or(MINUTE), //
+        )
+    });
+
+    // authorize the canister ID so that timer functions are authorized
+    ALLOWED_PRINCIPALS.with(|m| {
+        m.borrow_mut().insert(
+            id().to_text().into(), // principal
+            (),                    //
+        )
     });
 
     init_timers_fn();
@@ -486,6 +621,32 @@ fn post_upgrade_fn() {
         });
     });
 
+    // authorize the canister ID so that timer functions are authorized
+    ALLOWED_PRINCIPALS.with(|m| {
+        m.borrow_mut().insert(
+            id().to_text().into(), // principal
+            (),                    //
+        )
+    });
+
+    // REGISTRATION_EXPIRATION_TTL
+    REGISTRATION_EXPIRATION_TTL.with(|s| {
+        let v = s.borrow().get(&()).unwrap_or(3 * DAY);
+        s.borrow_mut().insert((), v)
+    });
+
+    // IN_PROGRESS_TTL
+    IN_PROGRESS_TTL.with(|s| {
+        let v = s.borrow().get(&()).unwrap_or(10 * MINUTE);
+        s.borrow_mut().insert((), v)
+    });
+
+    // MANAGEMENT_TASK_INTERVAL
+    MANAGEMENT_TASK_INTERVAL.with(|s| {
+        let v = s.borrow().get(&()).unwrap_or(MINUTE);
+        s.borrow_mut().insert((), v)
+    });
+
     init_timers_fn();
 
     // rebuild the IC certification tree
@@ -513,12 +674,14 @@ fn post_upgrade_fn() {
 // Registration
 
 #[update(name = "createRegistration")]
+#[candid_method(update, rename = "createRegistration")]
 fn create_registration(name: String, canister: Principal) -> CreateRegistrationResponse {
     match CREATOR.with(|c| c.borrow().create(&name, &canister)) {
         Ok(id) => CreateRegistrationResponse::Ok(id),
         Err(err) => CreateRegistrationResponse::Err(match err {
             CreateError::Duplicate(id) => CreateRegistrationError::Duplicate(id),
             CreateError::NameError(err) => CreateRegistrationError::NameError(err.to_string()),
+            CreateError::RateLimited(domain) => CreateRegistrationError::RateLimited(domain),
             CreateError::Unauthorized => CreateRegistrationError::Unauthorized,
             CreateError::UnexpectedError(err) => {
                 CreateRegistrationError::UnexpectedError(err.to_string())
@@ -528,6 +691,7 @@ fn create_registration(name: String, canister: Principal) -> CreateRegistrationR
 }
 
 #[query(name = "getRegistration")]
+#[candid_method(query, rename = "getRegistration")]
 fn get_registration(id: Id) -> GetRegistrationResponse {
     match GETTER.with(|g| g.borrow().get(&id)) {
         Ok(reg) => GetRegistrationResponse::Ok(reg),
@@ -542,6 +706,7 @@ fn get_registration(id: Id) -> GetRegistrationResponse {
 }
 
 #[update(name = "updateRegistration")]
+#[candid_method(update, rename = "updateRegistration")]
 fn update_registration(id: Id, typ: UpdateType) -> UpdateRegistrationResponse {
     match UPDATER.with(|u| u.borrow().update(&id, typ)) {
         Ok(()) => UpdateRegistrationResponse::Ok(()),
@@ -556,6 +721,7 @@ fn update_registration(id: Id, typ: UpdateType) -> UpdateRegistrationResponse {
 }
 
 #[update(name = "removeRegistration")]
+#[candid_method(update, rename = "removeRegistration")]
 fn remove_registration(id: Id) -> RemoveRegistrationResponse {
     match REMOVER.with(|r| r.borrow().remove(&id)) {
         Ok(()) => {
@@ -572,9 +738,39 @@ fn remove_registration(id: Id) -> RemoveRegistrationResponse {
     }
 }
 
+#[query(name = "listRegistrations")]
+#[candid_method(query, rename = "listRegistrations")]
+fn list_registrations() -> ListRegistrationsResponse {
+    match REGISTRATION_LISTER.with(|v| v.borrow().list()) {
+        Ok(rs) => ListRegistrationsResponse::Ok(rs),
+        Err(err) => ListRegistrationsResponse::Err(match err {
+            registration::ListError::Unauthorized => ListRegistrationsError::Unauthorized,
+            registration::ListError::UnexpectedError(err) => {
+                ListRegistrationsError::UnexpectedError(err.to_string())
+            }
+        }),
+    }
+}
+
 // Certificates
 
+#[query(name = "getCertificate")]
+#[candid_method(query, rename = "getCertificate")]
+fn get_certificate(id: Id) -> GetCertificateResponse {
+    match CERT_GETTER.with(|c| c.borrow().get_cert(&id)) {
+        Ok(enc_pair) => GetCertificateResponse::Ok(enc_pair),
+        Err(err) => GetCertificateResponse::Err(match err {
+            GetCertError::NotFound => GetCertificateError::NotFound,
+            GetCertError::Unauthorized => GetCertificateError::Unauthorized,
+            GetCertError::UnexpectedError(err) => {
+                GetCertificateError::UnexpectedError(err.to_string())
+            }
+        }),
+    }
+}
+
 #[update(name = "uploadCertificate")]
+#[candid_method(update, rename = "uploadCertificate")]
 fn upload_certificate(id: Id, pair: EncryptedPair) -> UploadCertificateResponse {
     match UPLOADER.with(|u| u.borrow().upload(&id, pair)) {
         Ok(()) => UploadCertificateResponse::Ok(()),
@@ -589,6 +785,7 @@ fn upload_certificate(id: Id, pair: EncryptedPair) -> UploadCertificateResponse 
 }
 
 #[query(name = "exportCertificatesPaginated")]
+#[candid_method(query, rename = "exportCertificatesPaginated")]
 fn export_certificates_paginated(key: Option<String>, limit: u64) -> ExportCertificatesResponse {
     match EXPORTER.with(|e| e.borrow().export(key, limit)) {
         Ok(pkgs) => ExportCertificatesResponse::Ok(pkgs),
@@ -602,6 +799,7 @@ fn export_certificates_paginated(key: Option<String>, limit: u64) -> ExportCerti
 }
 
 #[query(name = "exportCertificatesCertified")]
+#[candid_method(query, rename = "exportCertificatesCertified")]
 fn export_certificates_certified(
     key: Option<String>,
     limit: u64,
@@ -618,6 +816,7 @@ fn export_certificates_certified(
 }
 
 #[query(name = "exportCertificates")]
+#[candid_method(query, rename = "exportCertificates")]
 fn export_certificates() -> ExportCertificatesResponse {
     match EXPORTER.with(|e| e.borrow().export(None, u64::MAX)) {
         Ok(pkgs) => ExportCertificatesResponse::Ok(pkgs),
@@ -633,6 +832,7 @@ fn export_certificates() -> ExportCertificatesResponse {
 // Tasks
 
 #[update(name = "queueTask")]
+#[candid_method(update, rename = "queueTask")]
 fn queue_task(id: Id, timestamp: u64) -> QueueTaskResponse {
     match QUEUER.with(|q| q.borrow().queue(id, timestamp)) {
         Ok(()) => QueueTaskResponse::Ok(()),
@@ -645,6 +845,7 @@ fn queue_task(id: Id, timestamp: u64) -> QueueTaskResponse {
 }
 
 #[query(name = "peekTask")]
+#[candid_method(query, rename = "peekTask")]
 fn peek_task() -> PeekTaskResponse {
     match PEEKER.with(|p| p.borrow().peek()) {
         Ok(id) => PeekTaskResponse::Ok(id),
@@ -657,6 +858,7 @@ fn peek_task() -> PeekTaskResponse {
 }
 
 #[update(name = "dispenseTask")]
+#[candid_method(update, rename = "dispenseTask")]
 fn dispense_task() -> DispenseTaskResponse {
     match DISPENSER.with(|d| d.borrow().dispense()) {
         Ok(id) => DispenseTaskResponse::Ok(id),
@@ -670,9 +872,39 @@ fn dispense_task() -> DispenseTaskResponse {
     }
 }
 
+#[update(name = "removeTask")]
+#[candid_method(update, rename = "removeTask")]
+fn remove_task(id: Id) -> RemoveTaskResponse {
+    match TASK_REMOVER.with(|v| v.borrow().remove(&id)) {
+        Ok(()) => RemoveTaskResponse::Ok,
+        Err(err) => RemoveTaskResponse::Err(match err {
+            work::RemoveError::NotFound => RemoveTaskError::NotFound,
+            work::RemoveError::Unauthorized => RemoveTaskError::Unauthorized,
+            work::RemoveError::UnexpectedError(err) => {
+                RemoveTaskError::UnexpectedError(err.to_string())
+            }
+        }),
+    }
+}
+
+#[query(name = "listTasks")]
+#[candid_method(query, rename = "listTasks")]
+fn list_tasks() -> ListTasksResponse {
+    match TASK_LISTER.with(|v| v.borrow().list()) {
+        Ok(ts) => ListTasksResponse::Ok(ts),
+        Err(err) => ListTasksResponse::Err(match err {
+            work::ListError::Unauthorized => ListTasksError::Unauthorized,
+            work::ListError::UnexpectedError(err) => {
+                ListTasksError::UnexpectedError(err.to_string())
+            }
+        }),
+    }
+}
+
 // Metrics
 
 #[query(name = "http_request")]
+#[candid_method(query, rename = "http_request")]
 fn http_request(request: HttpRequest) -> HttpResponse {
     if request.url != "/metrics" {
         return HttpResponse {
@@ -742,6 +974,7 @@ fn http_request(request: HttpRequest) -> HttpResponse {
 // ACLs
 
 #[query(name = "listAllowedPrincipals")]
+#[candid_method(query, rename = "listAllowedPrincipals")]
 fn list_allowed_principals() -> ListAllowedPrincipalsResponse {
     if let Err(err) = ROOT_AUTHORIZER.with(|a| a.borrow().authorize(&caller())) {
         return ListAllowedPrincipalsResponse::Err(match err {
@@ -752,15 +985,18 @@ fn list_allowed_principals() -> ListAllowedPrincipalsResponse {
         });
     }
 
+    // filter out own canister ID from response
     ListAllowedPrincipalsResponse::Ok(ALLOWED_PRINCIPALS.with(|m| {
         m.borrow()
             .iter()
             .map(|(k, _)| Principal::from_text(k.as_str()).expect("failed to parse principal"))
+            .filter(|k| k != &id())
             .collect()
     }))
 }
 
 #[update(name = "addAllowedPrincipal")]
+#[candid_method(update, rename = "addAllowedPrincipal")]
 fn add_allowed_principal(principal: Principal) -> ModifyAllowedPrincipalResponse {
     if let Err(err) = ROOT_AUTHORIZER.with(|a| a.borrow().authorize(&caller())) {
         return ModifyAllowedPrincipalResponse::Err(match err {
@@ -777,6 +1013,7 @@ fn add_allowed_principal(principal: Principal) -> ModifyAllowedPrincipalResponse
 }
 
 #[update(name = "rmAllowedPrincipal")]
+#[candid_method(update, rename = "rmAllowedPrincipal")]
 fn rm_allowed_principal(principal: Principal) -> ModifyAllowedPrincipalResponse {
     if let Err(err) = ROOT_AUTHORIZER.with(|a| a.borrow().authorize(&caller())) {
         return ModifyAllowedPrincipalResponse::Err(match err {
@@ -797,4 +1034,23 @@ fn rm_allowed_principal(principal: Principal) -> ModifyAllowedPrincipalResponse 
     };
 
     ModifyAllowedPrincipalResponse::Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_candid_interface() {
+        use candid_parser::utils::{service_equal, CandidSource};
+
+        candid::export_service!();
+        let new_interface = __export_service();
+
+        service_equal(
+            CandidSource::Text(&new_interface),
+            CandidSource::Text(include_str!("../interface.did")),
+        )
+        .unwrap();
+    }
 }

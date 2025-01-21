@@ -7,10 +7,11 @@
 //! See RFC 8017 (https://www.rfc-editor.org/rfc/rfc8017.txt)
 //! for information about the signature format
 use ic_crypto_internal_basic_sig_der_utils as der_utils;
-use ic_crypto_sha::Sha256;
+use ic_crypto_sha2::Sha256;
 use ic_types::crypto::{AlgorithmId, CryptoError, CryptoResult};
 use num_traits::{FromPrimitive, Zero};
-use rsa::{PublicKey, PublicKeyParts};
+use rsa::traits::PublicKeyParts;
+use rsa::{pkcs8, Pkcs1v15Sign};
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// The object identifier for RSA public keys
@@ -23,11 +24,11 @@ pub fn algorithm_identifier() -> der_utils::PkixAlgorithmIdentifier {
 }
 
 /// A RSA public key usable for signature verification
-#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize)]
 pub struct RsaPublicKey {
     der: Vec<u8>,
     #[serde(skip_serializing)]
-    key: rsa::RSAPublicKey,
+    key: rsa::RsaPublicKey,
 }
 
 impl<'de> Deserialize<'de> for RsaPublicKey {
@@ -96,8 +97,8 @@ impl RsaPublicKey {
     pub fn from_der_spki(bytes: &[u8]) -> CryptoResult<Self> {
         use rsa::BigUint;
 
-        let parsed =
-            rsa::RSAPublicKey::from_pkcs8(bytes).map_err(|e| CryptoError::MalformedPublicKey {
+        let parsed: rsa::RsaPublicKey = pkcs8::DecodePublicKey::from_public_key_der(bytes)
+            .map_err(|e| CryptoError::MalformedPublicKey {
                 algorithm: AlgorithmId::RsaSha256,
                 key_bytes: Some(bytes.to_vec()),
                 internal_error: format!("Parsing RSA key failed {:?}", e),
@@ -159,12 +160,43 @@ impl RsaPublicKey {
     /// (https://datatracker.ietf.org/doc/html/rfc8017#section-8.2) and used by
     /// the IC for webauthn (https://docs.dfinity.systems/spec/public/#webauthn)
     pub fn verify_pkcs1_sha256(&self, message: &[u8], signature: &[u8]) -> CryptoResult<()> {
-        let digest = Sha256::hash(message);
-        let padding = rsa::PaddingScheme::PKCS1v15Sign {
-            hash: Some(rsa::Hash::SHA2_256),
-        };
+        // The version of rsa crate that we use has a signature malleability bug
+        // https://github.com/RustCrypto/RSA/issues/272 which does not seem
+        // directly to be any real problem, but worth avoiding.
+        //
+        // There is an updated version of the crate but upgrading
+        // requires significant changes, see CRP-2038
+        let modulus_bytes = (self.key.n().bits() + 7) / 8; // rounding up
 
-        match self.key.verify(padding, &digest, signature) {
+        if signature.len() > modulus_bytes {
+            return Err(CryptoError::SignatureVerification {
+                algorithm: AlgorithmId::RsaSha256,
+                public_key_bytes: self.as_der().to_vec(),
+                sig_bytes: signature.to_vec(),
+                internal_error: format!(
+                    "Signature is {} bytes but public modulus only {}",
+                    signature.len(),
+                    modulus_bytes
+                ),
+            });
+        }
+        let sig = rsa::BigUint::from_bytes_be(signature);
+
+        if &sig > self.key.n() {
+            return Err(CryptoError::SignatureVerification {
+                algorithm: AlgorithmId::RsaSha256,
+                public_key_bytes: self.as_der().to_vec(),
+                sig_bytes: signature.to_vec(),
+                internal_error: "Signature is larger than public modulus".to_string(),
+            });
+        }
+
+        let digest = Sha256::hash(message);
+
+        match &self
+            .key
+            .verify(Pkcs1v15Sign::new::<sha2::Sha256>(), &digest, signature)
+        {
             Ok(_) => Ok(()),
             Err(e) => Err(CryptoError::SignatureVerification {
                 algorithm: AlgorithmId::RsaSha256,

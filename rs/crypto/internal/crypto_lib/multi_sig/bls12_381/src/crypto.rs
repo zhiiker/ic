@@ -10,7 +10,7 @@ use ic_crypto_internal_bls12_381_type::{
     verify_bls_signature, G1Projective, G2Affine, G2Projective, Scalar,
 };
 
-use ic_crypto_sha::{Context, DomainSeparationContext};
+use ic_crypto_sha2::{Context, DomainSeparationContext};
 use rand::{CryptoRng, Rng};
 
 /// Domain separator for Hash-to-G1 to be used for signature generation in a
@@ -68,7 +68,7 @@ pub fn sign_message(message: &[u8], secret_key: &SecretKey) -> IndividualSignatu
 }
 
 pub fn create_pop(public_key: &PublicKey, secret_key: &SecretKey) -> Pop {
-    let public_key_bytes = PublicKeyBytes::from(public_key.clone());
+    let public_key_bytes = PublicKeyBytes::from(public_key);
     let mut domain_separated_public_key: Vec<u8> = vec![];
     domain_separated_public_key
         .extend(DomainSeparationContext::new(DOMAIN_MULTI_SIG_BLS12_381_POP).as_bytes());
@@ -98,7 +98,7 @@ pub fn verify_individual_message_signature(
     verify_point(&hash, signature, public_key)
 }
 pub fn verify_pop(pop: &Pop, public_key: &PublicKey) -> bool {
-    let public_key_bytes = PublicKeyBytes::from(public_key.clone());
+    let public_key_bytes = PublicKeyBytes::from(public_key);
     let mut domain_separated_public_key: Vec<u8> = vec![];
     domain_separated_public_key
         .extend(DomainSeparationContext::new(DOMAIN_MULTI_SIG_BLS12_381_POP).as_bytes());

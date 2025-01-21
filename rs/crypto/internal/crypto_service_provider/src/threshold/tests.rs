@@ -1,4 +1,3 @@
-#![allow(clippy::unwrap_used)]
 //! Tests for threshold signature implementations
 
 use crate::api::ThresholdSignatureCspClient;
@@ -26,8 +25,8 @@ pub mod util {
     /// This assumes that a set of keys has been provided and verifies that:
     /// * If the threshold signatures are used correctly, signatures verify.
     /// * If incorrect values are provided at any stage, relevant methods fail.
-    /// Note: We assume that all signers have been dealt keys but disqualify
-    /// some as part of the test.
+    ///   Note: We assume that all signers have been dealt keys but disqualify
+    ///   some as part of the test.
     ///
     /// # Arguments
     /// * `public_coefficients` is the public part of the threshold key.  This
@@ -46,10 +45,10 @@ pub mod util {
     ) {
         let signature_selection_seed =
             seed.derive("test_threshold_signatures::signature_selection");
-        let mut rng = seed.into_rng();
-        let verifier = Csp::builder()
+        let rng = &mut seed.into_rng();
+        let verifier = Csp::builder_for_test()
             .with_vault(
-                LocalCspVault::builder()
+                LocalCspVault::builder_for_test()
                     .with_rng(ChaChaRng::from_seed(rng.gen::<[u8; 32]>()))
                     .build(),
             )
@@ -63,7 +62,7 @@ pub mod util {
             .iter()
             .map(|(csp, key_id)| {
                 csp.csp_vault
-                    .threshold_sign(AlgorithmId::ThresBls12_381, message, *key_id)
+                    .threshold_sign(AlgorithmId::ThresBls12_381, message.to_vec(), *key_id)
             })
             .collect();
         let signatures = signatures.expect("Signing failed");
@@ -72,10 +71,10 @@ pub mod util {
             // * Signatures cannot be generated with an incorrect AlgorithmId:
             for algorithm_id in AlgorithmId::iter() {
                 if algorithm_id != AlgorithmId::ThresBls12_381 {
-                    if let Some((csp, key_id)) = signers.get(0) {
+                    if let Some((csp, key_id)) = signers.first() {
                         assert!(
                             csp.csp_vault
-                                .threshold_sign(algorithm_id, message, *key_id)
+                                .threshold_sign(algorithm_id, message.to_vec(), *key_id)
                                 .is_err(),
                             "Managed to threshold sign with algorithm ID {:?}",
                             algorithm_id
@@ -85,7 +84,7 @@ pub mod util {
             }
             //
             // * Signatures cannot be generated with an incorrect key_id:
-            if let Some((csp, _key_id)) = signers.get(0) {
+            if let Some((csp, _key_id)) = signers.first() {
                 let wrong_key_id = KeyId::from(rng.gen::<[u8; 32]>());
                 let mut key_ids = signers.iter().map(|(_, key_id)| *key_id);
 
@@ -95,7 +94,7 @@ pub mod util {
                 );
                 assert!(
                     csp.csp_vault
-                        .threshold_sign(AlgorithmId::ThresBls12_381, message, wrong_key_id)
+                        .threshold_sign(AlgorithmId::ThresBls12_381, message.to_vec(), wrong_key_id)
                         .is_err(),
                     "A randomly generated key_id managed to sign"
                 );
@@ -245,16 +244,16 @@ pub mod util {
     pub fn test_threshold_scheme_with_basic_keygen(seed: Seed, message: &[u8]) {
         let mut rng = seed.into_rng();
         let seed = Seed::from_rng(&mut rng);
-        let threshold = NumberOfNodes::from(rng.gen_range(0..10));
+        let threshold = NumberOfNodes::from(rng.gen_range(1..10));
         let number_of_signers = NumberOfNodes::from(rng.gen_range(0..10));
 
-        let vault = LocalCspVault::builder().with_rng(rng).build();
+        let vault = LocalCspVault::builder_for_test().with_rng(rng).build();
         let threshold_keygen = vault.threshold_keygen_for_test(
             AlgorithmId::ThresBls12_381,
             threshold,
             number_of_signers,
         );
-        let csp = Csp::builder().with_vault(vault).build();
+        let csp = Csp::builder_for_test().with_vault(vault).build();
 
         match threshold_keygen {
             Ok((public_coefficients, key_ids)) => {
@@ -281,7 +280,7 @@ proptest! {
 
     #[test]
     fn test_threshold_scheme_with_basic_keygen(message in proptest::collection::vec(any::<u8>(), 0..100)) {
-        let mut rng = ReproducibleRng::new();
-        util::test_threshold_scheme_with_basic_keygen(Seed::from_rng(&mut rng), &message);
+        let rng = &mut ReproducibleRng::new();
+        util::test_threshold_scheme_with_basic_keygen(Seed::from_rng(rng), &message);
     }
 }

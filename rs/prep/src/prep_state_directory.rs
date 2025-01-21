@@ -70,7 +70,7 @@ fn parse_threshold_sig_key<P: AsRef<Path> + fmt::Debug>(pem_file: P) -> Result<V
         bail!("PEM file doesn't end with END PK block: {:?}", &pem_file);
     }
 
-    let decoded = base64::decode(&lines[1..n - 1].join(""))
+    let decoded = base64::decode(lines[1..n - 1].join(""))
         .with_context(|| format!("failed to decode base64 from: {:?}", &pem_file))?;
 
     Ok(decoded)
@@ -81,10 +81,13 @@ mod tests {
     use super::*;
     use crate::internet_computer::{IcConfig, TopologyConfig};
     use crate::node::{NodeConfiguration, NodeIndex};
-    use crate::subnet_configuration::SubnetConfig;
-    use ic_crypto::threshold_sig_public_key_from_der;
+    use crate::subnet_configuration::{SubnetConfig, SubnetRunningState};
+    use ic_crypto_utils_threshold_sig_der::threshold_sig_public_key_from_der;
     use ic_registry_subnet_type::SubnetType;
+    use ic_types::ReplicaVersion;
     use std::collections::BTreeMap;
+    use std::net::SocketAddr;
+    use std::str::FromStr;
     use tempfile::TempDir;
 
     #[test]
@@ -121,11 +124,12 @@ mod tests {
         subnet_nodes.insert(
             0,
             NodeConfiguration {
-                xnet_api: "http://1.2.3.4:1".parse()?,
-                public_api: "http://1.2.3.4:2".parse()?,
-                p2p_addr: "org.internetcomputer.p2p1://1.2.3.4:4".parse()?,
+                xnet_api: SocketAddr::from_str("1.2.3.4:8080").unwrap(),
+                public_api: SocketAddr::from_str("1.2.3.4:8081").unwrap(),
                 node_operator_principal_id: None,
                 secret_key_store: None,
+                domain: None,
+                node_reward_type: None,
             },
         );
 
@@ -135,8 +139,7 @@ mod tests {
             SubnetConfig::new(
                 0,
                 subnet_nodes,
-                None,
-                None,
+                ReplicaVersion::default(),
                 None,
                 None,
                 None,
@@ -153,13 +156,15 @@ mod tests {
                 None,
                 vec![],
                 vec![],
+                SubnetRunningState::Active,
+                None,
             ),
         );
 
         let ic_config = IcConfig::new(
             /* target_dir= */ tmp.path(),
             topology_config,
-            /* replica_version_id= */ None,
+            ReplicaVersion::default(),
             /* generate_subnet_records= */ true, // see note above
             /* nns_subnet_index= */ Some(0),
             /* release_package_download_url= */ None,
@@ -168,7 +173,6 @@ mod tests {
             None,
             None,
             /* ssh_readonly_access_to_unassigned_nodes */ vec![],
-            /* guest_launch_measurement_sha256_hex */ None,
         );
         let _init_ic = ic_config.initialize()?;
 

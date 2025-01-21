@@ -1,59 +1,37 @@
-use super::{verifier::VerifierImpl, CertificationCrypto};
+use crate::{
+    certification::{CertificationCrypto, VerifierImpl},
+    consensus::MINIMUM_CHAIN_LENGTH,
+};
 use ic_consensus_utils::{
-    active_high_threshold_transcript, aggregate, membership::Membership, registry_version_at_height,
+    active_high_threshold_nidkg_id, aggregate, bouncer_metrics::BouncerMetrics,
+    membership::Membership, registry_version_at_height,
 };
 use ic_interfaces::{
-    artifact_pool::{ChangeSetProducer, PriorityFnAndFilterProducer},
-    certification::{CertificationPool, ChangeAction, ChangeSet, Verifier, VerifierError},
+    certification::{CertificationPool, ChangeAction, Mutations, Verifier, VerifierError},
     consensus_pool::ConsensusPoolCache,
+    p2p::consensus::{Bouncer, BouncerFactory, BouncerValue, PoolMutationsProducer},
     validation::ValidationError,
 };
+use ic_interfaces_registry::RegistryClient;
 use ic_interfaces_state_manager::StateManager;
 use ic_logger::{debug, error, trace, ReplicaLogger};
 use ic_metrics::{buckets::decimal_buckets, MetricsRegistry};
 use ic_replicated_state::ReplicatedState;
-use ic_types::consensus::{Committee, HasCommittee, HasHeight};
 use ic_types::{
-    artifact::{
-        CertificationMessageAttribute, CertificationMessageFilter, CertificationMessageId,
-        Priority, PriorityFn,
-    },
-    artifact_kind::CertificationArtifact,
-    consensus::certification::{
-        Certification, CertificationContent, CertificationMessage, CertificationShare,
+    artifact::CertificationMessageId,
+    consensus::{
+        certification::{
+            Certification, CertificationContent, CertificationMessage, CertificationShare,
+        },
+        Committee, HasCommittee, HasHeight,
     },
     crypto::Signed,
     replica_config::ReplicaConfig,
     CryptoHashOfPartialState, Height,
 };
 use prometheus::{Histogram, IntCounter, IntGauge};
-use std::cell::RefCell;
-use std::sync::Arc;
-use std::time::Instant;
-
-/// We always keep a minimum chain length below catch-up height
-pub const MINIMUM_CHAIN_LENGTH: u64 = 100;
-
-/// The Certification component, processing the changes on the certification
-/// pool and submitting the corresponding change sets.
-pub struct CertifierImpl {
-    replica_config: ReplicaConfig,
-    membership: Arc<Membership>,
-    crypto: Arc<dyn CertificationCrypto>,
-    state_manager: Arc<dyn StateManager<State = ReplicatedState>>,
-    consensus_pool_cache: Arc<dyn ConsensusPoolCache>,
-    metrics: CertifierMetrics,
-    /// The highest height that has been purged. Used to avoid redudant purging.
-    highest_purged_height: RefCell<Height>,
-    log: ReplicaLogger,
-}
-
-/// The Certification component, processing the changes on the certification
-/// pool and submitting the corresponding change sets.
-pub struct CertifierGossipImpl {
-    state_manager: Arc<dyn StateManager<State = ReplicatedState>>,
-    consensus_pool_cache: Arc<dyn ConsensusPoolCache>,
-}
+use std::{cell::RefCell, sync::Arc, time::Instant};
+use tokio::sync::watch;
 
 struct CertifierMetrics {
     shares_created: IntCounter,
@@ -62,85 +40,66 @@ struct CertifierMetrics {
     execution_time: Histogram,
 }
 
-impl<Pool: CertificationPool> PriorityFnAndFilterProducer<CertificationArtifact, Pool>
-    for CertifierGossipImpl
-{
-    // The priority function requires just the height of the artifact to decide if
-    // it should be fetched or not: if we already have a full certification at
-    // that height or this height is below the CUP height, we're not interested in
-    // any new artifacts at that height. If it is above the CUP height and we do not
-    // have a full certification at that height, we're interested in all artifacts.
-    fn get_priority_function(
-        &self,
-        certification_pool: &Pool,
-    ) -> PriorityFn<CertificationMessageId, CertificationMessageAttribute> {
-        let certified_heights = certification_pool.certified_heights();
-        let cup_height = self.consensus_pool_cache.catch_up_package().height();
-        Box::new(move |_, attribute| {
-            let height = match attribute {
-                CertificationMessageAttribute::Certification(height) => height,
-                CertificationMessageAttribute::CertificationShare(height) => height,
-            };
-            // We drop all artifacts below the CUP height or those for which we have a full
-            // certification already.
-            if *height < cup_height || certified_heights.contains(height) {
-                Priority::Drop
-            } else {
-                Priority::Fetch
-            }
-        })
-    }
-
-    /// Return the height above which we want a certification. Note that
-    /// this is not always equal the upper bound of what we have in the
-    /// certification pool for the following reasons:
-    /// 1. The pool is not persisted. We will not have any certification
-    ///    in there.
-    /// 2. We might have certification in the pool that is not yet
-    ///    verified or delivered to the state_manager.
-    fn get_filter(&self) -> CertificationMessageFilter {
-        let to_certify = self.state_manager.list_state_hashes_to_certify();
-        let filter_height = if to_certify.is_empty() {
-            self.state_manager.latest_state_height()
-        } else {
-            let h = to_certify[0].0;
-            assert!(
-                h > Height::from(0),
-                "State height to certify must be 1 or above"
-            );
-            h.decrement()
-        };
-        CertificationMessageFilter {
-            height: filter_height,
-        }
-    }
-}
-
-/// Return both Certifier and CertifierGossip components.
-pub fn setup(
+/// The Certification component, producing the change set for the certification pool(s).
+pub struct CertifierImpl {
     replica_config: ReplicaConfig,
     membership: Arc<Membership>,
     crypto: Arc<dyn CertificationCrypto>,
     state_manager: Arc<dyn StateManager<State = ReplicatedState>>,
     consensus_pool_cache: Arc<dyn ConsensusPoolCache>,
-    metrics_registry: MetricsRegistry,
+    metrics: CertifierMetrics,
+    /// The highest height that has been purged. Used to avoid redundant purging.
+    highest_purged_height: RefCell<Height>,
+    max_certified_height_tx: watch::Sender<Height>,
     log: ReplicaLogger,
-) -> (CertifierImpl, CertifierGossipImpl) {
-    (
-        CertifierImpl::new(
-            replica_config,
-            membership,
-            crypto,
-            state_manager.clone(),
-            consensus_pool_cache.clone(),
-            metrics_registry,
-            log,
-        ),
-        CertifierGossipImpl {
-            state_manager,
+}
+
+/// The Certification component, processing the changes on the certification
+/// pool and submitting the corresponding change sets.
+pub struct CertifierBouncer {
+    consensus_pool_cache: Arc<dyn ConsensusPoolCache>,
+    metrics: BouncerMetrics,
+}
+
+impl CertifierBouncer {
+    /// Construct a new CertifierBouncer.
+    pub fn new(
+        metrics_registry: &MetricsRegistry,
+        consensus_pool_cache: Arc<dyn ConsensusPoolCache>,
+    ) -> Self {
+        Self {
             consensus_pool_cache,
-        },
-    )
+            metrics: BouncerMetrics::new(metrics_registry, "certification_pool"),
+        }
+    }
+}
+
+impl<Pool: CertificationPool> BouncerFactory<CertificationMessageId, Pool> for CertifierBouncer {
+    // The priority function requires just the height of the artifact to decide if
+    // it should be fetched or not: if we already have a full certification at
+    // that height or this height is below the CUP height, we're not interested in
+    // any new artifacts at that height. If it is above the CUP height and we do not
+    // have a full certification at that height, we're interested in all artifacts.
+    fn new_bouncer(&self, certification_pool: &Pool) -> Bouncer<CertificationMessageId> {
+        let _timer = self.metrics.update_duration.start_timer();
+
+        let certified_heights = certification_pool.certified_heights();
+        let cup_height = self.consensus_pool_cache.catch_up_package().height();
+        Box::new(move |id| {
+            let height = id.height;
+            // We drop all artifacts below the CUP height or those for which we have a full
+            // certification already.
+            if height < cup_height || certified_heights.contains(&height) {
+                BouncerValue::Unwanted
+            } else {
+                BouncerValue::Wants
+            }
+        })
+    }
+
+    fn refresh_period(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(3)
+    }
 }
 
 /// The certifier component is responsible for signing execution states.
@@ -152,30 +111,30 @@ pub fn setup(
 /// following algorithm:
 ///
 /// 1. Request a set of (height, hash) tuples from its local StateManager, where
-/// `hash` is the hash of the replicated state after processing the batch at the
-/// specified height. The StateManager is responsible for selecting which parts
-/// of the replicated state are included in the computation of the hash.
+///    `hash` is the hash of the replicated state after processing the batch at the
+///    specified height. The StateManager is responsible for selecting which parts
+///    of the replicated state are included in the computation of the hash.
 ///
 /// 2. Sign the hash-height tuple, resulting in a CertificationShare, and place
-/// the CertificationShare in the certification pool, to be gossiped to other
-/// replicas.
+///    the CertificationShare in the certification pool, to be gossiped to other
+///    replicas.
 ///
 /// 3. On every invocation of `on_state_change`, if sufficiently many
-/// CertificationShares for the same (height, hash) pair were received, combine
-/// them into a full Certification and put it into the certification pool. At
-/// that point, the CertificationShares are not required anymore and can be
-/// purged.
+///    CertificationShares for the same (height, hash) pair were received, combine
+///    them into a full Certification and put it into the certification pool. At
+///    that point, the CertificationShares are not required anymore and can be
+///    purged.
 ///
 /// 4. For every (height, hash) pair with a full Certification, submit
-/// the pair (height, Certification) to the StateManager.
+///    the pair (height, Certification) to the StateManager.
 ///
 /// 5. Whenever the catch-up package height increases, remove all certification
-/// artifacts below this height.
-impl<T: CertificationPool> ChangeSetProducer<T> for CertifierImpl {
-    type ChangeSet = ChangeSet;
+///    artifacts below this height.
+impl<T: CertificationPool> PoolMutationsProducer<T> for CertifierImpl {
+    type Mutations = Mutations;
 
     /// Should be called on every change of the certification pool and timeouts.
-    fn on_state_change(&self, certification_pool: &T) -> ChangeSet {
+    fn on_state_change(&self, certification_pool: &T) -> Mutations {
         // This timer will make an entry in the metrics histogram automatically, when
         // it's dropped.
         let _timer = self.metrics.execution_time.start_timer();
@@ -193,10 +152,21 @@ impl<T: CertificationPool> ChangeSetProducer<T> for CertifierImpl {
                     // if we have a valid certification, deliver it to the state manager and skip
                     // the pair
                     Some(certification) => {
+                        // TODO[NET-1711]: Remove deliver_state_certification(), and include them in the
+                        // change set for the artifact processor to handle.
                         self.state_manager
                             .deliver_state_certification(certification);
                         self.metrics.last_certified_height.set(height.get() as i64);
                         debug!(&self.log, "Delivered certification for height {}", height);
+
+                        self.max_certified_height_tx.send_if_modified(|h| {
+                            if height > *h {
+                                *h = height;
+                                true
+                            } else {
+                                false
+                            }
+                        });
                         None
                     }
                     // return this pair to be signed by the current replica
@@ -293,13 +263,20 @@ impl CertifierImpl {
     /// Construct a new CertifierImpl.
     pub fn new(
         replica_config: ReplicaConfig,
-        membership: Arc<Membership>,
+        registry_client: Arc<dyn RegistryClient>,
         crypto: Arc<dyn CertificationCrypto>,
         state_manager: Arc<dyn StateManager<State = ReplicatedState>>,
         consensus_pool_cache: Arc<dyn ConsensusPoolCache>,
         metrics_registry: MetricsRegistry,
         log: ReplicaLogger,
+        max_certified_height_tx: watch::Sender<Height>,
     ) -> Self {
+        let membership = Arc::new(Membership::new(
+            consensus_pool_cache.clone(),
+            registry_client.clone(),
+            replica_config.subnet_id,
+        ));
+
         Self {
             replica_config,
             membership,
@@ -327,6 +304,7 @@ impl CertifierImpl {
             },
             log,
             highest_purged_height: RefCell::new(Height::from(1)),
+            max_certified_height_tx,
         }
     }
 
@@ -338,10 +316,9 @@ impl CertifierImpl {
     ) -> Vec<CertificationMessage> {
         state_hashes
             .iter()
-            .cloned()
             // Filter out all heights, where the current replica does not belong to the committee
             // and, hence, should not sign.
-            .filter(|(height, _)| {
+            .filter(|&(height, _)| {
                 self.membership
                     .node_belongs_to_threshold_committee(
                         self.replica_config.node_id,
@@ -358,16 +335,16 @@ impl CertifierImpl {
             })
             // Filter out all heights if we have a share signed by us already (this is a linear scan
             // through all shares of the same height, but is bound by the number of replicas).
-            .filter(|(height, _)| {
+            .filter(|&(height, _)| {
                 certification_pool
                     .shares_at_height(*height)
                     .all(|share| share.signed.signature.signer != self.replica_config.node_id)
             })
+            .cloned()
             .filter_map(|(height, hash)| {
                 let content = CertificationContent::new(hash);
                 let dkg_id =
-                    active_high_threshold_transcript(self.consensus_pool_cache.as_ref(), height)?
-                        .dkg_id;
+                    active_high_threshold_nidkg_id(self.consensus_pool_cache.as_ref(), height)?;
                 match self
                     .crypto
                     .sign(&content, self.replica_config.node_id, dkg_id)
@@ -395,7 +372,7 @@ impl CertifierImpl {
     ) -> Vec<CertificationMessage> {
         // A struct defined to morph `Certification` into a format that can be
         // accepted by `utils::aggregate`.
-        #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
         struct CertificationTuple(Height, CertificationContent);
 
         impl HasHeight for CertificationTuple {
@@ -419,13 +396,7 @@ impl CertifierImpl {
             self.membership.as_ref(),
             self.crypto.as_aggregate(),
             Box::new(|cert: &CertificationTuple| {
-                Some(
-                    active_high_threshold_transcript(
-                        self.consensus_pool_cache.as_ref(),
-                        cert.height(),
-                    )?
-                    .dkg_id,
-                )
+                active_high_threshold_nidkg_id(self.consensus_pool_cache.as_ref(), cert.height())
             }),
             shares,
         )
@@ -447,7 +418,7 @@ impl CertifierImpl {
         &self,
         certification_pool: &dyn CertificationPool,
         state_hashes: &[(Height, CryptoHashOfPartialState)],
-    ) -> ChangeSet {
+    ) -> Mutations {
         // Iterate over all state hashes, obtain list of corresponding unvalidated
         // artifacts by the height and try to verify their signatures.
 
@@ -481,7 +452,7 @@ impl CertifierImpl {
                         .filter_map(move |share| {
                             self.validate_share(certification_pool, hash, share)
                         })
-                        .chain(cert_change_set.into_iter()),
+                        .chain(cert_change_set),
                 )
             })
             .collect()
@@ -531,10 +502,10 @@ impl CertifierImpl {
             registry_version,
         ) {
             Ok(()) => Some(ChangeAction::MoveToValidated(msg)),
-            Err(ValidationError::Permanent(err)) => {
+            Err(ValidationError::InvalidArtifact(err)) => {
                 Some(ChangeAction::HandleInvalid(msg, format!("{:?}", err)))
             }
-            Err(ValidationError::Transient(err)) => {
+            Err(ValidationError::ValidationFailed(err)) => {
                 debug!(
                     self.log,
                     "Couldn't verify certification signature: {:?}", err
@@ -598,19 +569,18 @@ impl CertifierImpl {
                         .crypto
                         .verify(
                             &share.signed,
-                            active_high_threshold_transcript(
+                            active_high_threshold_nidkg_id(
                                 self.consensus_pool_cache.as_ref(),
                                 share.height,
-                            )?
-                            .dkg_id,
+                            )?,
                         )
                         .map_err(VerifierError::from)
                     {
                         Ok(()) => ChangeAction::MoveToValidated(msg),
-                        Err(ValidationError::Permanent(err)) => {
+                        Err(ValidationError::InvalidArtifact(err)) => {
                             ChangeAction::HandleInvalid(msg, format!("{:?}", err))
                         }
-                        Err(ValidationError::Transient(err)) => {
+                        Err(ValidationError::ValidationFailed(err)) => {
                             debug!(self.log, "Couldn't verify share signature: {:?}", err);
                             return None;
                         }
@@ -626,24 +596,25 @@ mod tests {
     use super::*;
     use ic_artifact_pool::certification_pool::CertificationPoolImpl;
     use ic_consensus_mocks::{dependencies, Dependencies};
-    use ic_interfaces::artifact_pool::{MutablePool, UnvalidatedArtifact};
-    use ic_interfaces::certification::CertificationPool;
-    use ic_interfaces::time_source::{SysTimeSource, TimeSource};
-    use ic_test_utilities::consensus::fake::*;
-    use ic_test_utilities::types::ids::{node_test_id, subnet_test_id};
+    use ic_interfaces::{
+        certification::CertificationPool,
+        p2p::consensus::{MutablePool, UnvalidatedArtifact},
+    };
+    use ic_test_utilities_consensus::fake::*;
     use ic_test_utilities_logger::with_test_replica_logger;
-    use ic_types::artifact::CertificationMessageId;
-    use ic_types::consensus::certification::CertificationMessageHash;
+    use ic_test_utilities_types::ids::{node_test_id, subnet_test_id};
     use ic_types::{
-        artifact::Priority,
+        artifact::CertificationMessageId,
         consensus::certification::{
-            Certification, CertificationContent, CertificationMessage, CertificationShare,
+            Certification, CertificationContent, CertificationMessage, CertificationMessageHash,
+            CertificationShare,
         },
         crypto::{
             threshold_sig::ni_dkg::{NiDkgId, NiDkgTag, NiDkgTargetSubnet},
             CryptoHash, CryptoHashOf,
         },
         signature::*,
+        time::UNIX_EPOCH,
         CryptoHashOfPartialState, Height,
     };
 
@@ -651,7 +622,7 @@ mod tests {
         UnvalidatedArtifact::<CertificationMessage> {
             message,
             peer_id: node_test_id(0),
-            timestamp: SysTimeSource::new().get_relative_time(),
+            timestamp: UNIX_EPOCH,
         }
     }
 
@@ -725,7 +696,7 @@ mod tests {
                 let Dependencies {
                     mut pool,
                     replica_config,
-                    membership,
+                    registry,
                     crypto,
                     state_manager,
                     ..
@@ -734,19 +705,24 @@ mod tests {
                 add_expectations(state_manager.clone(), 1, 4);
                 let metrics_registry = MetricsRegistry::new();
                 let mut cert_pool = CertificationPoolImpl::new(
+                    replica_config.node_id,
                     pool_config,
                     ic_logger::replica_logger::no_op_logger(),
                     metrics_registry.clone(),
                 );
-                let (certifier, certifier_gossip) = setup(
+                let (max_certified_height_tx, _) = watch::channel(Height::from(0));
+
+                let certifier = CertifierImpl::new(
                     replica_config,
-                    membership,
+                    registry,
                     crypto,
                     state_manager.clone(),
                     pool.get_cache(),
-                    metrics_registry,
+                    metrics_registry.clone(),
                     log,
+                    max_certified_height_tx,
                 );
+                let bouncer_factory = CertifierBouncer::new(&metrics_registry, pool.get_cache());
 
                 // generate a certifications for heights 1 and 3
                 for height in &[1, 3] {
@@ -754,25 +730,22 @@ mod tests {
                 }
                 let change_set =
                     certifier.validate(&cert_pool, &state_manager.list_state_hashes_to_certify());
-                cert_pool.apply_changes(&SysTimeSource::new(), change_set);
+                cert_pool.apply(change_set);
 
-                let prio_fn = certifier_gossip.get_priority_function(&cert_pool);
+                let bouncer = bouncer_factory.new_bouncer(&cert_pool);
                 for (height, prio) in &[
-                    (1, Priority::Drop),
-                    (2, Priority::Fetch),
-                    (3, Priority::Drop),
-                    (4, Priority::Fetch),
+                    (1, BouncerValue::Unwanted),
+                    (2, BouncerValue::Wants),
+                    (3, BouncerValue::Unwanted),
+                    (4, BouncerValue::Wants),
                 ] {
                     assert_eq!(
-                        prio_fn(
-                            &CertificationMessageId {
-                                height: Height::from(*height),
-                                hash: CertificationMessageHash::Certification(CryptoHashOf::from(
-                                    CryptoHash(Vec::new())
-                                )),
-                            },
-                            &CertificationMessageAttribute::Certification(Height::from(*height))
-                        ),
+                        bouncer(&CertificationMessageId {
+                            height: Height::from(*height),
+                            hash: CertificationMessageHash::Certification(CryptoHashOf::from(
+                                CryptoHash(Vec::new())
+                            )),
+                        },),
                         *prio
                     );
                 }
@@ -787,7 +760,7 @@ mod tests {
                 let Dependencies {
                     mut pool,
                     replica_config,
-                    membership,
+                    registry,
                     crypto,
                     state_manager,
                     ..
@@ -796,19 +769,22 @@ mod tests {
                 pool.advance_round_normal_operation_n(6);
                 add_expectations(state_manager.clone(), 1, 4);
                 let metrics_registry = MetricsRegistry::new();
+                let (max_certified_height_tx, _) = watch::channel(Height::from(0));
                 let mut cert_pool = CertificationPoolImpl::new(
+                    replica_config.node_id,
                     pool_config,
                     ic_logger::replica_logger::no_op_logger(),
                     metrics_registry.clone(),
                 );
                 let certifier = CertifierImpl::new(
                     replica_config,
-                    membership,
+                    registry,
                     crypto,
                     state_manager.clone(),
                     pool.get_cache(),
                     metrics_registry,
                     log,
+                    max_certified_height_tx,
                 );
 
                 // generate a certifications for heights 1, 2 and 4
@@ -829,7 +805,7 @@ mod tests {
                 // expect 5 change actions: 3 full certifications moved to validated section + 2
                 // shares, where no certification is available (at height 3)
                 assert_eq!(change_set.len(), 5);
-                cert_pool.apply_changes(&SysTimeSource::new(), change_set);
+                cert_pool.apply(change_set);
 
                 // if the minimum chain length is outside of the interval (60, 120),
                 // then you need to adjust the test values below.
@@ -874,10 +850,7 @@ mod tests {
                 let height = Height::from(1);
                 assert!(cert_pool.certification_at_height(height).is_some());
 
-                cert_pool.apply_changes(
-                    &SysTimeSource::new(),
-                    vec![ChangeAction::RemoveAllBelow(purge_height)],
-                );
+                cert_pool.apply(vec![ChangeAction::RemoveAllBelow(purge_height)]);
 
                 let mut back_off_factor = 1;
                 loop {
@@ -912,16 +885,16 @@ mod tests {
         })
     }
 
-    // Here we insert certification shares for 3 different contents, so that we can
-    // test the correct aggregation, if there are enough shares for an
-    // aggregation, too few and just enough.
+    /// Here we insert certification shares for 3 different contents, so that we can
+    /// test the correct aggregation, if there are enough shares for an
+    /// aggregation, too few and just enough.
     #[test]
     fn test_certification_aggregation() {
         ic_test_utilities::artifact_pool_config::with_test_pool_config(|pool_config| {
             let Dependencies {
                 pool,
                 replica_config,
-                membership,
+                registry,
                 crypto,
                 state_manager,
                 ..
@@ -930,20 +903,23 @@ mod tests {
             add_expectations(state_manager.clone(), 3, 5);
             let metrics_registry = MetricsRegistry::new();
             let mut cert_pool = CertificationPoolImpl::new(
+                replica_config.node_id,
                 pool_config,
                 ic_logger::replica_logger::no_op_logger(),
                 metrics_registry.clone(),
             );
+            let (max_certified_height_tx, _) = watch::channel(Height::from(0));
 
             with_test_replica_logger(|log| {
                 let certifier = CertifierImpl::new(
                     replica_config,
-                    membership,
+                    registry,
                     crypto,
                     state_manager.clone(),
                     pool.get_cache(),
                     metrics_registry,
                     log,
+                    max_certified_height_tx,
                 );
 
                 std::iter::empty()
@@ -955,7 +931,7 @@ mod tests {
                 // this moves unvalidated shares to validated
                 let change_set =
                     certifier.validate(&cert_pool, &state_manager.list_state_hashes_to_certify());
-                cert_pool.apply_changes(&SysTimeSource::new(), change_set);
+                cert_pool.apply(change_set);
 
                 // emulates a call from inside on_state_change
                 let mut messages = vec![];
@@ -986,8 +962,8 @@ mod tests {
         })
     }
 
-    // Here we test, that the validation stops after finding a certification for a
-    // specified height.
+    /// Here we test, that the validation stops after finding a certification for a
+    /// specified height.
     #[test]
     fn test_certification_validate() {
         ic_test_utilities::artifact_pool_config::with_test_pool_config(|pool_config| {
@@ -996,7 +972,7 @@ mod tests {
             let Dependencies {
                 mut pool,
                 replica_config,
-                membership,
+                registry,
                 crypto,
                 state_manager,
                 ..
@@ -1006,20 +982,23 @@ mod tests {
             add_expectations(state_manager.clone(), 3, 5);
             let metrics_registry = MetricsRegistry::new();
             let mut cert_pool = CertificationPoolImpl::new(
+                replica_config.node_id,
                 pool_config,
                 ic_logger::replica_logger::no_op_logger(),
                 metrics_registry.clone(),
             );
+            let (max_certified_height_tx, _) = watch::channel(Height::from(0));
 
             with_test_replica_logger(|log| {
                 let certifier = CertifierImpl::new(
                     replica_config,
-                    membership,
+                    registry,
                     crypto,
                     state_manager.clone(),
                     pool.get_cache(),
                     metrics_registry,
                     log,
+                    max_certified_height_tx,
                 );
 
                 std::iter::empty()
@@ -1035,7 +1014,7 @@ mod tests {
                 // this moves unvalidated shares to validated
                 let change_set =
                     certifier.validate(&cert_pool, &state_manager.list_state_hashes_to_certify());
-                cert_pool.apply_changes(&SysTimeSource::new(), change_set);
+                cert_pool.apply(change_set);
 
                 assert_eq!(cert_pool.shares_at_height(Height::from(3)).count(), 6);
                 assert_eq!(
@@ -1057,14 +1036,14 @@ mod tests {
         })
     }
 
-    // Simply tests creating new certification shares.
+    /// Simply tests creating new certification shares.
     #[test]
     fn test_certification_sign() {
         ic_test_utilities::artifact_pool_config::with_test_pool_config(|pool_config| {
             let Dependencies {
                 mut pool,
                 replica_config,
-                membership,
+                registry,
                 crypto,
                 state_manager,
                 ..
@@ -1074,20 +1053,23 @@ mod tests {
             add_expectations(state_manager.clone(), 3, 5);
             let metrics_registry = MetricsRegistry::new();
             let cert_pool = CertificationPoolImpl::new(
+                replica_config.node_id,
                 pool_config,
                 ic_logger::replica_logger::no_op_logger(),
                 metrics_registry.clone(),
             );
+            let (max_certified_height_tx, _) = watch::channel(Height::from(0));
 
             with_test_replica_logger(|log| {
                 let certifier = CertifierImpl::new(
                     replica_config,
-                    membership,
+                    registry,
                     crypto,
                     state_manager,
                     pool.get_cache(),
                     metrics_registry,
                     log,
+                    max_certified_height_tx,
                 );
 
                 let shares = certifier.sign(
@@ -1125,8 +1107,8 @@ mod tests {
         })
     }
 
-    // We test that the validator actually stops after the first discovered
-    // certification, even if multiple are available.
+    /// We test that the validator actually stops after the first discovered
+    /// certification, even if multiple are available.
     #[test]
     fn test_certification_validate_2() {
         ic_test_utilities::artifact_pool_config::with_test_pool_config(|pool_config| {
@@ -1134,7 +1116,7 @@ mod tests {
                 let Dependencies {
                     mut pool,
                     replica_config,
-                    membership,
+                    registry,
                     crypto,
                     state_manager,
                     ..
@@ -1143,16 +1125,20 @@ mod tests {
                 // make the mock state manager return empty hashes for heights 3, 4 and 5
                 add_expectations(state_manager.clone(), 3, 5);
                 let metrics_registry = MetricsRegistry::new();
+                let (max_certified_height_tx, _) = watch::channel(Height::from(0));
+
                 let certifier = CertifierImpl::new(
-                    replica_config,
-                    membership,
+                    replica_config.clone(),
+                    registry,
                     crypto,
                     state_manager.clone(),
                     pool.get_cache(),
                     metrics_registry.clone(),
                     log,
+                    max_certified_height_tx,
                 );
                 let mut cert_pool = CertificationPoolImpl::new(
+                    replica_config.node_id,
                     pool_config,
                     ic_logger::replica_logger::no_op_logger(),
                     metrics_registry,
@@ -1184,14 +1170,14 @@ mod tests {
                 let change_set =
                     certifier.validate(&cert_pool, &state_manager.list_state_hashes_to_certify());
                 assert_eq!(change_set.len(), 1);
-                cert_pool.apply_changes(&SysTimeSource::new(), change_set);
+                cert_pool.apply(change_set);
 
                 assert!(cert_pool.certification_at_height(Height::from(5)).is_some());
             })
         })
     }
 
-    // Test that an unexpected hash leads to marking the certification as invalid.
+    /// Test that an unexpected hash leads to marking the certification as invalid.
     #[test]
     fn test_invalidate_certificate_with_incorrect_state() {
         ic_test_utilities::artifact_pool_config::with_test_pool_config(|pool_config| {
@@ -1199,20 +1185,23 @@ mod tests {
                 let Dependencies {
                     pool,
                     replica_config,
-                    membership,
+                    registry,
                     crypto,
                     state_manager,
                     ..
                 } = dependencies(pool_config.clone(), 1);
 
+                let (max_certified_height_tx, _) = watch::channel(Height::from(0));
+
                 let certifier = CertifierImpl::new(
                     replica_config,
-                    membership,
+                    registry,
                     crypto,
                     state_manager,
                     pool.get_cache(),
                     MetricsRegistry::new(),
                     log,
+                    max_certified_height_tx,
                 );
 
                 let cert = if let CertificationMessage::Certification(cert) =
@@ -1239,16 +1228,16 @@ mod tests {
         })
     }
 
-    // Here we insert certification shares for 3 different contents, so that we can
-    // test the correct aggregation, if there are enough shares for an
-    // aggregation, too few and just enough.
+    /// Here we insert certification shares for 3 different contents, so that we can
+    /// test the correct aggregation, if there are enough shares for an
+    /// aggregation, too few and just enough.
     #[test]
     fn test_invalidate_a_second_certification_share_from_the_same_signer() {
         ic_test_utilities::artifact_pool_config::with_test_pool_config(|pool_config| {
             let Dependencies {
                 pool,
                 replica_config,
-                membership,
+                registry,
                 crypto,
                 state_manager,
                 ..
@@ -1257,20 +1246,23 @@ mod tests {
             add_expectations(state_manager.clone(), 4, 5);
             let metrics_registry = MetricsRegistry::new();
             let mut cert_pool = CertificationPoolImpl::new(
+                replica_config.node_id,
                 pool_config,
                 ic_logger::replica_logger::no_op_logger(),
                 metrics_registry.clone(),
             );
+            let (max_certified_height_tx, _) = watch::channel(Height::from(0));
 
             with_test_replica_logger(|log| {
                 let certifier = CertifierImpl::new(
                     replica_config,
-                    membership,
+                    registry,
                     crypto,
                     state_manager.clone(),
                     pool.get_cache(),
                     metrics_registry,
                     log,
+                    max_certified_height_tx,
                 );
 
                 std::iter::empty()
@@ -1281,7 +1273,7 @@ mod tests {
                 // this moves unvalidated shares to validated
                 let change_set =
                     certifier.validate(&cert_pool, &state_manager.list_state_hashes_to_certify());
-                cert_pool.apply_changes(&SysTimeSource::new(), change_set);
+                cert_pool.apply(change_set);
 
                 // Let's insert valid shares from the same signer again:
                 cert_pool.insert(fake_share(Height::from(4), 0));
@@ -1305,7 +1297,7 @@ mod tests {
                     "Both items should be RemoveFromUnvalidated"
                 );
 
-                cert_pool.apply_changes(&SysTimeSource::new(), change_set);
+                cert_pool.apply(change_set);
 
                 // At level 4, we find a certification
                 assert_eq!(cert_pool.shares_at_height(Height::from(4)).count(), 4);
@@ -1322,6 +1314,129 @@ mod tests {
                         .unvalidated_shares_at_height(Height::from(5))
                         .count(),
                     0
+                );
+            })
+        })
+    }
+
+    /// Test that the certifier always transmits the highest certified height that
+    /// has been seen so far. I.e. always transmit the global maximum height.
+    /// Test scenario:
+    /// 1. Certifier receives certifications for heights 1, 2, 3.
+    ///     - Certifier should transmit height 3.
+    /// 2. Certifier receives certification for height 4.
+    ///    - Certifier should transmit height 4.
+    /// 3. Certifier receives certifications for heights 4, 3, 2, 1.
+    ///   - Certifier should not transmit any height, as none of the heights are higher
+    ///     than the last transmitted height.
+    #[test]
+    fn test_certified_heights_are_transmitted() {
+        ic_test_utilities::artifact_pool_config::with_test_pool_config(|pool_config| {
+            with_test_replica_logger(|log| {
+                let Dependencies {
+                    pool,
+                    replica_config,
+                    registry,
+                    crypto,
+                    state_manager,
+                    ..
+                } = dependencies(pool_config.clone(), 4);
+
+                let metrics_registry = MetricsRegistry::new();
+                let (max_certified_height_tx, mut max_certified_height_rx) =
+                    watch::channel(Height::from(0));
+                let cert_pool = CertificationPoolImpl::new(
+                    replica_config.node_id,
+                    pool_config,
+                    ic_logger::replica_logger::no_op_logger(),
+                    metrics_registry.clone(),
+                );
+
+                for height in 1..=4 {
+                    cert_pool
+                        .validated
+                        .insert(CertificationMessage::Certification(Certification {
+                            height: Height::from(height),
+                            signed: Signed {
+                                content: gen_content(),
+                                signature: ThresholdSignature::fake(),
+                            },
+                        }));
+                }
+
+                let certifier = CertifierImpl::new(
+                    replica_config,
+                    registry,
+                    crypto,
+                    state_manager.clone(),
+                    pool.get_cache(),
+                    metrics_registry,
+                    log,
+                    max_certified_height_tx,
+                );
+
+                // We expect deliver_state_certification() to be called 8 times since we call
+                // CertifierImpl::on_state_change 3 times with 8 heights in total:
+                // We mock the certified heights [1, 2, 3], [4], [4, 3, 2, 1] which are in total 8 heights.
+                // I.e. the certifier should deliver the state certification 8 times.
+                state_manager
+                    .get_mut()
+                    .expect_deliver_state_certification()
+                    .times(8)
+                    .return_const(());
+
+                let state_hashes = |heights: Vec<u64>| {
+                    heights
+                        .into_iter()
+                        .map(|h| {
+                            (
+                                Height::from(h),
+                                CryptoHashOfPartialState::from(CryptoHash(Vec::new())),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                };
+
+                // We mock the state manager to return the heights
+                // of the states that are certified. The CertifierImpl
+                // should transmit the highest height that it has seen
+                // each time it sees a new height it certifies by delivering it
+                // to the state manager.
+                state_manager
+                    .get_mut()
+                    .expect_list_state_hashes_to_certify()
+                    .times(1)
+                    .return_const(state_hashes(vec![1, 2, 3]));
+
+                certifier.on_state_change(&cert_pool);
+                assert_eq!(
+                    *max_certified_height_rx.borrow_and_update(),
+                    Height::from(3)
+                );
+
+                // New max height is 4, so it should be transmitted
+                state_manager
+                    .get_mut()
+                    .expect_list_state_hashes_to_certify()
+                    .times(1)
+                    .return_const(state_hashes(vec![4]));
+                certifier.on_state_change(&cert_pool);
+                assert_eq!(
+                    *max_certified_height_rx.borrow_and_update(),
+                    Height::from(4),
+                    "Expected height 4 to be transmitted as it is higher than previous transmitted heights"
+                );
+
+                // None of these heights are higher than the last transmitted height
+                state_manager
+                    .get_mut()
+                    .expect_list_state_hashes_to_certify()
+                    .times(1)
+                    .return_const(state_hashes(vec![4, 3, 2, 1]));
+                certifier.on_state_change(&cert_pool);
+                assert!(
+                    !max_certified_height_rx.has_changed().unwrap(),
+                    "No new height should be sent if they are lower than a previously sent height."
                 );
             })
         })

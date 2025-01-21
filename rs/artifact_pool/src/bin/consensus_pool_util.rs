@@ -10,6 +10,7 @@ use ic_metrics::MetricsRegistry;
 use ic_types::{
     consensus::{certification::CertificationMessage, CatchUpPackage, ConsensusMessageHashable},
     time::current_time,
+    NodeId, PrincipalId,
 };
 use prost::Message;
 use serde::{Deserialize, Serialize};
@@ -31,9 +32,7 @@ fn main() {
                     .long("artifact")
                     .value_name("NAME")
                     .help("Artifact name")
-                    .multiple_occurrences(true)
-                    .multiple_values(true)
-                    .takes_value(true),
+                    .num_args(1..),
             ),
         )
         .subcommand(Command::new("import").about("Import data from stdin"))
@@ -47,7 +46,7 @@ fn main() {
                         .value_name("FILE")
                         .help("Output filename")
                         .required(true)
-                        .takes_value(true),
+                        .num_args(1),
                 ),
         )
         .arg(arg!(<PATH>       "PATH to the consensus pool directory"));
@@ -56,7 +55,7 @@ fn main() {
         .expect("Unable to output help message");
     let matches = app.get_matches();
     let path = matches
-        .value_of("PATH")
+        .get_one::<String>("PATH")
         .expect("Missing PATH to consensus pool directory");
     if let Some(matches) = matches.subcommand_matches("export") {
         export(path, matches)
@@ -88,7 +87,7 @@ const ALL_ARTIFACT_NAMES: [&str; 13] = [
     "CertificationShare",
 ];
 
-fn parse_artifact_names<'a, 'b>(names: &'a [&'b str]) -> Vec<&'static str> {
+fn parse_artifact_names(names: &[&str]) -> Vec<&'static str> {
     for name in names {
         if !ALL_ARTIFACT_NAMES
             .iter()
@@ -121,7 +120,8 @@ fn open_certification_pool(path: &str, read_only: bool) -> CertificationPoolImpl
     let path = PathBuf::from(path);
     let mut config = ArtifactPoolConfig::new(path);
     config.persistent_pool_read_only = read_only;
-    CertificationPoolImpl::new(config, log, MetricsRegistry::new())
+    let node_id = NodeId::from(PrincipalId::new_node_test_id(0));
+    CertificationPoolImpl::new(node_id, config, log, MetricsRegistry::new())
 }
 
 fn from_str<'a, T: Deserialize<'a>>(json: &'a str) -> Result<T, serde_json::Error> {
@@ -139,8 +139,10 @@ fn to_string<T: Serialize>(msg: &T) -> String {
 }
 
 fn export(path: &str, matches: &clap::ArgMatches) {
-    let artifacts = match matches.values_of("artifact") {
-        Some(names) => parse_artifact_names(&names.collect::<Vec<&str>>()),
+    let artifacts = match matches.get_many::<String>("artifact") {
+        Some(names) => {
+            parse_artifact_names(&names.map(|name| name.as_str()).collect::<Vec<&str>>())
+        }
         None => ALL_ARTIFACT_NAMES.to_vec(),
     };
 
@@ -209,17 +211,13 @@ fn export(path: &str, matches: &clap::ArgMatches) {
                 }
             }
             "Certification" => {
-                for x in certification_pool
-                    .persistent_pool
-                    .certifications()
-                    .get_all()
-                {
+                for x in certification_pool.validated.certifications().get_all() {
                     println!("{}", to_string(&CertificationMessage::Certification(x)));
                 }
             }
             "CertificationShare" => {
                 for x in certification_pool
-                    .persistent_pool
+                    .validated
                     .certification_shares()
                     .get_all()
                 {
@@ -248,7 +246,7 @@ fn import(path: &str) {
             });
             consensus_pool.validated.mutate(ops);
         } else if let Ok(msg) = from_str(&s) {
-            certification_pool.persistent_pool.insert(msg)
+            certification_pool.validated.insert(msg)
         } else {
             panic!("Failed to parse JSON: {}", s);
         }
@@ -257,7 +255,7 @@ fn import(path: &str) {
 
 fn export_cup_proto(path: &str, matches: &clap::ArgMatches) {
     let filename = matches
-        .value_of("output")
+        .get_one::<String>("output")
         .expect("Expect an output filename");
     let mut file = std::fs::File::create(filename)
         .unwrap_or_else(|err| panic!("Cannot open file {} for write: {:?}", filename, err));

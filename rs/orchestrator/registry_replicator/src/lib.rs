@@ -29,8 +29,10 @@
 //! switch-over is handled in this component.
 
 use crate::internal_state::InternalState;
-use ic_config::metrics::{Config as MetricsConfig, Exporter};
-use ic_config::Config;
+use ic_config::{
+    metrics::{Config as MetricsConfig, Exporter},
+    Config,
+};
 use ic_crypto_utils_threshold_sig_der::parse_threshold_sig_key;
 use ic_http_endpoints_metrics::MetricsHttpEndpoint;
 use ic_interfaces_registry::{RegistryClient, RegistryDataProvider, ZERO_REGISTRY_VERSION};
@@ -39,14 +41,17 @@ use ic_metrics::MetricsRegistry;
 use ic_registry_client::client::RegistryClientImpl;
 use ic_registry_local_store::{Changelog, ChangelogEntry, KeyMutation, LocalStore, LocalStoreImpl};
 use ic_registry_nns_data_provider::registry::RegistryCanister;
-use ic_types::crypto::threshold_sig::ThresholdSigPublicKey;
-use ic_types::{NodeId, RegistryVersion};
+use ic_types::{crypto::threshold_sig::ThresholdSigPublicKey, NodeId, RegistryVersion};
 use metrics::RegistryreplicatorMetrics;
-use std::io::{Error, ErrorKind};
-use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    io::{Error, ErrorKind},
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use tokio::task::JoinHandle;
 use url::Url;
 
@@ -125,7 +130,6 @@ impl RegistryReplicator {
         metrics_addr: SocketAddr,
     ) -> (Self, MetricsHttpEndpoint) {
         let replicator = RegistryReplicator::new_from_config(logger.clone(), node_id, config);
-        let crypto = ic_crypto_for_verification_only::new(replicator.get_registry_client());
 
         let metrics_config = MetricsConfig {
             exporter: Exporter::Http(metrics_addr),
@@ -135,8 +139,6 @@ impl RegistryReplicator {
             tokio::runtime::Handle::current(),
             metrics_config,
             MetricsRegistry::global(),
-            replicator.get_registry_client(),
-            Arc::new(crypto),
             &logger.inner_logger.root,
         );
 
@@ -234,16 +236,16 @@ impl RegistryReplicator {
 
         // Fill the local registry store by polling the registry canister until we get no
         // more changes.
-        let certified_time = loop {
+        loop {
             // Note, code duplicate in internal_state.rs poll()
             match registry_canister
                 .get_certified_changes_since(registry_version.get(), &nns_pub_key)
                 .await
             {
-                Ok((mut records, _, t)) => {
+                Ok((mut records, _, _t)) => {
                     // We fetched the latest version.
                     if records.is_empty() {
-                        break t;
+                        break;
                     }
                     records.sort_by_key(|tr| tr.version);
                     let changelog = records.iter().fold(Changelog::default(), |mut cl, r| {
@@ -289,12 +291,7 @@ impl RegistryReplicator {
                     timeout = timeout.min(60); // limit the timeout by a minute max
                 }
             }
-        };
-
-        // Set certified time for the first time now, to indicate that local store is up-to-date
-        self.local_store
-            .update_certified_time(certified_time.as_nanos_since_unix_epoch())
-            .expect("Could not store certified time");
+        }
 
         info!(
             self.logger,
@@ -360,6 +357,25 @@ impl RegistryReplicator {
             }
         });
         Ok(handle)
+    }
+
+    /// Requests latest version and certified changes from the
+    /// [`RegistryCanister`] and applies changes to [`LocalStore`] accordingly.
+    ///
+    /// Note that we will poll at most 1000 oldest registry versions (see the implementation of
+    /// `get_certified_changes_since` of `RegistryCanister`), so multiple polls might be necessary
+    /// to get the most recent version of the registry.
+    pub async fn poll(&self, nns_urls: Vec<Url>) -> Result<(), String> {
+        InternalState::new(
+            self.logger.clone(),
+            self.node_id,
+            self.registry_client.clone(),
+            self.local_store.clone(),
+            nns_urls,
+            self.poll_delay,
+        )
+        .poll()
+        .await
     }
 
     /// Set the local registry data to what is contained in the provided local

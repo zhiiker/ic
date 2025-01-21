@@ -1,7 +1,4 @@
-use ic_config::{
-    subnet_config::{SubnetConfig, SubnetConfigs},
-    Config,
-};
+use ic_config::{subnet_config::SubnetConfig, Config};
 use ic_cycles_account_manager::CyclesAccountManager;
 use ic_execution_environment::ExecutionServices;
 use ic_interfaces::execution_environment::IngressHistoryReader;
@@ -22,10 +19,11 @@ use ic_registry_provisional_whitelist::ProvisionalWhitelist;
 use ic_registry_routing_table::{routing_table_insert_subnet, RoutingTable};
 use ic_registry_subnet_type::SubnetType;
 use ic_state_manager::StateManagerImpl;
-use ic_test_utilities::{consensus::fake::FakeVerifier, types::ids::subnet_test_id};
+use ic_test_utilities_consensus::fake::FakeVerifier;
 use ic_test_utilities_registry::{
     add_subnet_record, insert_initial_dkg_transcript, SubnetRecordBuilder,
 };
+use ic_test_utilities_types::ids::subnet_test_id;
 use ic_types::{
     malicious_flags::MaliciousFlags, replica_config::ReplicaConfig, NodeId, PrincipalId,
     RegistryVersion, SubnetId,
@@ -100,7 +98,7 @@ pub(crate) fn setup() -> (
     let subnet_id = subnet_test_id(1);
     let root_subnet_id = subnet_test_id(2);
     let (config, _) = Config::temp_config();
-    let subnet_config = SubnetConfigs::default().own_subnet_config(subnet_type);
+    let subnet_config = SubnetConfig::new(subnet_type);
     let replica_config = ReplicaConfig {
         node_id: NodeId::from(PrincipalId::new_node_test_id(27)),
         subnet_id,
@@ -121,6 +119,7 @@ pub(crate) fn setup() -> (
         subnet_id,
         subnet_config.cycles_account_manager_config,
     ));
+
     let state_manager = Arc::new(StateManagerImpl::new(
         Arc::new(FakeVerifier::new()),
         replica_config.subnet_id,
@@ -132,6 +131,8 @@ pub(crate) fn setup() -> (
         ic_types::malicious_flags::MaliciousFlags::default(),
     ));
 
+    let (completed_execution_messages_tx, _) = tokio::sync::mpsc::channel(1);
+
     let execution_services = ExecutionServices::setup_execution(
         log.clone().into(),
         &metrics_registry,
@@ -142,6 +143,8 @@ pub(crate) fn setup() -> (
         Arc::clone(&cycles_account_manager),
         Arc::clone(&state_manager) as Arc<_>,
         Arc::clone(&state_manager.get_fd_factory()),
+        completed_execution_messages_tx,
+        &state_manager.state_layout().tmp(),
     );
 
     let message_routing = MessageRoutingImpl::new(

@@ -1,5 +1,7 @@
 use crate::KeyId;
-use ic_crypto_internal_threshold_sig_ecdsa::{EccCurveType, EccPoint, MEGaPublicKey};
+use ic_crypto_internal_threshold_sig_canister_threshold_sig::{
+    EccCurveType, EccPoint, MEGaPublicKey,
+};
 use ic_crypto_internal_types::sign::threshold_sig::ni_dkg::ni_dkg_groth20_bls12_381::FsEncryptionPublicKey;
 
 #[test]
@@ -23,8 +25,10 @@ mod stability_tests {
     use ic_crypto_internal_test_vectors::multi_bls12_381::TESTVEC_MULTI_BLS12_381_2_PK;
     use ic_crypto_internal_test_vectors::multi_bls12_381::TESTVEC_MULTI_BLS12_381_3_PK;
     use ic_crypto_internal_test_vectors::multi_bls12_381::TESTVEC_MULTI_BLS12_381_4_PK;
-    use ic_crypto_internal_threshold_sig_ecdsa::PedersenCommitment;
-    use ic_crypto_internal_threshold_sig_ecdsa::{PolynomialCommitment, SimpleCommitment};
+    use ic_crypto_internal_threshold_sig_canister_threshold_sig::PedersenCommitment;
+    use ic_crypto_internal_threshold_sig_canister_threshold_sig::{
+        PolynomialCommitment, SimpleCommitment,
+    };
     use ic_crypto_internal_types::curves::bls12_381;
     use ic_crypto_internal_types::encrypt::forward_secure::CspFsEncryptionPublicKey;
     use ic_crypto_internal_types::sign::threshold_sig::public_coefficients::bls12_381::PublicCoefficientsBytes;
@@ -32,7 +36,6 @@ mod stability_tests {
     use ic_crypto_internal_types::sign::threshold_sig::public_key::bls12_381::PublicKeyBytes;
     use ic_crypto_tls_interfaces::TlsPublicKeyCert;
     use ic_types::crypto::AlgorithmId;
-    use openssl::x509::X509;
     use std::fmt::Debug;
 
     #[derive(Debug)]
@@ -75,30 +78,6 @@ mod stability_tests {
             string_value,
             "KeyId(0x0101010101010101010101010101010101010101010101010101010101010101)"
         )
-    }
-
-    #[test]
-    fn should_instantiate_same_key_id_from_display_string() {
-        let key_id =
-            KeyId::from_hex("e1299603ca276e7164d25be3596f98c6139202959b6a83195acf0c5121d57742")
-                .expect("invalid key id");
-
-        let reconstructed_key_id =
-            KeyId::try_from(key_id.to_string().as_str()).expect("invalid key id");
-
-        assert_eq!(key_id, reconstructed_key_id);
-    }
-
-    #[test]
-    fn should_provide_stable_key_id_from_display_string() {
-        let displayed_key_id =
-            "KeyId(0xd9564f1e7ab210c9f0c95d4627d5266485b4a7724048a36170c8ff5ac2915a48)";
-        let computed_key_id = KeyId::try_from(displayed_key_id).expect("invalid key id");
-        let expected_key_id =
-            KeyId::from_hex("d9564f1e7ab210c9f0c95d4627d5266485b4a7724048a36170c8ff5ac2915a48")
-                .expect("invalid key id");
-
-        assert_eq!(computed_key_id, expected_key_id);
     }
 
     #[test]
@@ -172,6 +151,10 @@ mod stability_tests {
             ParameterizedTest {
                 input: (AlgorithmId::MegaSecp256k1, bytes),
                 expected: "93549663cba48293c1d9a92de585a49581e05af84563aecd47fb7ab5fe9745c3",
+            },
+            ParameterizedTest {
+                input: (AlgorithmId::ThresholdEcdsaSecp256r1, bytes),
+                expected: "001b0b2aa06c51280e5267b7c9a5c5aa1691dcec75622eaa5c30d2ed08c5f25a",
             },
         ];
 
@@ -394,8 +377,8 @@ t7Ica9iKR8XXVy+W5eyW52YYPbGzXZ0FgxPcOMk3Tm2qx/zJJ7pkN+rJeIEgQHEj
 
         for test in &tests {
             assert_eq!(
-                KeyId::from(&test.input),
-                test.expected_key_id(),
+                KeyId::try_from(&test.input),
+                Ok(test.expected_key_id()),
                 "Parameterized test {:?} failed",
                 &test
             )
@@ -403,10 +386,7 @@ t7Ica9iKR8XXVy+W5eyW52YYPbGzXZ0FgxPcOMk3Tm2qx/zJJ7pkN+rJeIEgQHEj
     }
 
     fn tls_public_key_cert_from_pem(pem_cert: &str) -> TlsPublicKeyCert {
-        TlsPublicKeyCert::new_from_x509(
-            X509::from_pem(pem_cert.as_bytes()).expect("error parsing X509"),
-        )
-        .expect("error parsing certificate")
+        TlsPublicKeyCert::new_from_pem(pem_cert).expect("error parsing certificate")
     }
 
     fn csp_public_coefficients<T: AsRef<[u8]>>(public_key: T) -> CspPublicCoefficients {

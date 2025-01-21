@@ -1,8 +1,7 @@
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library")
-
-package(default_visibility = ["//visibility:public"])
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
 
 DEPENDENCIES = [
+    # Keep sorted.
     "//rs/config",
     "//rs/crypto/utils/threshold_sig_der",
     "//rs/monitoring/logger",
@@ -12,19 +11,23 @@ DEPENDENCIES = [
     "//rs/registry/helpers",
     "//rs/registry/local_store",
     "//rs/types/types",
+    "@crate_index//:anyhow",
     "@crate_index//:chrono",
     "@crate_index//:clap",
-    "@crate_index//:json5",
-    "@crate_index//:rand_0_8_4",
+    "@crate_index//:rand",
     "@crate_index//:reqwest",
     "@crate_index//:serde",
     "@crate_index//:serde_json",
-    "@crate_index//:serde_millis",
     "@crate_index//:slog",
     "@crate_index//:slog-async",
     "@crate_index//:slog-term",
     "@crate_index//:tokio",
     "@crate_index//:url",
+]
+
+DEV_DEPENDENCIES = [
+    # Keep sorted.
+    "//rs/test_utilities/tmpdir",
 ]
 
 MACRO_DEPENDENCIES = []
@@ -37,7 +40,10 @@ rust_library(
     aliases = ALIASES,
     crate_name = "ic_backup",
     proc_macro_deps = MACRO_DEPENDENCIES,
-    version = "0.8.0",
+    version = "1.0.2",
+    visibility = [
+        "//rs:system-tests-pkg",
+    ],
     deps = DEPENDENCIES,
 )
 
@@ -46,5 +52,16 @@ rust_binary(
     srcs = ["src/main.rs"],
     aliases = ALIASES,
     proc_macro_deps = MACRO_DEPENDENCIES,
+    visibility = [
+        "//rs:release-pkg",
+        "//rs:system-tests-pkg",
+    ],
     deps = DEPENDENCIES + [":backup"],
+)
+
+rust_test(
+    name = "backup_test",
+    compile_data = ["test_data/fake_input_config.json.template"],
+    crate = ":backup",
+    deps = DEPENDENCIES + DEV_DEPENDENCIES,
 )

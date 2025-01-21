@@ -10,7 +10,7 @@ use std::time::Instant;
 ///
 /// In asynchronous code, when dealing with cancellations, control may never
 /// reach the code where `observe()` is called. The code below aims at tracking
-/// latencies while the object is in scope with the posibility to modify label
+/// latencies while the object is in scope with the possibility to modify label
 /// values as they become available.
 pub struct HistogramVecTimer<'a, const LABEL_COUNT: usize> {
     hist: HistogramVec,
@@ -72,7 +72,7 @@ impl<'a, const LABEL_COUNT: usize> HistogramVecTimer<'a, LABEL_COUNT> {
     }
 }
 
-impl<'a, const LABEL_COUNT: usize> Drop for HistogramVecTimer<'a, LABEL_COUNT> {
+impl<const LABEL_COUNT: usize> Drop for HistogramVecTimer<'_, LABEL_COUNT> {
     fn drop(&mut self) {
         self.hist
             .with_label_values(self.label_values())

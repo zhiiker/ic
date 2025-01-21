@@ -3,13 +3,18 @@ use ic_types::crypto::canister_threshold_sig::error::{
     IDkgVerifyComplaintError, IDkgVerifyDealingPrivateError, IDkgVerifyDealingPublicError,
     IDkgVerifyInitialDealingsError, IDkgVerifyOpeningError, IDkgVerifyTranscriptError,
     ThresholdEcdsaVerifyCombinedSignatureError, ThresholdEcdsaVerifySigShareError,
+    ThresholdSchnorrVerifyCombinedSigError, ThresholdSchnorrVerifySigShareError,
 };
 use ic_types::crypto::threshold_sig::ni_dkg::errors::create_transcript_error::DkgCreateTranscriptError;
 use ic_types::crypto::threshold_sig::ni_dkg::errors::key_removal_error::DkgKeyRemovalError;
 use ic_types::crypto::threshold_sig::ni_dkg::errors::load_transcript_error::DkgLoadTranscriptError;
 use ic_types::crypto::threshold_sig::ni_dkg::errors::verify_dealing_error::DkgVerifyDealingError;
+use ic_types::crypto::vetkd::VetKdKeyShareVerificationError;
 use ic_types::crypto::CryptoError;
 use ic_types::registry::RegistryClientError;
+
+#[cfg(test)]
+mod tests;
 
 // An implementation for the consensus component.
 impl ErrorReproducibility for CryptoError {
@@ -22,18 +27,18 @@ impl ErrorReproducibility for CryptoError {
             CryptoError::InvalidArgument { .. } => true,
             // true, as the registry is guaranteed to be consistent across replicas
             CryptoError::PublicKeyNotFound { .. } | CryptoError::TlsCertNotFound { .. } => true,
-            // panic, as during signature verification no secret keys are involved
+            // true, as secret material is specific to a replica (other replicas may not encounter the same error)
+            // but retrying the same operation on this replica will not change the outcome
             CryptoError::SecretKeyNotFound { .. } | CryptoError::TlsSecretKeyNotFound { .. } => {
-                panic!("Unexpected error {}, no secret keys involved", &self)
+                true
             }
             // true tentatively, but may change to panic! in the future:
             // this error indicates either globally corrupted registry, or a local
             // data corruption, and in either case we should not use the key anymore
             CryptoError::MalformedPublicKey { .. } => true,
-            // panic, as during signature verification no secret keys are involved
-            CryptoError::MalformedSecretKey { .. } => {
-                panic!("Unexpected error {}, no secret keys involved", &self)
-            }
+            // true, as secret material is specific to a replica (other replicas may not encounter the same error)
+            // but retrying the same operation on this replica will not change the outcome
+            CryptoError::MalformedSecretKey { .. } => true,
             // true, but this error may be removed TODO(CRP-224)
             CryptoError::MalformedSignature { .. } => true,
             // true, but this error may be removed TODO(CRP-224)
@@ -56,8 +61,8 @@ impl ErrorReproducibility for CryptoError {
             CryptoError::DkgTranscriptNotFound { .. } => true,
             // true, as the registry is guaranteed to be consistent across replicas
             CryptoError::RootSubnetPublicKeyNotFound { .. } => true,
-            // false, as the internal error can happen due to a local failure
-            CryptoError::InternalError { .. } => false,
+            // true, as non-reproducible internal errors use the other variant TransientInternalError
+            CryptoError::InternalError { .. } => true,
             // false, as by definition the transient internal error is non-reproducible
             // (catch-all for lower-level transient errors)
             CryptoError::TransientInternalError { .. } => false,
@@ -135,6 +140,8 @@ impl ErrorReproducibility for DkgLoadTranscriptError {
             DkgLoadTranscriptError::MalformedFsEncryptionPublicKey(_) => true,
             // false, as a transient error is not replicated by definition
             DkgLoadTranscriptError::TransientInternalError(_) => false,
+            // true, as internal errors are not expected to resolve through retrying
+            DkgLoadTranscriptError::InternalError(_) => true,
         }
     }
 }
@@ -161,6 +168,8 @@ impl ErrorReproducibility for DkgKeyRemovalError {
             DkgKeyRemovalError::TransientInternalError(_) => false,
             // true, as the encryption public key is fetched from the registry
             DkgKeyRemovalError::KeyNotFoundError(_) => true,
+            // true, as the key ID is computed from the transcripts provided as input
+            DkgKeyRemovalError::KeyIdInstantiationError(_) => true,
         }
     }
 }
@@ -196,7 +205,7 @@ impl ErrorReproducibility for IDkgVerifyDealingPublicError {
         match self {
             // The dealer wasn't even in the transcript
             Self::TranscriptIdMismatch => true,
-            // The dealing was publically invalid
+            // The dealing was publicly invalid
             Self::InvalidDealing { .. } => true,
             Self::InvalidSignature { crypto_error, .. } => crypto_error.is_reproducible(),
         }
@@ -267,8 +276,8 @@ impl ErrorReproducibility for IDkgVerifyDealingPrivateError {
             IDkgVerifyDealingPrivateError::RegistryError(registry_client_error) => {
                 registry_client_error.is_reproducible()
             }
-            // false, as an RPC error may be transient
-            IDkgVerifyDealingPrivateError::CspVaultRpcError(_) => false,
+            // false, as a transient error is not reproducible by definition
+            IDkgVerifyDealingPrivateError::TransientInternalError { .. } => false,
             // true, as the dealing does not become valid through retrying
             IDkgVerifyDealingPrivateError::InvalidDealing(_) => true,
             // true, as validity checks of arguments are stable across replicas
@@ -307,6 +316,8 @@ impl ErrorReproducibility for ThresholdEcdsaVerifySigShareError {
             Self::SerializationError { .. } => true,
             // The share included an invalid commitment type
             Self::InternalError { .. } => true,
+            // true, as validity checks of arguments are stable across replicas
+            Self::InvalidArguments(_) => true,
         }
     }
 }
@@ -327,6 +338,53 @@ impl ErrorReproducibility for ThresholdEcdsaVerifyCombinedSignatureError {
             Self::SerializationError { .. } => true,
             // Invalid commitment type or wrong algorithm ID
             Self::InternalError { .. } => true,
+            // true, as validity checks of arguments are stable across replicas
+            Self::InvalidArguments(_) => true,
+        }
+    }
+}
+
+impl ErrorReproducibility for ThresholdSchnorrVerifySigShareError {
+    fn is_reproducible(&self) -> bool {
+        // The match below is intentionally explicit on all possible values,
+        // to avoid defaults, which might be error-prone.
+        // Upon addition of any new error this match has to be updated.
+
+        // Signature share verification does not depend on any local or private
+        // state and so is inherently replicated.
+        match self {
+            // The error returned if signature share commitments are invalid
+            Self::InvalidSignatureShare => true,
+            // The purported signer does exist in the transcript
+            Self::InvalidArgumentMissingSignerInTranscript { .. } => true,
+            // The signature share could not even be deserialized correctly
+            Self::SerializationError(_) => true,
+            // The share included an invalid commitment type
+            Self::InternalError(_) => true,
+            // true, as validity checks of arguments are stable across replicas
+            Self::InvalidArguments(_) => true,
+        }
+    }
+}
+
+impl ErrorReproducibility for ThresholdSchnorrVerifyCombinedSigError {
+    fn is_reproducible(&self) -> bool {
+        // The match below is intentionally explicit on all possible values,
+        // to avoid defaults, which might be error-prone.
+        // Upon addition of any new error this match has to be updated.
+
+        // Signature verification does not depend on any local or
+        // private state and so is inherently replicated.
+        match self {
+            // The Schnorr signature was invalid or did not match the
+            // presignature transcript
+            Self::InvalidSignature => true,
+            // The signature could not even be deserialized correctly
+            Self::SerializationError(_) => true,
+            // Invalid commitment type or wrong algorithm ID
+            Self::InternalError(_) => true,
+            // true, as validity checks of arguments are stable across replicas
+            Self::InvalidArguments(_) => true,
         }
     }
 }
@@ -362,8 +420,22 @@ impl ErrorReproducibility for RegistryClientError {
             RegistryClientError::PollLockFailed { .. } => false,
             // may be transient errors
             RegistryClientError::PollingLatestVersionFailed { .. } => false,
-            // true, as the registry is guaranteed to be consistent accross replicas
+            // true, as the registry is guaranteed to be consistent across replicas
             RegistryClientError::DecodeError { .. } => true,
+        }
+    }
+}
+
+impl ErrorReproducibility for VetKdKeyShareVerificationError {
+    fn is_reproducible(&self) -> bool {
+        // The match below is intentionally explicit on all possible values,
+        // to avoid defaults, which might be error-prone.
+        // Upon addition of any new error this match has to be updated.
+
+        // VetKd key share verification does not depend on any local or private
+        // state and so is inherently replicated.
+        match self {
+            Self::InvalidSignature => true,
         }
     }
 }

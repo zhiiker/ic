@@ -6,6 +6,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/binary"
@@ -17,20 +18,20 @@ import (
 	"log"
 	"net/url"
 	"os"
-	"strings"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dfinity/ic/proto/build_event_stream"
 	"github.com/golang/protobuf/proto"
 	beeline "github.com/honeycombio/beeline-go"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/genproto/googleapis/bytestream"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
-var GRPC_DIAL_TIMEOUT = 20*time.Second
+var GRPC_DIAL_TIMEOUT = 20 * time.Second
 
 // Expect multiple proto messages in uvarint delimited format.
 func ReadDelimitedProtoMessage(br *bufio.Reader) ([]byte, error) {
@@ -48,64 +49,43 @@ func ReadDelimitedProtoMessage(br *bufio.Reader) ([]byte, error) {
 }
 
 func loadEnvVars() map[string]interface{} {
-	want := [...]string{"CD_ENV",
-		"CI_COMMIT_AUTHOR",
-		"CI_COMMIT_SHA",
-		"CI_COMMIT_TAG",
-		"CI_COMMIT_TIMESTAMP",
-		"CI_CONCURRENT_ID",
-		"CI_CONCURRENT_PROJECT_ID",
-		"CI_ENVIRONMENT_NAME",
-		"CI_ENVIRONMENT_SLUG",
-		"CI_EXTERNAL_PULL_REQUEST_IID",
-		"CI_EXTERNAL_PULL_REQUEST_SOURCE_BRANCH_NAME",
-		"CI_EXTERNAL_PULL_REQUEST_SOURCE_BRANCH_SHA",
-		"CI_JOB_ID",
-		"CI_JOB_IMAGE",
-		"CI_JOB_MANUAL",
-		"CI_JOB_NAME",
-		"CI_JOB_STAGE",
-		"CI_JOB_STATUS",
+	want := []string{"GITHUB_ACTION",
+		"GITHUB_ACTION_PATH",
+		"GITHUB_ACTION_REPOSITORY",
+		"GITHUB_ACTIONS",
+		"GITHUB_ACTOR",
+		"GITHUB_BASE_REF",
+		"GITHUB_ENV",
+		"GITHUB_EVENT_NAME",
+		"GITHUB_HEAD_REF",
+		"GITHUB_JOB",
+		"GITHUB_OUTPUT",
+		"GITHUB_PATH",
+		"GITHUB_REF",
+		"GITHUB_REF_NAME",
+		"GITHUB_REF_PROTECTED",
+		"GITHUB_REF_TYPE",
+		"GITHUB_REPOSITORY",
+		"GITHUB_REPOSITORY_ID",
+		"GITHUB_REPOSITORY_OWNER",
+		"GITHUB_REPOSITORY_OWNER_ID",
+		"GITHUB_RETENTION_DAYS",
+		"GITHUB_RUN_ATTEMPT",
+		"GITHUB_RUN_NUMBER",
+		"GITHUB_SHA",
+		"GITHUB_STEP_SUMMARY",
+		"GITHUB_TRIGGERING_ACTOR",
+		"GITHUB_WORKFLOW",
+		"GITHUB_WORKFLOW_REF",
+		"GITHUB_WORKFLOW_SHA",
+		"GITHUB_WORKSPACE",
+		"RUNNER_ARCH",
+		"RUNNER_NAME",
+		"RUNNER_OS",
+		"RUNNER_TEMP",
+		"RUNNER_TOOL_CACHE",
 		"CI_JOB_URL",
-		"CI_NODE_INDEX",
-		"CI_NODE_TOTAL",
-		"CI_PIPELINE_ID",
-		"CI_PIPELINE_SOURCE",
-		"CI_RUNNER_DESCRIPTION",
-		"CI_RUNNER_ID",
-		"CI_RUNNER_TAGS",
-		"DEPLOY_FLAVOR",
-		"USER_ID",
-		"USER_LOGIN",
-		"SCHEDULE_NAME",
-		"TESTNET",
-		"STEP_START",
-		"PIPELINE_START_TIME",
-		"job_status",
-		"DISKIMG_BRANCH",
-		"CI_MERGE_REQUEST_APPROVED",
-		"CI_MERGE_REQUEST_ASSIGNEES",
-		"CI_MERGE_REQUEST_ID",
-		"CI_MERGE_REQUEST_IID",
-		"CI_MERGE_REQUEST_LABELS",
-		"CI_MERGE_REQUEST_MILESTONE",
-		"CI_MERGE_REQUEST_PROJECT_ID",
-		"CI_MERGE_REQUEST_PROJECT_PATH",
-		"CI_MERGE_REQUEST_PROJECT_URL",
-		"CI_MERGE_REQUEST_REF_PATH",
-		"CI_MERGE_REQUEST_SOURCE_BRANCH_NAME",
-		"CI_MERGE_REQUEST_SOURCE_BRANCH_SHA",
-		"CI_MERGE_REQUEST_SOURCE_PROJECT_ID",
-		"CI_MERGE_REQUEST_SOURCE_PROJECT_PATH",
-		"CI_MERGE_REQUEST_SOURCE_PROJECT_URL",
-		"CI_MERGE_REQUEST_TARGET_BRANCH_NAME",
-		"CI_MERGE_REQUEST_TARGET_BRANCH_SHA",
-		"CI_MERGE_REQUEST_TITLE",
-		"CI_MERGE_REQUEST_EVENT_TYPE",
-		"CI_MERGE_REQUEST_DIFF_ID",
-		"CI_MERGE_REQUEST_DIFF_BASE_SHA",
 	}
-
 	env_vars := make(map[string]interface{})
 	for _, w := range want {
 		env_vars[w] = os.Getenv(w)
@@ -126,9 +106,12 @@ func main() {
 	debug := flag.Bool("n", false, "Debug mode: Output all the proto in text json text form")
 	flag.Parse()
 
+	var dataset string = "bazel-github"
+	log.Printf("Using dataset %s", dataset)
+
 	beeline.Init(beeline.Config{
-		WriteKey:    envVarOrDie("HONEYCOMB_API_TOKEN"),
-		Dataset:     "bazel",
+		WriteKey:    envVarOrDie("BUILDEVENT_APIKEY"),
+		Dataset:     dataset,
 		ServiceName: "exporter",
 	})
 	defer beeline.Close()
@@ -175,53 +158,100 @@ func main() {
 			log.Fatalln("failed to unmarshal json bytes to map: ", err)
 		}
 
-		test_status := summary.GetOverallStatus()
-		// Extract failure messages only for FLAKY or FAILED tests.
-		if test_status == build_event_stream.TestStatus_FLAKY || test_status == build_event_stream.TestStatus_FAILED {
-			test_target := event.GetId().GetTestSummary().GetLabel()
-			if strings.Contains(test_target, "//rs/tests/") {
-				// It is important for the script to NOT fail in case of errors/panics when processing system-test logs.
-				// Thus, GetSystemTestFailures() recovers from panic, if one occurs.
-				jsonMap["failure_messages"] = GetSystemTestFailures(summary)
-			}
-		}
 		spanCtx, eventSpan := beeline.StartSpan(context.Background(), "export_event")
+		testTarget := event.GetId().GetTestSummary().GetLabel()
+		if IsSystemTestTarget(testTarget) {
+			kibanaUrls, failureMessages := ExtractFailuresAndKibanaUrls(testTarget, summary)
+			// By adding a string field explicitly, we circumvent the default json encoding behavior of objects (like map) containing special symbols like "&".
+			// By default "problematic" HTML characters should be escaped inside JSON quoted strings. https://cs.opensource.google/go/go/+/refs/tags/go1.20.5:src/encoding/json/stream.go;l=193
+			// Kibana urls do contain such special symbols (like &) and we don't want to escape them.
+			beeline.AddField(spanCtx, "event.kibana_urls", kibanaUrls)
+			beeline.AddField(spanCtx, "event.failure_messages", failureMessages)
+		}
+
 		beeline.AddField(spanCtx, "event", jsonMap)
-		beeline.AddField(spanCtx, "gitlab", envVars)
+		beeline.AddField(spanCtx, "github", envVars)
 		eventSpan.Send()
 	}
 	log.Printf("Processed %d protos", cnt)
 }
 
-func HandlePanic() {
-    if err := recover(); err != nil {
-        log.Printf("Recovered from panic: %v\n", err)
-    }
+func ProcessTestLogFile(shouldExtractFailures bool, fileIdx int, file *build_event_stream.File, failuresMap map[string]string, kibanaUrlsMap map[string]string) {
+	testLog, err := GetTestLog(file)
+	if err != nil {
+		errMsg := "Failed to read test log"
+		kibanaUrlsMap["url_"+strconv.Itoa(fileIdx)] = errMsg
+		if shouldExtractFailures {
+			failuresMap["failure_"+strconv.Itoa(fileIdx)] = errMsg
+		}
+	} else {
+		testLogStr := string(testLog)
+		kibanaUrl, err := ExtractKibanaUrlFromTestLog(testLogStr)
+		if err != nil {
+			kibanaUrl = err.Error()
+		}
+		kibanaUrlsMap["url_"+strconv.Itoa(fileIdx)] = kibanaUrl
+		if shouldExtractFailures {
+			failureMsg, err := ExtractFailuresFromTestLog(testLogStr)
+			if err != nil {
+				log.Printf("Couldn't extract failures from file=%v, err: %v\n", file, err)
+				failureMsg = err.Error()
+			}
+			failuresMap["failure_"+strconv.Itoa(fileIdx)] = failureMsg
+		}
+	}
 }
 
-func GetSystemTestFailures(summary *build_event_stream.TestSummary) string {
-	defer HandlePanic()
-	failures := make(map[string]string)
-	failed := summary.GetFailed()
-	idx := 1
-	for _, file := range failed {
-		failure := ""
-		testLog, err := GetTestLog(file)
-		if err != nil {
-			log.Printf("Error when retrieving log %v\n", err)
-			failure = "Failed to retrieve test log"
-		} else {
-			failure, err = ExtractFailuresFromTestLog(string(testLog))
-			if err != nil {
-				log.Printf("Error when processing log %v\n", err)
-				failure = "Failed to extract errors from log"
-			}
+func ConvertMapToString(m map[string]string, testTarget string) string {
+	result := ""
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	// Here we change the default encoding behavior, as urls can contain special symbols like &. We don't want to escape those.
+	encoder.SetEscapeHTML(false)
+	err := encoder.Encode(m)
+	if err != nil {
+		errMsg := "Processing error: Failed to json encode map"
+		log.Printf("%s for target=%s: %v\n", errMsg, testTarget, err)
+		result = errMsg
+	} else {
+		result = buffer.String()
+		// For purely visual purposes, instead of printing an empty map (i.e. {}) in Honeycomb, let's print nothing.
+		if result == "{}" {
+			result = ""
 		}
-		failures["failure_" + strconv.Itoa(idx)] = failure
-		idx += 1
 	}
-	jsonBytes, _ := json.Marshal(failures)
-	return string(jsonBytes)
+	return result
+}
+
+func ExtractFailuresAndKibanaUrls(testTarget string, summary *build_event_stream.TestSummary) (string, string) {
+	// It is important for the script to NOT fail in case of errors/panics when processing system-test logs.
+	// Thus, this function recovers from panic, if one occurs.
+	defer HandlePanic()
+	// These could be lists instead of maps. However, in Honeycomb one can spot a particular failure message (especially verbose one) easier when an index is shown: {failure_1: "error_1", "failure_2": "error_2", ...} vs ["error_1", ... , ].
+	failureMessagesMap := make(map[string]string)
+	kibanaUrlsMap := make(map[string]string)
+	fileIdx := 1
+	for _, file := range summary.GetFailed() {
+		ProcessTestLogFile(true, fileIdx, file, failureMessagesMap, kibanaUrlsMap)
+		fileIdx += 1
+	}
+	for _, file := range summary.GetPassed() {
+		ProcessTestLogFile(false, fileIdx, file, failureMessagesMap, kibanaUrlsMap)
+		fileIdx += 1
+	}
+	kibanaUrls := ConvertMapToString(kibanaUrlsMap, testTarget)
+	failureMessages := ConvertMapToString(failureMessagesMap, testTarget)
+	return kibanaUrls, failureMessages
+}
+
+func HandlePanic() {
+	if err := recover(); err != nil {
+		log.Printf("Recovered from panic: %v\n", err)
+	}
+}
+
+func IsSystemTestTarget(testTarget string) bool {
+	return strings.Contains(testTarget, "//rs/tests/")
 }
 
 func GetTestLog(file *build_event_stream.File) ([]byte, error) {
@@ -229,6 +259,7 @@ func GetTestLog(file *build_event_stream.File) ([]byte, error) {
 	uri := file.GetUri()
 	parsedURI, err := url.Parse(uri)
 	if err != nil {
+		log.Printf("Failed to parse uri %s, error: %v\n", uri, err)
 		return []byte{}, err
 	}
 	if parsedURI.Scheme != "bytestream" {
@@ -280,23 +311,51 @@ func GetTestLog(file *build_event_stream.File) ([]byte, error) {
 }
 
 func ExtractFailuresFromTestLog(testLog string) (string, error) {
-	// First we need to find the "JSON Report" event, which contains all inner errors.
-	reportIdx := strings.Index(testLog, "JSON Report")
+	// First we need to find "json_report_created_event" event in the logs, which contains all inner errors.
+	// Example of report event in the logs:
+	// TIMESTAMP INFO[...] {"event_name":"json_report_created_event","body":{"success":[],"failure":[],"skipped":[]}}
+	reportIdx := strings.Index(testLog, "{\"event_name\":\"json_report_created_event\"")
 	if reportIdx == -1 {
-		return "", errors.New("Json Report was not found in the test log.")
+		err := errors.New("json_report_created_event was not found in the test log.")
+		log.Println(err)
+		return "", err
 	}
 	reportStart := reportIdx + strings.Index(testLog[reportIdx:], "{")
 	reportEnd := reportStart + strings.Index(testLog[reportStart:], "\n")
-	report := testLog[reportStart: reportEnd]
+	report := testLog[reportStart:reportEnd]
 	jsonMap := make(map[string]interface{})
+	errMsg := "json_report_created_event from log couldn't be processed correctly"
 	if err := json.Unmarshal([]byte(report), &jsonMap); err != nil {
-		log.Printf("Failed to unmarshal json bytes to map in JSON Report: %v\n", err)
-		return "", err
+		log.Printf("Failed to unmarshal json bytes to map in json_report_created_event: %v\n", err)
+		return "", fmt.Errorf("%s: %v", errMsg, err)
 	}
-	jsonBytes, err := json.Marshal(jsonMap["failure"])
+	jsonBytesBody, err := json.Marshal(jsonMap["body"])
 	if err != nil {
 		log.Printf("Failed to marshal map: %v\n", err)
-		return "", err
+		return "", fmt.Errorf("%s: %v", errMsg, err)
 	}
-	return string(jsonBytes), nil
+	jsonMap = make(map[string]interface{})
+	if err := json.Unmarshal([]byte(jsonBytesBody), &jsonMap); err != nil {
+		log.Printf("Failed to unmarshal json bytes in the \"body\" of json_report_created_event: %v\n", err)
+		return "", fmt.Errorf("%s: %v", errMsg, err)
+	}
+	jsonBytesFailure, err := json.Marshal(jsonMap["failure"])
+	if err != nil {
+		log.Printf("Failed to marshal map: %v\n", err)
+		return "", fmt.Errorf("%s: %v", errMsg, err)
+	}
+	return string(jsonBytesFailure), nil
+}
+
+func ExtractKibanaUrlFromTestLog(testLog string) (string, error) {
+	// System test log should contain this string.
+	message := "Replica logs will appear in Kibana: "
+	kibanaUrlIdx := strings.Index(testLog, message)
+	if kibanaUrlIdx == -1 {
+		return "", errors.New("Kibana url was not found in the test log.")
+	}
+	kibanaUrlStart := kibanaUrlIdx + len(message)
+	kibanaUrlEnd := kibanaUrlStart + strings.Index(testLog[kibanaUrlStart:], "\n")
+	kibanaUrl := testLog[kibanaUrlStart:kibanaUrlEnd]
+	return kibanaUrl, nil
 }

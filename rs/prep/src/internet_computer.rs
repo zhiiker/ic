@@ -8,22 +8,29 @@
 use std::{
     collections::BTreeMap,
     convert::TryInto,
-    fmt,
     fs::{self, File},
     io,
     path::{Path, PathBuf},
     str::FromStr,
 };
 
-use openssl::pkey;
+use anyhow::{anyhow, Result};
+
+use prost::Message;
 use serde_json::Value;
 use thiserror::Error;
 use url::Url;
+use x509_cert::der; // re-export of der crate
+use x509_cert::spki; // re-export of spki crate
 
 use ic_interfaces_registry::{
     RegistryDataProvider, RegistryTransportRecord, ZERO_REGISTRY_VERSION,
 };
+use ic_protobuf::registry::firewall::v1::{
+    FirewallAction, FirewallRule, FirewallRuleDirection, FirewallRuleSet,
+};
 use ic_protobuf::registry::{
+    api_boundary_node::v1::ApiBoundaryNodeRecord,
     node_operator::v1::NodeOperatorRecord,
     provisional_whitelist::v1::ProvisionalWhitelist as PbProvisionalWhitelist,
     replica_version::v1::{BlessedReplicaVersions, ReplicaVersionRecord},
@@ -34,9 +41,11 @@ use ic_protobuf::registry::{
 use ic_protobuf::types::v1::{PrincipalId as PrincipalIdProto, SubnetId as SubnetIdProto};
 use ic_registry_client::client::RegistryDataProviderError;
 use ic_registry_keys::{
-    make_blessed_replica_versions_key, make_node_operator_record_key,
+    make_api_boundary_node_record_key, make_blessed_replica_versions_key,
+    make_firewall_rules_record_key, make_node_operator_record_key,
     make_provisional_whitelist_record_key, make_replica_version_key, make_routing_table_record_key,
-    make_subnet_list_record_key, make_unassigned_nodes_config_record_key, ROOT_SUBNET_ID_KEY,
+    make_subnet_list_record_key, make_unassigned_nodes_config_record_key, FirewallRulesScope,
+    ROOT_SUBNET_ID_KEY,
 };
 use ic_registry_local_store::{Changelog, KeyMutation, LocalStoreImpl, LocalStoreWriter};
 use ic_registry_proto_data_provider::ProtoRegistryDataProvider;
@@ -45,6 +54,7 @@ use ic_registry_routing_table::{
     routing_table_insert_subnet, CanisterIdRange, RoutingTable, WellFormedError,
     CANISTER_IDS_PER_SUBNET,
 };
+use ic_registry_transport::insert;
 use ic_registry_transport::pb::v1::RegistryMutation;
 use ic_types::{
     CanisterId, PrincipalId, PrincipalIdParseError, RegistryVersion, ReplicaVersion, SubnetId,
@@ -70,7 +80,7 @@ pub const IC_ROOT_PUB_KEY_PATH: &str = "nns_public_key.pem";
 ///
 /// For testing purposes, the bootstrapped nodes can be configured to have a
 /// node operator. The corresponding allowance is the number of configured
-/// initial nodes mulitplied by this value.
+/// initial nodes multiplied by this value.
 pub const INITIAL_NODE_ALLOWANCE_MULTIPLIER: usize = 2;
 
 pub const INITIAL_REGISTRY_VERSION: RegistryVersion = RegistryVersion::new(1);
@@ -80,6 +90,7 @@ pub struct TopologyConfig {
     subnets: BTreeMap<SubnetIndex, SubnetConfig>,
     subnet_ids: BTreeMap<SubnetIndex, SubnetId>,
     unassigned_nodes: BTreeMap<NodeIndex, NodeConfiguration>,
+    api_boundary_nodes: BTreeMap<NodeIndex, NodeConfiguration>,
 }
 
 impl TopologyConfig {
@@ -96,29 +107,47 @@ impl TopologyConfig {
     fn get_routing_table_with_specified_ids_allocation_range(
         &self,
     ) -> Result<RoutingTable, WellFormedError> {
-        let specified_ids_range_start: u64 = 0;
-        let specified_ids_range_end: u64 = u64::MAX / 2;
-
-        let specified_ids_range = CanisterIdRange {
-            start: CanisterId::from(specified_ids_range_start),
-            end: CanisterId::from(specified_ids_range_end),
-        };
-
-        let subnets_allocation_range_start =
-            ((specified_ids_range_end / CANISTER_IDS_PER_SUBNET) + 2) * CANISTER_IDS_PER_SUBNET;
-        let subnets_allocation_range_end =
-            subnets_allocation_range_start + CANISTER_IDS_PER_SUBNET - 1;
-
-        let subnets_allocation_range = CanisterIdRange {
-            start: CanisterId::from(subnets_allocation_range_start),
-            end: CanisterId::from(subnets_allocation_range_end),
-        };
-
         let mut routing_table = RoutingTable::default();
-        let subnet_index = self.subnets.keys().next().unwrap();
-        let subnet_id = self.subnet_ids[subnet_index];
-        routing_table.insert(specified_ids_range, subnet_id)?;
-        routing_table.insert(subnets_allocation_range, subnet_id)?;
+
+        // Calculates specified and subnet allocation ranges based on given start and end.
+        let calculate_ranges = |specified_ids_range_start: u64, specified_ids_range_end: u64| {
+            let specified_ids_range = CanisterIdRange {
+                start: CanisterId::from(specified_ids_range_start),
+                end: CanisterId::from(specified_ids_range_end),
+            };
+
+            let subnets_allocation_range_start =
+                ((specified_ids_range_end / CANISTER_IDS_PER_SUBNET) + 2) * CANISTER_IDS_PER_SUBNET;
+            let subnets_allocation_range_end =
+                subnets_allocation_range_start + CANISTER_IDS_PER_SUBNET - 1;
+
+            let subnets_allocation_range = CanisterIdRange {
+                start: CanisterId::from(subnets_allocation_range_start),
+                end: CanisterId::from(subnets_allocation_range_end),
+            };
+
+            (specified_ids_range, subnets_allocation_range)
+        };
+
+        // Set initial range values.
+        let mut start = 0;
+        let mut end = u64::MAX / 2;
+
+        for (i, &subnet_index) in self.subnets.keys().enumerate() {
+            let subnet_id = self.subnet_ids[&subnet_index];
+            let (specified_ids_range, subnets_allocation_range) = calculate_ranges(start, end);
+
+            // Insert both ranges for the first subnet, only specified range for others.
+            routing_table.insert(specified_ids_range, subnet_id)?;
+            if i == 0 {
+                routing_table.insert(subnets_allocation_range, subnet_id)?;
+            }
+
+            // Adjust start and end for the next subnet.
+            start = end + 1;
+            end = end.saturating_add(CANISTER_IDS_PER_SUBNET);
+        }
+
         Ok(routing_table)
     }
 
@@ -137,6 +166,21 @@ impl TopologyConfig {
             }
         }
         routing_table
+    }
+
+    pub fn insert_api_boundary_node(
+        &mut self,
+        idx: NodeIndex,
+        config: NodeConfiguration,
+    ) -> Result<()> {
+        if config.domain.is_none() {
+            return Err(anyhow!(
+                "Missing domain name: an API boundary node requires a domain name."
+            ));
+        }
+
+        self.api_boundary_nodes.insert(idx, config);
+        Ok(())
     }
 
     pub fn insert_unassigned_node(&mut self, idx: NodeIndex, nc: NodeConfiguration) {
@@ -167,21 +211,6 @@ impl TopologyConfig {
     }
 }
 
-#[derive(Clone)]
-pub struct NodeOperatorPublicKey {
-    pkey_wrapper: pkey::PKey<pkey::Public>,
-}
-
-// We need to implement a wrapper and the debug trait since PKey does not
-// implement Debug
-impl fmt::Debug for NodeOperatorPublicKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("NodeOperatorPublicKey")
-            .field("pkey_wrapper", &self.pkey_wrapper.public_key_to_der())
-            .finish()
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct NodeOperatorEntry {
     _name: String,
@@ -203,8 +232,8 @@ impl From<NodeOperatorEntry> for NodeOperatorRecord {
             node_provider_principal_id: item
                 .node_provider_principal_id
                 .map(|x| x.to_vec())
-                .unwrap_or_else(Vec::new),
-            dc_id: item.dc_id,
+                .unwrap_or_default(),
+            dc_id: item.dc_id.to_lowercase(),
             rewardable_nodes: item.rewardable_nodes,
             ipv6: item.ipv6,
         }
@@ -213,6 +242,7 @@ impl From<NodeOperatorEntry> for NodeOperatorRecord {
 
 pub type InitializedTopology = BTreeMap<SubnetIndex, InitializedSubnet>;
 pub type UnassignedNodes = BTreeMap<NodeIndex, InitializedNode>;
+pub type ApiBoundaryNodes = BTreeMap<NodeIndex, InitializedNode>;
 
 #[derive(Clone, Debug)]
 pub struct IcConfig {
@@ -266,11 +296,16 @@ pub struct IcConfig {
     /// run with --use_specified_ids_allocation_range flag.
     use_specified_ids_allocation_range: bool,
 
-    /// The hex-formatted SHA-256 hash measurement of the SEV guest launch context.
-    initial_guest_launch_measurement_sha256_hex: Option<String>,
+    /// Whitelisted firewall prefixes for initial registry state, separated by
+    /// commas.
+    whitelisted_prefixes: Option<String>,
+
+    /// Whitelisted ports for the firewall prefixes, separated by
+    /// commas. Port 8080 is always included.
+    whitelisted_ports: Option<String>,
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum InitializeError {
     #[error("io error: {source}")]
     IoError {
@@ -282,12 +317,6 @@ pub enum InitializeError {
     JsonError {
         #[from]
         source: serde_json::Error,
-    },
-
-    #[error("OpenSSL error: {source}")]
-    OpenSslError {
-        #[from]
-        source: openssl::error::ErrorStack,
     },
 
     #[error("principal did not parse: {source}")]
@@ -332,11 +361,21 @@ impl IcConfig {
         self.provisional_whitelist = Some(provisional_whitelist);
     }
 
+    /// Set whitelisted firewall prefixes for initial registry state, where
+    /// each are separated by commas.
+    pub fn set_whitelisted_prefixes(&mut self, whitelisted_prefixes: Option<String>) {
+        self.whitelisted_prefixes = whitelisted_prefixes;
+    }
+
+    pub fn set_whitelisted_ports(&mut self, whitelisted_ports: Option<String>) {
+        self.whitelisted_ports = whitelisted_ports;
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new<P: AsRef<Path>>(
         target_dir: P,
         topology_config: TopologyConfig,
-        replica_version_id: Option<ReplicaVersion>,
+        replica_version_id: ReplicaVersion,
         generate_subnet_records: bool,
         nns_subnet_index: Option<u64>,
         release_package_url: Option<Url>,
@@ -345,12 +384,11 @@ impl IcConfig {
         initial_node_operator: Option<PrincipalId>,
         initial_node_provider: Option<PrincipalId>,
         ssh_readonly_access_to_unassigned_nodes: Vec<String>,
-        initial_guest_launch_measurement_sha256_hex: Option<String>,
     ) -> Self {
         Self {
             target_dir: PathBuf::from(target_dir.as_ref()),
             topology_config,
-            initial_replica_version_id: replica_version_id.unwrap_or_default(),
+            initial_replica_version_id: replica_version_id,
             generate_subnet_records,
             nns_subnet_index,
             initial_release_package_url: release_package_url,
@@ -362,7 +400,8 @@ impl IcConfig {
             initial_node_provider,
             ssh_readonly_access_to_unassigned_nodes,
             use_specified_ids_allocation_range: false,
-            initial_guest_launch_measurement_sha256_hex,
+            whitelisted_prefixes: None,
+            whitelisted_ports: None,
         }
     }
 
@@ -379,9 +418,40 @@ impl IcConfig {
     /// * ... a registry file to be used as a static registry
     pub fn initialize(mut self) -> Result<InitializedIc, InitializeError> {
         let version = INITIAL_REGISTRY_VERSION;
+
+        let mut mutations = self.initial_mutations.clone();
+
+        if let Some(prefixes) = self.whitelisted_prefixes {
+            let ports = if let Some(ports) = self.whitelisted_ports {
+                ports
+                    .split(',')
+                    .map(|port| port.parse::<u32>().unwrap())
+                    .chain(std::iter::once(8080))
+                    .collect()
+            } else {
+                vec![8080]
+            };
+
+            mutations.extend(vec![insert(
+                make_firewall_rules_record_key(&FirewallRulesScope::Global),
+                FirewallRuleSet {
+                    entries: vec![FirewallRule {
+                        ipv4_prefixes: Vec::new(),
+                        ipv6_prefixes: prefixes.split(',').map(|v| v.to_string()).collect(),
+                        ports,
+                        action: FirewallAction::Allow as i32,
+                        comment: "Globally allow provided prefixes for testing".to_string(),
+                        user: None,
+                        direction: Some(FirewallRuleDirection::Inbound as i32),
+                    }],
+                }
+                .encode_to_vec(),
+            )]);
+        }
+
         let data_provider = ProtoRegistryDataProvider::new();
         data_provider
-            .add_mutations(self.initial_mutations.clone())
+            .add_mutations(mutations)
             .expect("Failed to add initial mutations");
         let mut initialized_topology = InitializedTopology::new();
 
@@ -432,11 +502,36 @@ impl IcConfig {
             unassigned_nodes.insert(*n_idx, init_node);
         }
 
+        let mut api_boundary_nodes = BTreeMap::new();
+        for (n_idx, nc) in self.topology_config.api_boundary_nodes.iter() {
+            // create all the registry entries for the node
+            let node_path = InitializedSubnet::build_node_path(self.target_dir.as_path(), *n_idx);
+            let init_node = nc.clone().initialize(node_path)?;
+            init_node.write_registry_entries(&data_provider, version)?;
+            api_boundary_nodes.insert(*n_idx, init_node.clone());
+
+            // create the API boundary node registry entry
+            let api_bn_record = ApiBoundaryNodeRecord {
+                version: self.initial_replica_version_id.to_string(),
+            };
+            write_registry_entry(
+                &data_provider,
+                self.target_dir.as_path(),
+                &make_api_boundary_node_record_key(init_node.node_id),
+                version,
+                api_bn_record,
+            );
+        }
+
         // Set the routing table after initializing the subnet ids
         let routing_table_record = if self.generate_subnet_records {
             PbRoutingTable::from(if self.use_specified_ids_allocation_range {
-                self.topology_config.get_routing_table_with_specified_ids_allocation_range(
-                ).expect("Failed to create a routing table with an allocation range for the creation of canisters with specified Canister IDs.")
+                self.topology_config
+                    .get_routing_table_with_specified_ids_allocation_range()
+                    .expect(
+                        "Failed to create a routing table with an allocation range \
+                         for the creation of canisters with specified Canister IDs.",
+                    )
             } else {
                 self.topology_config
                     .get_routing_table(self.nns_subnet_index.as_ref())
@@ -501,7 +596,7 @@ impl IcConfig {
         let replica_version_record = ReplicaVersionRecord {
             release_package_sha256_hex: self.initial_release_package_sha256_hex.unwrap_or_default(),
             release_package_urls: opturl_to_string_vec(self.initial_release_package_url),
-            guest_launch_measurement_sha256_hex: self.initial_guest_launch_measurement_sha256_hex,
+            guest_launch_measurement_sha256_hex: None,
         };
 
         let blessed_replica_versions_record = BlessedReplicaVersions {
@@ -604,20 +699,11 @@ impl IcConfig {
             registry_store.store(v, cle)
         })?;
 
-        // Set certified time.
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Could not get system time");
-        let nanos = now.as_nanos() as u64;
-        registry_store
-            .update_certified_time(nanos)
-            .expect("Could not update certified time.");
-
         Ok(InitializedIc {
             target_dir: self.target_dir,
             initialized_topology,
             unassigned_nodes,
+            api_boundary_nodes,
         })
     }
 
@@ -747,7 +833,18 @@ impl IcConfig {
                     }),
                 }?;
                 let provider_buf: Vec<u8> = fs::read(provider_path.as_path())?;
-                let _ = pkey::PKey::public_key_from_der(&provider_buf)?;
+
+                // Sanity check that public key is in DER format.
+                use der::Decode;
+                spki::SubjectPublicKeyInfoOwned::from_der(&provider_buf).map_err(|e| {
+                    InitializeError::IoError {
+                        source: io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!("input is not a DER-encoded X.509 SubjectPublicKeyInfo (SPKI): {e}."),
+                        ),
+                    }
+                })?;
+
                 Some(PrincipalId::new_self_authenticating(&provider_buf))
             } else {
                 None
@@ -774,6 +871,7 @@ pub struct InitializedIc {
     pub target_dir: PathBuf,
     pub initialized_topology: InitializedTopology,
     pub unassigned_nodes: UnassignedNodes,
+    pub api_boundary_nodes: ApiBoundaryNodes,
 }
 
 impl InitializedIc {

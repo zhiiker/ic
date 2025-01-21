@@ -1,7 +1,5 @@
-#![allow(clippy::unwrap_used)]
 mod keygen {
-
-    use crate::{keypair_from_rng, public_key_from_der};
+    use crate::keypair_from_rng;
     use ic_crypto_internal_test_vectors::unhex::hex_to_32_bytes;
     use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;
@@ -21,9 +19,24 @@ mod keygen {
             hex_to_32_bytes("78eda21ba04a15e2000fe8810fe3e56741d23bb9ae44aa9d5bb21b76675ff34b")
         );
     }
+}
+
+mod serialization {
+    use crate::types::{PublicKeyBytes, SecretKeyBytes};
+    use crate::{
+        public_key_from_der, secret_key_from_pkcs8_v1_der, secret_key_to_pkcs8_v1_der,
+        secret_key_to_pkcs8_v2_der, KeyDecodingError,
+    };
+    use assert_matches::assert_matches;
+    use ic_crypto_internal_test_vectors::unhex::hex_to_32_bytes;
+    use ic_crypto_secrets_containers::{SecretArray, SecretBytes};
 
     // Example DER-pk from https://tools.ietf.org/html/rfc8410#section-10.1
     const PK_DER_BASE64: &str = "MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE";
+
+    // Example DER-sk from https://tools.ietf.org/html/rfc8410#section-10.3
+    const SK_DER_BASE64: &str = "MC4CAQAwBQYDK2VwBCIEINTuctv5E1hK1bbY8fdp+K06/nwoy/HU++CXqI9EdVhC";
+    const SK_RAW_HEX: &str = "D4EE72DBF913584AD5B6D8F1F769F8AD3AFE7C28CBF1D4FBE097A88F44755842";
 
     // Example ECDSA DER-encoded key, for testing.
     const ECDSA_P256_PK_1_DER_HEX : &str = "3059301306072a8648ce3d020106082a8648ce3d03010703420004485c32997ce7c6d38ca82c821185c689d424fac7c9695bb97786c4248aab6428949bcd163e2bcf3eeeac4f200b38fbd053f82c4e1776dc9c6dc8db9b7c35e06f";
@@ -63,6 +76,75 @@ mod keygen {
         let pk_result = public_key_from_der(&pk_der);
         assert!(pk_result.is_err());
         assert!(pk_result.unwrap_err().is_malformed_public_key());
+    }
+
+    #[test]
+    fn should_correctly_parse_der_encoded_sk() {
+        let sk_der = SecretBytes::new(base64::decode(SK_DER_BASE64).unwrap());
+        let expected_sk = hex_to_32_bytes(SK_RAW_HEX);
+        assert_matches!(secret_key_from_pkcs8_v1_der(&sk_der), Ok(secret_key)
+            if secret_key.0.expose_secret() == &expected_sk
+        );
+    }
+
+    #[test]
+    fn should_fail_parsing_a_corrupted_der_encoded_sk() {
+        let mut sk_der = base64::decode(SK_DER_BASE64).unwrap();
+        sk_der[0] += 1;
+        assert_matches!(
+            secret_key_from_pkcs8_v1_der(&SecretBytes::new(sk_der)),
+            Err(KeyDecodingError::InvalidEncoding(_))
+        );
+    }
+
+    #[test]
+    fn should_fail_parsing_der_encoded_sk_of_wrong_length() {
+        let mut sk_der = base64::decode(SK_DER_BASE64).unwrap();
+        sk_der.push(0);
+        assert_eq!(sk_der.len(), 49);
+        assert_matches!(
+            secret_key_from_pkcs8_v1_der(&SecretBytes::new(sk_der)),
+            Err(KeyDecodingError::InvalidEncoding(_))
+        );
+    }
+
+    #[test]
+    fn should_correctly_encode_sk_as_pkcs8_v1_der() {
+        let sk_bytes = SecretKeyBytes(SecretArray::new_and_dont_zeroize_argument(
+            &hex_to_32_bytes(SK_RAW_HEX),
+        ));
+        let sk_expected = SecretBytes::new(base64::decode(SK_DER_BASE64).unwrap());
+
+        let sk_der = secret_key_to_pkcs8_v1_der(&sk_bytes);
+
+        assert_eq!(sk_der, sk_expected);
+    }
+
+    #[test]
+    fn should_correctly_encode_sk_as_pkcs8_v2_der() {
+        let sk_raw = [
+            23, 222, 179, 132, 243, 182, 175, 46, 55, 255, 145, 82, 212, 63, 65, 46, 184, 145, 149,
+            235, 110, 217, 184, 26, 140, 179, 27, 0, 1, 223, 93, 27,
+        ];
+        let pk_raw = [
+            166, 67, 137, 39, 17, 63, 64, 114, 183, 163, 58, 74, 233, 230, 14, 103, 51, 197, 76,
+            214, 93, 201, 74, 166, 220, 49, 145, 172, 32, 154, 60, 17,
+        ];
+        let sk_pkcs8_v2_der = [
+            48, 83, 2, 1, 1, 48, 5, 6, 3, 43, 101, 112, 4, 34, 4, 32, 23, 222, 179, 132, 243, 182,
+            175, 46, 55, 255, 145, 82, 212, 63, 65, 46, 184, 145, 149, 235, 110, 217, 184, 26, 140,
+            179, 27, 0, 1, 223, 93, 27, 161, 35, 3, 33, 0, 166, 67, 137, 39, 17, 63, 64, 114, 183,
+            163, 58, 74, 233, 230, 14, 103, 51, 197, 76, 214, 93, 201, 74, 166, 220, 49, 145, 172,
+            32, 154, 60, 17,
+        ];
+
+        let sk = SecretKeyBytes(SecretArray::new_and_dont_zeroize_argument(&sk_raw));
+        let pk = PublicKeyBytes(pk_raw);
+
+        assert_eq!(
+            secret_key_to_pkcs8_v2_der(&sk, &pk),
+            SecretBytes::new(sk_pkcs8_v2_der.to_vec())
+        );
     }
 
     // TODO(CRP-616) Add more failure tests with corrupted DER-keys.
@@ -164,9 +246,8 @@ mod sign {
 }
 
 mod wycheproof {
-    use crate::api::SecretArray;
-    use crate::types::{PublicKeyBytes, SecretKeyBytes, SignatureBytes};
-    use crate::{sign, verify};
+    use crate::types::{PublicKeyBytes, SignatureBytes};
+    use crate::verify;
     use std::convert::TryInto;
 
     #[test]
@@ -175,10 +256,14 @@ mod wycheproof {
             .expect("Unable to load tests");
 
         for test_group in test_set.test_groups {
-            let pk = PublicKeyBytes(test_group.key.pk.try_into().expect("Unexpected key size"));
-
-            let sk_bytes: [u8; 32] = test_group.key.sk.try_into().expect("Unexpected key size");
-            let sk = SecretKeyBytes(SecretArray::new_and_dont_zeroize_argument(&sk_bytes));
+            let pk = PublicKeyBytes(
+                test_group
+                    .key
+                    .pk
+                    .as_ref()
+                    .try_into()
+                    .expect("Unexpected key size"),
+            );
 
             for test in test_group.tests {
                 /*
@@ -188,20 +273,16 @@ mod wycheproof {
                 if test.sig.len() != 64 {
                     continue;
                 }
-                let test_sig =
-                    SignatureBytes(test.sig.try_into().expect("Unexpected signature size"));
-
-                let gen_sig = sign(&test.msg, &sk).expect("Generating signature failed");
+                let test_sig = SignatureBytes(
+                    test.sig
+                        .as_ref()
+                        .try_into()
+                        .expect("Unexpected signature size"),
+                );
 
                 if test.result == wycheproof::TestResult::Valid {
-                    // If test is valid verify that our generated signature matches (Ed25519 should
-                    // be deterministic) and that the signature verifies
                     assert!(verify(&test_sig, &test.msg, &pk).is_ok());
-                    assert_eq!(test_sig, gen_sig);
                 } else {
-                    // Otherwise check that the test signature fails but our generated signature
-                    // is accepted
-                    assert!(verify(&gen_sig, &test.msg, &pk).is_ok());
                     assert!(verify(&test_sig, &test.msg, &pk).is_err());
                 }
             }
@@ -211,17 +292,11 @@ mod wycheproof {
 
 mod verify {
     use crate::types::{PublicKeyBytes, SecretKeyBytes, SignatureBytes};
-    use crate::{
-        keypair_from_rng, public_key_from_der, public_key_to_der, sign, verify, verify_batch,
-    };
-    use ic_crypto_internal_seed::Seed;
+    use crate::{public_key_from_der, public_key_to_der, sign, verify};
     use ic_crypto_internal_test_vectors::ed25519::Ed25519TestVector::RFC8032_ED25519_1;
     use ic_crypto_internal_test_vectors::ed25519::Ed25519TestVector::RFC8032_ED25519_SHA_ABC;
     use ic_crypto_internal_test_vectors::ed25519::{crypto_lib_testvec, Ed25519TestVector};
     use ic_crypto_secrets_containers::SecretArray;
-    use ic_crypto_test_utils_reproducible_rng::reproducible_rng;
-    use ic_types::crypto::CryptoResult;
-    use rand::RngCore;
     use strum::IntoEnumIterator;
 
     #[test]
@@ -237,138 +312,6 @@ mod verify {
                 test_vec
             );
         }
-    }
-
-    #[test]
-    fn should_correctly_verify_batches_of_signatures_using_different_keys_on_same_message(
-    ) -> CryptoResult<()> {
-        const INPUT_SIZES: [usize; 9] = [1, 2, 3, 4, 5, 10, 30, 50, 100];
-        const NUM_ITERATIONS: usize = 10;
-        let mut rng = reproducible_rng();
-
-        let corrupt_sig = |sig: &SignatureBytes| {
-            let mut sig_copy = sig.to_owned();
-            sig_copy.0[0] ^= 1u8;
-            sig_copy
-        };
-
-        let verify_consistent_error = |key_sig_pairs: &[(&PublicKeyBytes, &SignatureBytes)],
-                                       msg: &[u8],
-                                       seed: Seed| {
-            let verification_returned_error = key_sig_pairs
-                .iter()
-                .map(|(pk, sig)| verify(sig, msg, pk))
-                .collect::<Result<Vec<_>, _>>()
-                .is_err();
-            assert!(verification_returned_error);
-
-            let batch_verification_returned_error = verify_batch(key_sig_pairs, msg, seed).is_err();
-            // one-by-one and batch verification should return consistent verification results
-            assert_eq!(
-                verification_returned_error,
-                batch_verification_returned_error
-            );
-        };
-
-        for input_size in INPUT_SIZES {
-            for _ in 0..NUM_ITERATIONS {
-                // random message
-                let mut msg = [0u8; 32];
-                rng.fill_bytes(&mut msg[..]);
-
-                // random secret/public key pairs
-                let key_pairs: Vec<_> = (0..input_size)
-                    .map(|_| keypair_from_rng(&mut rng))
-                    .collect();
-
-                // correct signatures of `msg`
-                let sigs: Vec<_> = key_pairs
-                    .iter()
-                    .map(|pair| sign(&msg[..], &pair.0))
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                // pairs of refs of correct keys and sigs
-                let key_sig_pairs: Vec<_> = key_pairs
-                    .iter()
-                    .zip(sigs.iter())
-                    .map(|((_sk, pk), sig)| (pk, sig))
-                    .collect();
-
-                // everything correct, should verify correctly
-                verify_batch(&key_sig_pairs, &msg, Seed::from_rng(&mut rng))?;
-
-                // corrupt each signature by flipping a bit and check that both batched and non-batched verification return an error
-                {
-                    let corrupt_sigs: Vec<_> = sigs.iter().map(|sig| corrupt_sig(sig)).collect();
-                    let key_corrupt_sig_pairs: Vec<_> = key_pairs
-                        .iter()
-                        .zip(corrupt_sigs.iter())
-                        .map(|((_sk, pk), sig)| (pk, sig))
-                        .collect();
-                    verify_consistent_error(&key_corrupt_sig_pairs, &msg, Seed::from_rng(&mut rng));
-                }
-
-                // corrupt one randomly selected signature by flipping a bit and check that both batched and non-batched verification return an error
-                {
-                    let corrupt_pos = rng.next_u32() as usize % sigs.len();
-                    let mut corrupt_sigs: Vec<_> = sigs.clone();
-                    corrupt_sigs[corrupt_pos] = corrupt_sig(&corrupt_sigs[corrupt_pos]);
-
-                    let key_corrupt_sig_pairs: Vec<_> = key_pairs
-                        .iter()
-                        .zip(corrupt_sigs.iter())
-                        .map(|((_sk, pk), sig)| (pk, sig))
-                        .collect();
-                    verify_consistent_error(&key_corrupt_sig_pairs, &msg, Seed::from_rng(&mut rng));
-                }
-
-                if input_size > 1 {
-                    // positions to swap
-                    let pos_0 = rng.next_u32() as usize % sigs.len();
-                    let pos_1 = loop {
-                        let pos = rng.next_u32() as usize % sigs.len();
-                        if pos != pos_0 {
-                            break pos;
-                        }
-                    };
-
-                    // check that the verification fails for both batched and non-batched verification for swapped public keys
-                    {
-                        let mut corrupt_key_pairs = key_pairs.clone();
-                        corrupt_key_pairs.swap(pos_0, pos_1);
-
-                        let corrupt_key_sig_pairs: Vec<_> = corrupt_key_pairs
-                            .iter()
-                            .zip(sigs.iter())
-                            .map(|((_sk, pk), sig)| (pk, sig))
-                            .collect();
-                        verify_consistent_error(
-                            &corrupt_key_sig_pairs,
-                            &msg,
-                            Seed::from_rng(&mut rng),
-                        );
-                    }
-
-                    // check that the verification fails for both batched and non-batched verification for swapped sigs
-                    {
-                        let mut corrupt_sigs = sigs.clone();
-                        corrupt_sigs.swap(pos_0, pos_1);
-
-                        let key_corrupt_sig_pairs: Vec<_> = key_pairs
-                            .iter()
-                            .zip(corrupt_sigs.iter())
-                            .map(|((_sk, pk), sig)| (pk, sig))
-                            .collect();
-                        verify_consistent_error(
-                            &key_corrupt_sig_pairs,
-                            &msg,
-                            Seed::from_rng(&mut rng),
-                        );
-                    }
-                }
-            }
-        }
-        Ok(())
     }
 
     #[test]
@@ -524,12 +467,15 @@ mod non_malleability {
 
     #[test]
     fn should_fail_to_verify_malleable_signature() {
+        #[allow(deprecated)]
+        let basepoint = curve25519_dalek::constants::BASEPOINT_ORDER.as_bytes();
+
         for test_vec in Ed25519TestVector::iter() {
             let (_sk, pk, msg, mut sig) = crypto_lib_testvec(test_vec);
 
             // Add curve order (L) to the S-element of the valid signature (R || S)
             let s = BigUint::from_bytes_le(&sig[32..]); // little-endian according to RFC8032
-            let l = BigUint::from_bytes_le(curve25519_dalek::constants::BASEPOINT_ORDER.as_bytes());
+            let l = BigUint::from_bytes_le(basepoint);
             sig[32..].copy_from_slice(&(s + l).to_bytes_le());
 
             let result = verify(&SignatureBytes(sig), &msg, &PublicKeyBytes(pk));

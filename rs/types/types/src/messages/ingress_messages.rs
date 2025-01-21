@@ -2,16 +2,20 @@
 
 use super::{MessageId, EXPECTED_MESSAGE_ID_LENGTH};
 use crate::{
+    artifact::{IdentifiableArtifact, IngressMessageId, PbArtifact},
     messages::{
-        http::{representation_indepent_hash_call_or_query, CallOrQuery},
+        http::{representation_independent_hash_call_or_query, CallOrQuery},
         Authentication, HasCanisterId, HttpCallContent, HttpCanisterUpdate, HttpRequest,
         HttpRequestContent, HttpRequestEnvelope, HttpRequestError, SignedRequestBytes,
     },
     CanisterId, CountBytes, PrincipalId, SubnetId, Time, UserId,
 };
 use ic_error_types::{ErrorCode, UserError};
-use ic_ic00_types::{
-    CanisterIdRecord, InstallCodeArgs, Method, Payload, SetControllerArgs, UpdateSettingsArgs,
+use ic_management_canister_types::{
+    CanisterIdRecord, CanisterInfoRequest, ClearChunkStoreArgs, DeleteCanisterSnapshotArgs,
+    InstallChunkedCodeArgs, InstallCodeArgsV2, ListCanisterSnapshotArgs, LoadCanisterSnapshotArgs,
+    Method, Payload, StoredChunksArgs, TakeCanisterSnapshotArgs, UpdateSettingsArgs,
+    UploadChunkArgs, IC_00,
 };
 use ic_protobuf::{
     log::ingress_message_log_entry::v1::IngressMessageLogEntry,
@@ -19,15 +23,18 @@ use ic_protobuf::{
     state::ingress::v1 as pb_ingress,
     types::v1 as pb_types,
 };
+use ic_validate_eq::ValidateEq;
+use ic_validate_eq_derive::ValidateEq;
+use prost::bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use std::{
     convert::{From, TryFrom, TryInto},
     mem::size_of,
+    str::FromStr,
 };
 
 /// The contents of a signed ingress message.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Deserialize, Serialize)]
 pub struct SignedIngressContent {
     sender: UserId,
     canister_id: CanisterId,
@@ -96,7 +103,7 @@ impl HasCanisterId for SignedIngressContent {
 
 impl HttpRequestContent for SignedIngressContent {
     fn id(&self) -> MessageId {
-        MessageId::from(representation_indepent_hash_call_or_query(
+        MessageId::from(representation_independent_hash_call_or_query(
             CallOrQuery::Call,
             self.canister_id.get().into_vec(),
             &self.method_name,
@@ -156,6 +163,21 @@ pub struct SignedIngress {
     binary: SignedRequestBytes,
 }
 
+impl IdentifiableArtifact for SignedIngress {
+    const NAME: &'static str = "ingress";
+    type Id = IngressMessageId;
+    fn id(&self) -> Self::Id {
+        self.into()
+    }
+}
+
+impl PbArtifact for SignedIngress {
+    type PbId = ic_protobuf::types::v1::IngressMessageId;
+    type PbIdError = ProxyDecodeError;
+    type PbMessage = Bytes;
+    type PbMessageError = ProxyDecodeError;
+}
+
 impl PartialEq for SignedIngress {
     fn eq(&self, other: &Self) -> bool {
         self.binary.eq(&other.binary)
@@ -188,6 +210,21 @@ impl From<SignedIngress> for SignedIngressContent {
     }
 }
 
+impl From<SignedIngress> for Bytes {
+    fn from(value: SignedIngress) -> Self {
+        Self::copy_from_slice(value.binary().as_ref())
+    }
+}
+
+impl TryFrom<Bytes> for SignedIngress {
+    type Error = ProxyDecodeError;
+    fn try_from(value: Bytes) -> Result<Self, Self::Error> {
+        SignedRequestBytes::from(value.to_vec())
+            .try_into()
+            .map_err(|e| ProxyDecodeError::CborDecodeError(Box::new(e)))
+    }
+}
+
 impl Serialize for SignedIngress {
     fn serialize<S: serde::ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_bytes(self.binary.as_ref())
@@ -198,7 +235,7 @@ impl<'de> Deserialize<'de> for SignedIngress {
     fn deserialize<D: serde::de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct BytesVisitor;
 
-        impl<'de> serde::de::Visitor<'de> for BytesVisitor {
+        impl serde::de::Visitor<'_> for BytesVisitor {
             type Value = Vec<u8>;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -316,13 +353,14 @@ impl CountBytes for SignedIngress {
 ///
 /// Used internally by the InternetComputer. See related [`SignedIngress`] for
 /// the message as it was received from the `HttpHandler`.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, Eq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Deserialize, Serialize, ValidateEq)]
 pub struct Ingress {
     pub source: UserId,
     pub receiver: CanisterId,
     pub effective_canister_id: Option<CanisterId>,
     pub method_name: String,
     #[serde(with = "serde_bytes")]
+    #[validate_eq(Ignore)]
     pub method_payload: Vec<u8>,
     pub message_id: MessageId,
     pub expiry_time: Time,
@@ -410,13 +448,13 @@ impl CountBytes for Ingress {
 }
 
 /// Errors returned when parsing an ingress payload.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Eq, PartialEq, Debug)]
 pub enum ParseIngressError {
     /// The requested subnet method is not available.
     UnknownSubnetMethod,
     /// Failed to parse method payload.
     InvalidSubnetPayload(String),
-    /// The subnet method can be called only by a canister.
+    /// The subnet method can not be called via ingress messages.
     SubnetMethodNotAllowed,
 }
 
@@ -430,7 +468,7 @@ impl ParseIngressError {
             ParseIngressError::SubnetMethodNotAllowed => UserError::new(
                 ErrorCode::CanisterRejectedMessage,
                 format!(
-                    "ic00 method {} can be called only by a canister",
+                    "ic00 method {} can not be called via ingress messages",
                     method_name
                 ),
             ),
@@ -465,18 +503,55 @@ pub fn extract_effective_canister_id(
             Ok(record) => Ok(Some(record.get_canister_id())),
             Err(err) => Err(ParseIngressError::InvalidSubnetPayload(err.to_string())),
         },
+        Ok(Method::CanisterInfo) => match CanisterInfoRequest::decode(ingress.arg()) {
+            Ok(record) => Ok(Some(record.canister_id())),
+            Err(err) => Err(ParseIngressError::InvalidSubnetPayload(err.to_string())),
+        },
         Ok(Method::UpdateSettings) => match UpdateSettingsArgs::decode(ingress.arg()) {
             Ok(record) => Ok(Some(record.get_canister_id())),
             Err(err) => Err(ParseIngressError::InvalidSubnetPayload(err.to_string())),
         },
-        Ok(Method::SetController) => match SetControllerArgs::decode(ingress.arg()) {
+        Ok(Method::InstallCode) => match InstallCodeArgsV2::decode(ingress.arg()) {
             Ok(record) => Ok(Some(record.get_canister_id())),
             Err(err) => Err(ParseIngressError::InvalidSubnetPayload(err.to_string())),
         },
-        Ok(Method::InstallCode) => match InstallCodeArgs::decode(ingress.arg()) {
+        Ok(Method::InstallChunkedCode) => match InstallChunkedCodeArgs::decode(ingress.arg()) {
+            Ok(record) => Ok(Some(record.target_canister_id())),
+            Err(err) => Err(ParseIngressError::InvalidSubnetPayload(err.to_string())),
+        },
+        Ok(Method::UploadChunk) => match UploadChunkArgs::decode(ingress.arg()) {
             Ok(record) => Ok(Some(record.get_canister_id())),
             Err(err) => Err(ParseIngressError::InvalidSubnetPayload(err.to_string())),
         },
+        Ok(Method::ClearChunkStore) => match ClearChunkStoreArgs::decode(ingress.arg()) {
+            Ok(record) => Ok(Some(record.get_canister_id())),
+            Err(err) => Err(ParseIngressError::InvalidSubnetPayload(err.to_string())),
+        },
+        Ok(Method::StoredChunks) => match StoredChunksArgs::decode(ingress.arg()) {
+            Ok(record) => Ok(Some(record.get_canister_id())),
+            Err(err) => Err(ParseIngressError::InvalidSubnetPayload(err.to_string())),
+        },
+        Ok(Method::TakeCanisterSnapshot) => match TakeCanisterSnapshotArgs::decode(ingress.arg()) {
+            Ok(record) => Ok(Some(record.get_canister_id())),
+            Err(err) => Err(ParseIngressError::InvalidSubnetPayload(err.to_string())),
+        },
+        Ok(Method::LoadCanisterSnapshot) => match LoadCanisterSnapshotArgs::decode(ingress.arg()) {
+            Ok(record) => Ok(Some(record.get_canister_id())),
+            Err(err) => Err(ParseIngressError::InvalidSubnetPayload(err.to_string())),
+        },
+        Ok(Method::ListCanisterSnapshots) => {
+            match ListCanisterSnapshotArgs::decode(ingress.arg()) {
+                Ok(record) => Ok(Some(record.get_canister_id())),
+                Err(err) => Err(ParseIngressError::InvalidSubnetPayload(err.to_string())),
+            }
+        }
+        Ok(Method::DeleteCanisterSnapshot) => {
+            match DeleteCanisterSnapshotArgs::decode(ingress.arg()) {
+                Ok(record) => Ok(Some(record.get_canister_id())),
+                Err(err) => Err(ParseIngressError::InvalidSubnetPayload(err.to_string())),
+            }
+        }
+
         Ok(Method::CreateCanister)
         | Ok(Method::SetupInitialDKG)
         | Ok(Method::DepositCycles)
@@ -484,18 +559,32 @@ pub fn extract_effective_canister_id(
         | Ok(Method::RawRand)
         | Ok(Method::ECDSAPublicKey)
         | Ok(Method::SignWithECDSA)
-        | Ok(Method::ComputeInitialEcdsaDealings)
+        | Ok(Method::ComputeInitialIDkgDealings)
+        | Ok(Method::ReshareChainKey)
+        | Ok(Method::SchnorrPublicKey)
+        | Ok(Method::SignWithSchnorr)
+        | Ok(Method::VetKdPublicKey)
+        | Ok(Method::VetKdDeriveEncryptedKey)
         | Ok(Method::BitcoinGetBalance)
         | Ok(Method::BitcoinGetUtxos)
+        | Ok(Method::BitcoinGetBlockHeaders)
         | Ok(Method::BitcoinSendTransaction)
         | Ok(Method::BitcoinSendTransactionInternal)
         | Ok(Method::BitcoinGetSuccessors)
-        | Ok(Method::BitcoinGetCurrentFeePercentiles) => {
+        | Ok(Method::BitcoinGetCurrentFeePercentiles)
+        | Ok(Method::NodeMetricsHistory)
+        | Ok(Method::SubnetInfo)
+        | Ok(Method::FetchCanisterLogs) => {
             // Subnet method not allowed for ingress.
             Err(ParseIngressError::SubnetMethodNotAllowed)
         }
         Err(_) => Err(ParseIngressError::UnknownSubnetMethod),
     }
+}
+
+/// Checks whether the given canister ID refers to the subnet (directly or as `IC_00`).
+pub fn is_subnet_id(canister_id: CanisterId, own_subnet_id: SubnetId) -> bool {
+    canister_id == IC_00 || canister_id.get_ref() == own_subnet_id.get_ref()
 }
 
 #[cfg(test)]
@@ -505,7 +594,7 @@ mod test {
     };
     use crate::{CanisterId, SubnetId, UserId};
     use ic_base_types::PrincipalId;
-    use ic_ic00_types::IC_00;
+    use ic_management_canister_types::IC_00;
     use std::convert::From;
 
     #[test]
@@ -547,8 +636,4 @@ mod test {
             );
         }
     }
-}
-
-fn is_subnet_id(canister_id: CanisterId, own_subnet_id: SubnetId) -> bool {
-    canister_id == CanisterId::ic_00() || canister_id.get_ref() == own_subnet_id.get_ref()
 }

@@ -4,7 +4,7 @@ use crate::common::MAX_ALGORITHM_ID_INDEX;
 #[test]
 fn should_be_maximal_algorithm_index_id_to_ensure_all_variants_covered_by_strategy() {
     assert_eq!(
-        AlgorithmId::MegaSecp256k1,
+        AlgorithmId::ThresholdEd25519,
         AlgorithmId::from(MAX_ALGORITHM_ID_INDEX)
     );
     assert_eq!(
@@ -14,14 +14,14 @@ fn should_be_maximal_algorithm_index_id_to_ensure_all_variants_covered_by_strate
 }
 
 macro_rules! should_have_a_strategy_for_each_variant {
-    ($enum_name:ty, $base_case:expr, $($variant:ident $pattern:tt),+ $(,)?) => {
+    ($enum_name:ty, $base_case:expr, $($variant:ident $($pattern:tt)?),+ $(,)?) => {
         paste::paste! {
             #[test]
             fn [<should_have_a_strategy_for_each_variant_of_ $enum_name:snake >]() {
                 let error_to_match = $base_case;
                 let _ = match error_to_match {
                     $(
-                    $enum_name::$variant $pattern => proptest::strategy::Strategy::boxed(
+                    $enum_name::$variant $($pattern)? => proptest::strategy::Strategy::boxed(
                         crate::[< $enum_name:snake >]::[<arb_ $variant:snake _variant>]()
                     ),
                     )+
@@ -34,14 +34,14 @@ macro_rules! should_have_a_strategy_for_each_variant {
 use ic_crypto_internal_csp::vault::api::CspBasicSignatureError;
 should_have_a_strategy_for_each_variant!(
     CspBasicSignatureError,
-    CspBasicSignatureError::InternalError {
+    CspBasicSignatureError::TransientInternalError {
         internal_error: "dummy error to match upon".to_string(),
     },
     SecretKeyNotFound { .. },
     UnsupportedAlgorithm { .. },
     WrongSecretKeyType { .. },
     MalformedSecretKey { .. },
-    InternalError { .. }
+    TransientInternalError { .. }
 );
 
 use ic_crypto_internal_csp::types::CspSignature;
@@ -109,13 +109,13 @@ should_have_a_strategy_for_each_variant!(
 use ic_crypto_internal_csp::vault::api::CspMultiSignatureError;
 should_have_a_strategy_for_each_variant!(
     CspMultiSignatureError,
-    CspMultiSignatureError::InternalError {
+    CspMultiSignatureError::TransientInternalError {
         internal_error: "dummy error to match upon".to_string(),
     },
     SecretKeyNotFound { .. },
     UnsupportedAlgorithm { .. },
     WrongSecretKeyType { .. },
-    InternalError { .. }
+    TransientInternalError { .. }
 );
 
 use ic_crypto_internal_csp::vault::api::CspMultiSignatureKeygenError;
@@ -133,12 +133,133 @@ should_have_a_strategy_for_each_variant!(
 use ic_crypto_internal_csp::api::CspThresholdSignError;
 should_have_a_strategy_for_each_variant!(
     CspThresholdSignError,
-    CspThresholdSignError::InternalError {
+    CspThresholdSignError::TransientInternalError {
         internal_error: "dummy error to match upon".to_string(),
     },
     SecretKeyNotFound { .. },
     UnsupportedAlgorithm { .. },
     WrongSecretKeyType { .. },
     MalformedSecretKey { .. },
-    InternalError { .. }
+    KeyIdInstantiationError(..),
+    TransientInternalError { .. }
+);
+
+use ic_crypto_internal_csp::vault::api::CspSecretKeyStoreContainsError;
+should_have_a_strategy_for_each_variant!(
+    CspSecretKeyStoreContainsError,
+    CspSecretKeyStoreContainsError::TransientInternalError {
+        internal_error: "dummy error to match upon".to_string(),
+    },
+    TransientInternalError { .. }
+);
+
+use ic_types::registry::RegistryClientError;
+should_have_a_strategy_for_each_variant!(
+    RegistryClientError,
+    RegistryClientError::DecodeError {
+        error: "dummy error to match upon".to_string(),
+    },
+    VersionNotAvailable { .. },
+    DataProviderQueryFailed { .. },
+    PollLockFailed { .. },
+    PollingLatestVersionFailed { .. },
+    DecodeError { .. }
+);
+
+use ic_types::crypto::CryptoError;
+should_have_a_strategy_for_each_variant!(
+    CryptoError,
+    CryptoError::TransientInternalError {
+        internal_error: "dummy error to match upon".to_string(),
+    },
+    InvalidArgument { .. },
+    PublicKeyNotFound { .. },
+    TlsCertNotFound { .. },
+    SecretKeyNotFound { .. },
+    TlsSecretKeyNotFound { .. },
+    MalformedSecretKey { .. },
+    MalformedPublicKey { .. },
+    MalformedSignature { .. },
+    MalformedPop { .. },
+    SignatureVerification { .. },
+    PopVerification { .. },
+    InconsistentAlgorithms { .. },
+    AlgorithmNotSupported { .. },
+    RegistryClient(_),
+    ThresholdSigDataNotFound { .. },
+    DkgTranscriptNotFound { .. },
+    RootSubnetPublicKeyNotFound { .. },
+    InternalError { .. },
+    TransientInternalError { .. }
+);
+
+use ic_crypto_internal_csp::vault::api::CspPublicKeyStoreError;
+should_have_a_strategy_for_each_variant!(
+    CspPublicKeyStoreError,
+    CspPublicKeyStoreError::TransientInternalError("dummy error to match upon".to_string(),),
+    TransientInternalError(_),
+);
+
+use ic_crypto_internal_csp::vault::api::PksAndSksContainsErrors;
+should_have_a_strategy_for_each_variant!(
+    PksAndSksContainsErrors,
+    PksAndSksContainsErrors::TransientInternalError("dummy error to match upon".to_string()),
+    NodeKeysErrors(_),
+    TransientInternalError(_),
+);
+
+use ic_crypto_internal_csp::vault::api::ValidatePksAndSksKeyPairError;
+should_have_a_strategy_for_each_variant!(
+    ValidatePksAndSksKeyPairError,
+    ValidatePksAndSksKeyPairError::PublicKeyInvalid("dummy error to match upon".to_string()),
+    PublicKeyInvalid(_),
+    SecretKeyNotFound { .. },
+    PublicKeyNotFound
+);
+
+use ic_crypto_internal_csp::vault::api::ValidatePksAndSksError;
+should_have_a_strategy_for_each_variant!(
+    ValidatePksAndSksError,
+    ValidatePksAndSksError::TransientInternalError("dummy error to match upon".to_string()),
+    NodeSigningKeyError(_),
+    CommitteeSigningKeyError(_),
+    TlsCertificateError(_),
+    DkgDealingEncryptionKeyError(_),
+    IdkgDealingEncryptionKeyError(_),
+    TransientInternalError(_),
+    EmptyPublicKeyStore
+);
+
+use ic_crypto_internal_csp::vault::api::PublicRandomSeedGeneratorError;
+should_have_a_strategy_for_each_variant!(
+    PublicRandomSeedGeneratorError,
+    PublicRandomSeedGeneratorError::TransientInternalError {
+        internal_error: "dummy error to match upon".to_string()
+    },
+    TransientInternalError { .. },
+);
+
+use ic_crypto_internal_csp::vault::api::CspTlsKeygenError;
+should_have_a_strategy_for_each_variant!(
+    CspTlsKeygenError,
+    CspTlsKeygenError::TransientInternalError {
+        internal_error: "dummy error to match upon".to_string()
+    },
+    InvalidArguments { .. },
+    InternalError { .. },
+    DuplicateKeyId { .. },
+    TransientInternalError { .. },
+);
+
+use ic_crypto_internal_csp::vault::api::CspTlsSignError;
+should_have_a_strategy_for_each_variant!(
+    CspTlsSignError,
+    CspTlsSignError::TransientInternalError {
+        internal_error: "dummy error to match upon".to_string()
+    },
+    SecretKeyNotFound { .. },
+    WrongSecretKeyType { .. },
+    MalformedSecretKey { .. },
+    SigningFailed { .. },
+    TransientInternalError { .. },
 );

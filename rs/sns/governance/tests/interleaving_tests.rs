@@ -1,8 +1,7 @@
 //! Tests that rely on interleaving two method calls on the governance canister
 //! (in particular, when one method is suspended when it calls out to the ledger
 //! canister).
-use crate::fixtures::TargetLedger;
-use crate::fixtures::{neuron_id, GovernanceCanisterFixtureBuilder, NeuronBuilder};
+use crate::fixtures::{neuron_id, GovernanceCanisterFixtureBuilder, NeuronBuilder, TargetLedger};
 use futures::{channel::mpsc, FutureExt, StreamExt};
 use ic_base_types::PrincipalId;
 use ic_nervous_system_common::E8;
@@ -47,6 +46,7 @@ fn test_cant_increase_dissolve_delay_while_disbursing() {
 
     // We use channels to control how the disbursing and delay increase are
     // interleaved
+    #[allow(clippy::disallowed_methods)]
     let (tx, mut rx) = mpsc::unbounded::<LedgerControlMessage>();
 
     let canister_fixture = canister_fixture_builder

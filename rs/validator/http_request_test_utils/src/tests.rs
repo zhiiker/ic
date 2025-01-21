@@ -15,10 +15,10 @@ mod delegation_chain {
 
     #[test]
     fn should_produce_a_valid_delegation_chain_of_length_2() {
-        let mut rng = reproducible_rng();
-        let first_key_pair = Ed25519KeyPair::generate(&mut rng);
-        let second_key_pair = Ed25519KeyPair::generate(&mut rng);
-        let third_key_pair = Ed25519KeyPair::generate(&mut rng);
+        let rng = &mut reproducible_rng();
+        let first_key_pair = Ed25519KeyPair::generate(rng);
+        let second_key_pair = Ed25519KeyPair::generate(rng);
+        let third_key_pair = Ed25519KeyPair::generate(rng);
         let first_delegation_expiration = Time::from_nanos_since_unix_epoch(1);
         let second_delegation_expiration = Time::from_nanos_since_unix_epoch(2);
 
@@ -60,13 +60,13 @@ mod delegation_chain {
 
     #[test]
     fn should_produce_http_request_with_start_of_chain_as_sender_and_signer_pubkey() {
-        let mut rng = reproducible_rng();
-        let first_key_pair = Ed25519KeyPair::generate(&mut rng);
-        let second_key_pair = Ed25519KeyPair::generate(&mut rng);
+        let rng = &mut reproducible_rng();
+        let first_key_pair = Ed25519KeyPair::generate(rng);
+        let second_key_pair = Ed25519KeyPair::generate(rng);
         let expected_sender = UserId::from(PrincipalId::new_self_authenticating(
             &ed25519_public_key_to_der(first_key_pair.public_key.to_vec()),
         ));
-        let request = HttpRequestBuilder::default()
+        let request = HttpRequestBuilder::new_update_call()
             .with_authentication(Delegation(
                 DelegationChain::rooted_at(UserKeyPair(first_key_pair))
                     .delegate_to(
@@ -85,11 +85,11 @@ mod delegation_chain {
 
     #[test]
     fn should_produce_http_request_signed_by_end_of_chain() {
-        let mut rng = reproducible_rng();
-        let first_key_pair = Ed25519KeyPair::generate(&mut rng);
-        let second_key_pair = Ed25519KeyPair::generate(&mut rng);
+        let rng = &mut reproducible_rng();
+        let first_key_pair = Ed25519KeyPair::generate(rng);
+        let second_key_pair = Ed25519KeyPair::generate(rng);
 
-        let request = HttpRequestBuilder::default()
+        let request = HttpRequestBuilder::new_update_call()
             .with_authentication(Delegation(
                 DelegationChain::rooted_at(UserKeyPair(first_key_pair))
                     .delegate_to(
@@ -136,11 +136,11 @@ mod change_authentication {
 
     #[test]
     fn should_change_sender_while_having_correct_signature() {
-        let mut rng = reproducible_rng();
-        let key_pair = Ed25519KeyPair::generate(&mut rng);
+        let rng = &mut reproducible_rng();
+        let key_pair = Ed25519KeyPair::generate(rng);
         let new_sender = vec![42];
 
-        let request = HttpRequestBuilder::default()
+        let request = HttpRequestBuilder::new_update_call()
             .with_authentication(AuthenticationScheme::Direct(UserKeyPair(key_pair)))
             .with_authentication_sender(Blob(new_sender.clone()))
             .build();
@@ -153,13 +153,13 @@ mod change_authentication {
 
     #[test]
     fn should_change_sender_public_key_while_having_correct_signature() {
-        let mut rng = reproducible_rng();
-        let key_pair = Ed25519KeyPair::generate(&mut rng);
-        let other_key_pair = Ed25519KeyPair::generate(&mut rng);
+        let rng = &mut reproducible_rng();
+        let key_pair = Ed25519KeyPair::generate(rng);
+        let other_key_pair = Ed25519KeyPair::generate(rng);
         let other_public_key = UserKeyPair(other_key_pair).public_key_der();
         assert_ne!(key_pair, other_key_pair);
 
-        let request = HttpRequestBuilder::default()
+        let request = HttpRequestBuilder::new_update_call()
             .with_authentication(AuthenticationScheme::Direct(UserKeyPair(key_pair)))
             .with_authentication_sender_public_key(Some(Blob(other_public_key.clone())))
             .build();
@@ -172,13 +172,13 @@ mod change_authentication {
 
     #[test]
     fn should_corrupt_signature() {
-        let mut rng = reproducible_rng();
-        let key_pair = Ed25519KeyPair::generate(&mut rng);
+        let rng = &mut reproducible_rng();
+        let key_pair = Ed25519KeyPair::generate(rng);
 
-        let valid_request = HttpRequestBuilder::default()
+        let valid_request = HttpRequestBuilder::new_update_call()
             .with_authentication(AuthenticationScheme::Direct(UserKeyPair(key_pair)))
             .build();
-        let corrupted_request = HttpRequestBuilder::default()
+        let corrupted_request = HttpRequestBuilder::new_update_call()
             .with_authentication(AuthenticationScheme::Direct(UserKeyPair(key_pair)))
             .corrupt_authentication_sender_signature()
             .build();

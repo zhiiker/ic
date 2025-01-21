@@ -32,11 +32,15 @@ type ExportPackage = record {
 type InitArg = record {
     rootPrincipals: vec principal;
     idSeed: nat;
+    registrationExpirationTtl: opt nat64;
+    inProgressTtl: opt nat64;
+    managementTaskInterval: opt nat64;
 };
 
 type CreateRegistrationError = variant {
     Duplicate: Id;
     NameError: text;
+    RateLimited: text;
     Unauthorized;
     UnexpectedError: text;
 };
@@ -82,6 +86,27 @@ type RemoveRegistrationError = variant {
 type RemoveRegistrationResponse = variant {
     Ok;
     Err: RemoveRegistrationError;
+};
+
+type ListRegistrationsError = variant {
+    Unauthorized;
+    UnexpectedError: text;
+};
+
+type ListRegistrationsResponse = variant {
+    Ok: vec record { text; Registration };
+    Err: ListRegistrationsError;
+};
+
+type GetCertificateError = variant {
+    NotFound;
+    Unauthorized;
+    UnexpectedError: text;
+};
+
+type GetCertificateResponse = variant {
+    Ok: EncryptedPair;
+    Err: GetRegistrationError;
 };
 
 type UploadCertificateError = variant {
@@ -140,6 +165,16 @@ type PeekTaskResponse = variant {
     Err: PeekTaskError;
 };
 
+type ListTasksError = variant {
+    Unauthorized;
+    UnexpectedError: text;
+};
+
+type ListTasksResponse = variant {
+    Ok: vec record { text; nat64; Registration };
+    Err: ListTasksError;
+};
+
 type DispenseTaskError = variant {
     NoTasksAvailable;
     Unauthorized;
@@ -149,6 +184,17 @@ type DispenseTaskError = variant {
 type DispenseTaskResponse = variant {
     Ok: Id;
     Err: DispenseTaskError;
+};
+
+type RemoveTaskError = variant {
+    NotFound;
+    Unauthorized;
+    UnexpectedError: text;
+};
+
+type RemoveTaskResponse = variant {
+    Ok;
+    Err: RemoveTaskError;
 };
 
 type ModifyAllowedPrincipalError = variant {
@@ -192,17 +238,21 @@ service: (InitArg) -> {
     getRegistration: (Id) -> (GetRegistrationResponse) query;
     updateRegistration: (Id, UpdateType) -> (UpdateRegistrationResponse);
     removeRegistration: (Id) -> (RemoveRegistrationResponse);
+    listRegistrations: () -> (ListRegistrationsResponse) query;
 
     // Certificates
+    getCertificate: (Id) -> (GetCertificateResponse) query;
     uploadCertificate: (Id, EncryptedPair) -> (UploadCertificateResponse);
-    exportCertificates: () -> (ExportCertificatesResponse);
-    exportCertificatesPaginated: (opt Id, nat64) -> (ExportCertificatesResponse);
-    exportCertificatesCertified: (opt Id, nat64) -> (ExportCertificatesCertifiedResponse);
+    exportCertificates: () -> (ExportCertificatesResponse) query;
+    exportCertificatesPaginated: (opt Id, nat64) -> (ExportCertificatesResponse) query;
+    exportCertificatesCertified: (opt Id, nat64) -> (ExportCertificatesCertifiedResponse) query;
 
     // Tasks
     queueTask: (Id, Timestamp) -> (QueueTaskResponse);
     dispenseTask: () -> (DispenseTaskResponse);
+    removeTask: (Id) -> (RemoveTaskResponse);
     peekTask: () -> (PeekTaskResponse) query;
+    listTasks: () -> (ListTasksResponse) query;
 
     // Metrics (Http Interface)
     http_request: (HttpRequest) -> (HttpResponse) query;

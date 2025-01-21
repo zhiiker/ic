@@ -12,7 +12,7 @@ use std::convert::TryFrom;
 use std::num::TryFromIntError;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 pub mod dealers;
 pub mod errors;
@@ -21,7 +21,7 @@ pub mod receivers;
 /// A validated configuration for non-interactive DKG. This configuration can
 /// only exist if all configuration invariants are satisfied. See
 /// `NiDkgConfig::new` for a description of the invariants.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Deserialize, Serialize)]
 pub struct NiDkgConfig {
     pub(crate) dkg_id: NiDkgId,
     max_corrupt_dealers: NumberOfNodes,
@@ -37,7 +37,7 @@ pub struct NiDkgConfig {
 impl From<&NiDkgConfig> for pb::NiDkgConfig {
     fn from(config: &NiDkgConfig) -> Self {
         Self {
-            dkg_id: Some(pb::NiDkgId::from(config.dkg_id)),
+            dkg_id: Some(pb::NiDkgId::from(config.dkg_id.clone())),
             max_corrupt_dealers: config.max_corrupt_dealers.get(),
             dealers: config
                 .dealers
@@ -107,7 +107,7 @@ impl TryFrom<pb::NiDkgConfig> for NiDkgConfig {
 
 /// The non-validated config parameter object to be passed to the `NiDkgConfig`
 /// constructor.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Deserialize, Serialize)]
 pub struct NiDkgConfigData {
     pub dkg_id: NiDkgId,
     pub max_corrupt_dealers: NumberOfNodes,
@@ -168,8 +168,8 @@ impl NiDkgConfig {
         })
     }
 
-    pub fn dkg_id(&self) -> NiDkgId {
-        self.dkg_id
+    pub fn dkg_id(&self) -> &NiDkgId {
+        &self.dkg_id
     }
 
     pub fn max_corrupt_dealers(&self) -> NumberOfNodes {
@@ -310,7 +310,7 @@ impl fmt::Display for NiDkgConfig {
 
 /// The minimum number of nodes required to generate a valid threshold
 /// signature.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Deserialize, Serialize)]
 pub struct NiDkgThreshold {
     threshold: NumberOfNodes,
 }
@@ -319,7 +319,7 @@ impl NiDkgThreshold {
     /// A `DkgThreshold` can only be created if the following invariants hold:
     /// * The threshold is at least 1 (error: `ThresholdIsZero`)
     ///
-    /// If an invariant is not satisifed, the `Err` as indicated above is
+    /// If an invariant is not satisfied, the `Err` as indicated above is
     /// returned.
     pub fn new(threshold: NumberOfNodes) -> Result<Self, NiDkgThresholdZeroError> {
         Self::ensure_threshold_is_not_zero(threshold)?;

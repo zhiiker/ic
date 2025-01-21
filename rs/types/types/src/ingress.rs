@@ -1,8 +1,10 @@
 //! Ingress types.
 
 use crate::artifact::IngressMessageId;
-use crate::{CanisterId, CountBytes, PrincipalId, Time, UserId};
-use ic_error_types::{ErrorCode, TryFromError, UserError};
+use crate::{CanisterId, MemoryDiskBytes, PrincipalId, Time, UserId};
+use ic_error_types::{ErrorCode, UserError};
+#[cfg(test)]
+use ic_exhaustive_derive::ExhaustiveSet;
 use ic_protobuf::{
     proxy::{try_from_option_field, ProxyDecodeError},
     state::ingress::v1 as pb_ingress,
@@ -14,7 +16,7 @@ use std::sync::Arc;
 use std::{convert::TryFrom, fmt};
 
 /// The inner state of an ingress message.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Deserialize, Serialize)]
 pub enum IngressState {
     /// The message was successfully inducted into the input queue of
     /// the receiver and should eventually execute.
@@ -54,7 +56,7 @@ impl IngressState {
 }
 
 /// The status of an ingress message.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Deserialize, Serialize)]
 pub enum IngressStatus {
     /// The system has knowledge of this message, its status is
     /// described by state
@@ -82,13 +84,11 @@ impl IngressStatus {
             IngressStatus::Known { receiver, .. } => Some(*receiver),
             IngressStatus::Unknown => None,
         }
-        .map(|receiver| {
-            CanisterId::new(receiver).expect("Receiver in IngressStatus must be a Canister ID.")
-        })
+        .map(CanisterId::unchecked_from_principal)
     }
 
     /// Returns the name of this status as specified in the interface spec:
-    /// `<https://sdk.dfinity.org/docs/interface-spec/index.html#state-tree-request-status>`
+    /// `<https://internetcomputer.org/docs/current/references/ic-interface-spec#state-tree-request-status>`
     pub fn as_str(&self) -> &'static str {
         match self {
             IngressStatus::Known { state, .. } => match state {
@@ -107,17 +107,41 @@ impl IngressStatus {
     pub fn payload_bytes(&self) -> usize {
         match self {
             IngressStatus::Known { state, .. } => match state {
-                IngressState::Completed(result) => result.count_bytes(),
-                IngressState::Failed(error) => error.description().as_bytes().len(),
+                IngressState::Completed(result) => result.memory_bytes(),
+                IngressState::Failed(error) => error.description().len(),
                 _ => 0,
             },
             IngressStatus::Unknown => 0,
         }
     }
+
+    /// Checks whether the state transition from `self` to `new_status` is valid.
+    pub fn is_valid_state_transition(&self, new_status: &IngressStatus) -> bool {
+        use IngressState::*;
+        use IngressStatus::*;
+        match (self, new_status) {
+            (Unknown, _) => true,
+            (Known { .. }, Unknown) => false,
+            (
+                Known { state, .. },
+                Known {
+                    state: new_state, ..
+                },
+            ) => matches!(
+                (&state, &new_state),
+                (Received, Processing)
+                    | (Received, Completed(_))
+                    | (Received, Failed(_))
+                    | (Processing, Processing)
+                    | (Processing, Completed(_))
+                    | (Processing, Failed(_))
+            ),
+        }
+    }
 }
 
 /// A list of hashsets that implements IngressSetQuery.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct IngressSets {
     hash_sets: Vec<Arc<HashSet<IngressMessageId>>>,
     min_block_time: Time,
@@ -142,7 +166,8 @@ impl IngressSets {
 
 /// This struct describes the different types that executing a Wasm function in
 /// a canister can produce
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
+#[cfg_attr(test, derive(ExhaustiveSet))]
 pub enum WasmResult {
     /// Raw response, returned in a "happy" case
     Reply(#[serde(with = "serde_bytes")] Vec<u8>),
@@ -151,12 +176,16 @@ pub enum WasmResult {
     Reject(String),
 }
 
-impl CountBytes for WasmResult {
-    fn count_bytes(&self) -> usize {
+impl MemoryDiskBytes for WasmResult {
+    fn memory_bytes(&self) -> usize {
         match self {
             WasmResult::Reply(bytes) => bytes.len(),
-            WasmResult::Reject(string) => string.as_bytes().len(),
+            WasmResult::Reject(string) => string.len(),
         }
+    }
+
+    fn disk_bytes(&self) -> usize {
+        0
     }
 }
 
@@ -166,6 +195,20 @@ impl WasmResult {
         match self {
             WasmResult::Reply(bytes) => bytes,
             WasmResult::Reject(string) => string.as_bytes().to_vec(),
+        }
+    }
+
+    /// For use in tests.
+    /// Asserts that the result is a rejection containing the given message.
+    pub fn assert_contains_reject(&self, message: &str) {
+        match self {
+            Self::Reject(s) => {
+                assert!(
+                    s.contains(message),
+                    "Unable to match reject message {s} with expected {message}"
+                )
+            }
+            _ => panic!("Expected reject"),
         }
     }
 }
@@ -237,9 +280,9 @@ impl From<&IngressStatus> for pb_ingress::IngressStatus {
                     status: Some(Status::Failed(pb_ingress::IngressStatusFailed {
                         receiver: Some(pb_types::PrincipalId::from(*receiver)),
                         user_id: Some(crate::user_id_into_protobuf(*user_id)),
-                        err_code: error.code() as u64,
                         err_description: error.description().to_string(),
                         time_nanos: time.as_nanos_since_unix_epoch(),
+                        err_code: pb_ingress::ErrorCode::from(error.code()).into(),
                     })),
                 },
                 IngressState::Processing => Self {
@@ -308,15 +351,13 @@ impl TryFrom<pb_ingress::IngressStatus> for IngressStatus {
                         f.user_id,
                         "IngressStatus::Failed::user_id",
                     )?)?,
-                    state: IngressState::Failed(UserError::new(
-                        ErrorCode::try_from(f.err_code).map_err(|err| match err {
-                            TryFromError::ValueOutOfRange(code) => {
-                                ProxyDecodeError::ValueOutOfRange {
-                                    typ: "ErrorCode",
-                                    err: code.to_string(),
-                                }
-                            }
-                        })?,
+                    state: IngressState::Failed(UserError::from_proto(
+                        ErrorCode::try_from(pb_ingress::ErrorCode::try_from(f.err_code).map_err(
+                            |_| ProxyDecodeError::ValueOutOfRange {
+                                typ: "ErrorCode",
+                                err: f.err_code.to_string(),
+                            },
+                        )?)?,
                         f.err_description,
                     )),
                 },
@@ -344,5 +385,22 @@ impl TryFrom<pb_ingress::IngressStatus> for IngressStatus {
                 Status::Unknown(_) => IngressStatus::Unknown,
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::exhaustive::ExhaustiveSet;
+    use ic_crypto_test_utils_reproducible_rng::reproducible_rng;
+
+    #[test]
+    fn wasm_result_proto_round_trip() {
+        for result in WasmResult::exhaustive_set(&mut reproducible_rng()) {
+            let encoded = pb_ingress::ingress_status_completed::WasmResult::from(&result);
+            let round_trip = WasmResult::from(encoded);
+
+            assert_eq!(result, round_trip);
+        }
     }
 }

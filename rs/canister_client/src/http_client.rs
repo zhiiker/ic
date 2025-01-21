@@ -3,17 +3,22 @@ use futures_util::{
     future::{Either as EitherFut, Map, Ready},
     FutureExt,
 };
-use hyper::{
-    client::{
-        connect::dns::{self, GaiResolver},
-        HttpConnector as HyperConnector, ResponseFuture as HyperFuture,
+use http_body_util::{BodyExt, Full};
+use hyper::{body::Bytes, header::CONTENT_TYPE, Method, StatusCode, Uri as HyperUri};
+use hyper_rustls::{HttpsConnector as HyperTlsConnector, HttpsConnectorBuilder};
+use hyper_util::{
+    client::legacy::{
+        connect::{
+            dns::{self, GaiResolver},
+            HttpConnector as HyperConnector,
+        },
+        Client as HyperClient, ResponseFuture as HyperFuture,
     },
-    header::CONTENT_TYPE,
-    service::Service,
-    Client as HyperClient, Method, Uri as HyperUri,
+    rt::TokioExecutor,
 };
-use hyper_tls::HttpsConnector as HyperTlsConnector;
 use itertools::Either;
+use serde_cbor::Value;
+use std::sync::Arc;
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -23,6 +28,7 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
+use tower::Service;
 use url::Url;
 
 #[derive(Clone)]
@@ -47,7 +53,7 @@ impl Default for HttpClientConfig {
 /// An HTTP Client to communicate with a replica.
 #[derive(Clone)]
 pub struct HttpClient {
-    hyper: HyperClient<HyperTlsConnector<HyperConnector<DnsResolverWithOverrides>>>,
+    hyper: HyperClient<HyperTlsConnector<HyperConnector<DnsResolverWithOverrides>>, Full<Bytes>>,
 }
 
 #[derive(Clone)]
@@ -109,25 +115,71 @@ impl Service<dns::Name> for DnsResolverWithOverrides {
     }
 }
 
+#[derive(Debug)]
+struct DangerAcceptInvalidCerts {}
+impl rustls::client::danger::ServerCertVerifier for DangerAcceptInvalidCerts {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::pki_types::CertificateDer,
+        _intermediates: &[rustls::pki_types::CertificateDer],
+        _server_name: &rustls::pki_types::ServerName,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
 impl HttpClient {
     pub fn new_with_config(config: HttpClientConfig) -> Self {
-        let native_tls_connector = native_tls::TlsConnector::builder()
-            .use_sni(false)
-            .request_alpns(&["h2"])
-            .danger_accept_invalid_certs(true)
-            .build()
-            .expect("failed to build tls connector");
         let mut http_connector =
             HyperConnector::new_with_resolver(DnsResolverWithOverrides::new(config.overrides));
         http_connector.enforce_http(false);
-        let https_connector =
-            HyperTlsConnector::from((http_connector, native_tls_connector.into()));
 
-        let hyper = HyperClient::builder()
+        let mut rustls_config = rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(DangerAcceptInvalidCerts {}))
+            .with_no_client_auth();
+        rustls_config.enable_sni = false;
+        let https_connector = HttpsConnectorBuilder::new()
+            .with_tls_config(rustls_config)
+            .https_or_http();
+        let https_connector = if config.http2_only {
+            https_connector.enable_http2()
+        } else {
+            https_connector.enable_http1().enable_http2()
+        };
+        let https_connector = https_connector.wrap_connector(http_connector);
+
+        let hyper = HyperClient::builder(TokioExecutor::new())
             .pool_idle_timeout(config.pool_idle_timeout)
             .pool_max_idle_per_host(config.pool_max_idle_per_host)
             .http2_only(config.http2_only)
-            .build::<_, hyper::Body>(https_connector);
+            .build::<_, Full<Bytes>>(https_connector);
 
         Self { hyper }
     }
@@ -154,7 +206,7 @@ impl HttpClient {
             .method(Method::POST)
             .uri(uri.clone())
             .header(CONTENT_TYPE, "application/cbor")
-            .body(hyper::Body::from(http_body))
+            .body(Full::new(Bytes::from(http_body)))
             .map_err(|e| {
                 format!(
                     "HttpClient: Failed to create POST request for {:?}: {:?}",
@@ -174,7 +226,7 @@ impl HttpClient {
             .map_err(|e| format!("HttpClient: Request timed out for {:?}: {:?}", uri, e))?;
         let response = result.map_err(|e| format!("Request failed for {:?}: {:?}", uri, e))?;
         let status = response.status();
-        let parsed_body = tokio::time::timeout_at(deadline, hyper::body::to_bytes(response))
+        let parsed_body = tokio::time::timeout_at(deadline, response.collect())
             .await
             .map_err(|e| {
                 format!(
@@ -182,15 +234,24 @@ impl HttpClient {
                     uri, e, status.canonical_reason().unwrap_or("empty status"),
                 )
             })?
-            .map(|bytes| bytes.to_vec())
+            .map(|collected| collected.to_bytes().to_vec())
             .map_err(|e| {
                 format!(
                     "HttpClient: Request to {:?} failed to get bytes: {:?}. Returned status: {:?}.",
                     uri, e, status.canonical_reason().unwrap_or("empty status"),
                 )
             })?;
-        if !status.is_success() {
-            let readable_response = std::str::from_utf8(&parsed_body);
+
+        let is_update_call = uri.path().ends_with("/call");
+
+        // update calls with a response code of 200 indicates an error occurred.
+        if !status.is_success() || (is_update_call && status == StatusCode::OK) {
+            let readable_response = if is_update_call {
+                format!("{:?}", serde_cbor::from_slice::<Value>(&parsed_body))
+            } else {
+                format!("{:?}", &std::str::from_utf8(&parsed_body))
+            };
+
             return Err(format!(
                 "HTTP Client: Request to {:?} failed with {:?}, {:?}",
                 uri,
@@ -237,7 +298,7 @@ impl HttpClient {
             .method(Method::POST)
             .uri(uri.clone())
             .header(CONTENT_TYPE, "application/cbor")
-            .body(hyper::Body::from(http_body))
+            .body(Full::new(Bytes::from(http_body)))
             .map_err(|e| format!("HttpClient: Failed to fill body {:?}: {:?}", url, e))?;
         let response_future = self.hyper.request(req);
 
@@ -247,12 +308,11 @@ impl HttpClient {
         let response_body = response
             .map_err(|e| format!("HttpClient: Request failed out for {:?}: {:?}", uri, e))?;
         let status_code = response_body.status();
-        let response_bytes =
-            tokio::time::timeout_at(deadline, hyper::body::to_bytes(response_body))
-                .await
-                .map_err(|e| format!("HttpClient: Request timed out for {:?}: {:?}", uri, e))?
-                .map(|bytes| bytes.to_vec())
-                .map_err(|e| format!("HttpClient: Failed to get bytes for {:?}: {:?}", uri, e))?;
+        let response_bytes = tokio::time::timeout_at(deadline, response_body.collect())
+            .await
+            .map_err(|e| format!("HttpClient: Request timed out for {:?}: {:?}", uri, e))?
+            .map(|collected| collected.to_bytes().to_vec())
+            .map_err(|e| format!("HttpClient: Failed to get bytes for {:?}: {:?}", uri, e))?;
 
         Ok((response_bytes, status_code))
     }

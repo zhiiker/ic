@@ -31,7 +31,7 @@ fn test_the_anonymous_user_cannot_add_a_node_operator() {
             node_operator_principal_id: Some(PrincipalId::new_anonymous()),
             node_allowance: 5,
             node_provider_principal_id: Some(PrincipalId::new_anonymous()),
-            dc_id: "AN1".into(),
+            dc_id: "an1".into(),
             rewardable_nodes: BTreeMap::new(),
             ipv6: None,
         };
@@ -74,13 +74,13 @@ fn test_a_canister_other_than_the_governance_canister_cannot_add_a_node_operator
             node_operator_principal_id: Some(PrincipalId::new_anonymous()),
             node_allowance: 5,
             node_provider_principal_id: Some(PrincipalId::new_anonymous()),
-            dc_id: "AN1".into(),
+            dc_id: "an1".into(),
             rewardable_nodes: BTreeMap::new(),
             ipv6: None,
         };
 
         // The attacker canister tries to add a node operator, pretending to be the
-        // proposals canister. This should have no effect.
+        // governance canister. This should have no effect.
         assert!(
             !forward_call_via_universal_canister(
                 &attacker_canister,
@@ -113,12 +113,12 @@ fn test_accepted_proposal_mutates_the_registry() {
         )
         .await;
 
-        // Install the universal canister in place of the proposals canister
-        let fake_proposal_canister = set_up_universal_canister(&runtime).await;
-        // Since it takes the id reserved for the proposal canister, it can impersonate
+        // Install the universal canister in place of the governance canister
+        let fake_governance_canister = set_up_universal_canister(&runtime).await;
+        // Since it takes the id reserved for the governance canister, it can impersonate
         // it
         assert_eq!(
-            fake_proposal_canister.canister_id(),
+            fake_governance_canister.canister_id(),
             ic_nns_constants::GOVERNANCE_CANISTER_ID
         );
 
@@ -126,14 +126,14 @@ fn test_accepted_proposal_mutates_the_registry() {
             node_operator_principal_id: Some(PrincipalId::new_anonymous()),
             node_allowance: 5,
             node_provider_principal_id: Some(PrincipalId::new_anonymous()),
-            dc_id: "AN1".into(),
+            dc_id: "an1".into(),
             rewardable_nodes: BTreeMap::new(),
             ipv6: None,
         };
 
         assert!(
             forward_call_via_universal_canister(
-                &fake_proposal_canister,
+                &fake_governance_canister,
                 &registry,
                 "add_node_operator",
                 Encode!(&payload).unwrap()
@@ -153,7 +153,7 @@ fn test_accepted_proposal_mutates_the_registry() {
                 node_operator_principal_id: PrincipalId::new_anonymous().to_vec(),
                 node_allowance: 5,
                 node_provider_principal_id: PrincipalId::new_anonymous().to_vec(),
-                dc_id: "AN1".into(),
+                dc_id: "an1".into(),
                 rewardable_nodes: BTreeMap::new(),
                 ipv6: None,
             }
@@ -164,14 +164,14 @@ fn test_accepted_proposal_mutates_the_registry() {
             node_operator_principal_id: Some(*TEST_NEURON_1_OWNER_PRINCIPAL),
             node_allowance: 120,
             node_provider_principal_id: Some(PrincipalId::new_anonymous()),
-            dc_id: "BC1".into(),
+            dc_id: "bc1".into(),
             rewardable_nodes: BTreeMap::new(),
             ipv6: None,
         };
 
         assert!(
             forward_call_via_universal_canister(
-                &fake_proposal_canister,
+                &fake_governance_canister,
                 &registry,
                 "add_node_operator",
                 Encode!(&payload2).unwrap()
@@ -189,7 +189,7 @@ fn test_accepted_proposal_mutates_the_registry() {
                 node_operator_principal_id: TEST_NEURON_1_OWNER_PRINCIPAL.to_vec(),
                 node_allowance: 120,
                 node_provider_principal_id: PrincipalId::new_anonymous().to_vec(),
-                dc_id: "BC1".into(),
+                dc_id: "bc1".into(),
                 rewardable_nodes: BTreeMap::new(),
                 ipv6: None,
             }
@@ -200,14 +200,14 @@ fn test_accepted_proposal_mutates_the_registry() {
             node_operator_principal_id: Some(PrincipalId::new_anonymous()),
             node_allowance: 567,
             node_provider_principal_id: Some(PrincipalId::new_anonymous()),
-            dc_id: "CA1".into(),
+            dc_id: "ca1".into(),
             rewardable_nodes: BTreeMap::new(),
             ipv6: None,
         };
 
         assert!(
             !forward_call_via_universal_canister(
-                &fake_proposal_canister,
+                &fake_governance_canister,
                 &registry,
                 "add_node_operator",
                 Encode!(&payload3).unwrap()

@@ -1,8 +1,8 @@
-use std::cmp::Reverse;
+use std::{cmp::Reverse, time::Duration};
 
 use candid::Principal;
 use certificate_orchestrator_interface::{
-    EncryptedPair, Id, Name, NameError, Registration, State, UpdateType,
+    EncryptedPair, ExportPackage, Id, Name, NameError, Registration, State, UpdateType,
 };
 use ic_cdk::caller;
 use mockall::automock;
@@ -21,7 +21,7 @@ cfg_if::cfg_if! {
 
 use crate::{
     acl::{Authorize, AuthorizeError, WithAuthorize},
-    ic_certification::remove_cert,
+    ic_certification::{add_cert, remove_cert},
     id::Generate,
     LocalRef, StableMap, StorableId, WithMetrics, REGISTRATION_EXPIRATION_TTL,
 };
@@ -32,6 +32,8 @@ pub enum CreateError {
     NameError(#[from] NameError),
     #[error("Registration '{0}' already exists")]
     Duplicate(Id),
+    #[error("Rate limit exceeded for domain '{0}'")]
+    RateLimited(String),
     #[error("Unauthorized")]
     Unauthorized,
     #[error(transparent)]
@@ -97,11 +99,14 @@ impl Create for Creator {
         });
 
         // Schedule expiration
+        let expiration_delay =
+            Duration::from_secs(REGISTRATION_EXPIRATION_TTL.with(|s| s.borrow().get(&()).unwrap()));
+
         self.expirations.with(|expirations| {
             let mut expirations = expirations.borrow_mut();
             expirations.push(
                 id.to_owned(),
-                Reverse(time() + REGISTRATION_EXPIRATION_TTL.as_nanos() as u64),
+                Reverse(time() + expiration_delay.as_nanos() as u64),
             );
         });
 
@@ -134,6 +139,7 @@ impl<T: Create> Create for WithMetrics<T> {
                         Err(err) => match err {
                             CreateError::NameError(_) => "name-error",
                             CreateError::Duplicate(_) => "duplicate",
+                            CreateError::RateLimited(_) => "rate-limited",
                             CreateError::Unauthorized => "unauthorized",
                             CreateError::UnexpectedError(_) => "fail",
                         },
@@ -241,8 +247,8 @@ impl Update for Updater {
                     },
                 );
 
-                Ok::<(), UpdateError>(())
-            })?,
+                Ok(())
+            }),
 
             // Update state
             UpdateType::State(state) => {
@@ -267,10 +273,74 @@ impl Update for Updater {
                     self.expirations.with(|exps| exps.borrow_mut().remove(id));
                     self.retries.with(|rets| rets.borrow_mut().remove(id));
                 }
+
+                // If a registration is being processed, but its expiration has not been scheduled,
+                // schedule it. This is needed, for example, for certificate renewals
+                if state != State::Available
+                    && !self
+                        .expirations
+                        .with(|exps| exps.borrow().get(id).is_some())
+                {
+                    let expiration_delay = Duration::from_secs(
+                        REGISTRATION_EXPIRATION_TTL.with(|s| s.borrow().get(&()).unwrap()),
+                    );
+
+                    self.expirations.with(|exps| {
+                        let mut exps = exps.borrow_mut();
+                        exps.push(
+                            id.to_owned(),
+                            Reverse(time() + expiration_delay.as_nanos() as u64),
+                        );
+                    });
+                }
+
+                Ok(())
             }
         }
+    }
+}
 
-        Ok(())
+pub struct UpdateWithIcCertification<T> {
+    updater: T,
+    pairs: LocalRef<StableMap<StorableId, EncryptedPair>>,
+    registrations: LocalRef<StableMap<StorableId, Registration>>,
+}
+
+impl<T: Update> UpdateWithIcCertification<T> {
+    pub fn new(
+        updater: T,
+        pairs: LocalRef<StableMap<StorableId, EncryptedPair>>,
+        registrations: LocalRef<StableMap<StorableId, Registration>>,
+    ) -> Self {
+        Self {
+            updater,
+            pairs,
+            registrations,
+        }
+    }
+}
+
+impl<T: Update> Update for UpdateWithIcCertification<T> {
+    fn update(&self, id: &Id, typ: UpdateType) -> Result<(), UpdateError> {
+        if let UpdateType::Canister(canister) = typ {
+            // If the encrypted pair has been uploaded, update the entry in certification tree
+            if let Some(pair) = self.pairs.with(|pairs| pairs.borrow().get(&id.into())) {
+                let Registration { name, .. } = self
+                    .registrations
+                    .with(|regs| regs.borrow().get(&id.into()))
+                    .ok_or(UpdateError::NotFound)?;
+
+                let package_to_certify = ExportPackage {
+                    id: id.into(),
+                    name,
+                    canister,
+                    pair,
+                };
+                add_cert(id.into(), &package_to_certify);
+                set_root_hash();
+            }
+        }
+        self.updater.update(id, typ)
     }
 }
 
@@ -307,6 +377,53 @@ impl<T: Update> Update for WithMetrics<T> {
         });
 
         out
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ListError {
+    #[error("Unauthorized")]
+    Unauthorized,
+
+    #[error(transparent)]
+    UnexpectedError(#[from] anyhow::Error),
+}
+
+pub trait List {
+    fn list(&self) -> Result<Vec<(String, Registration)>, ListError>;
+}
+
+pub struct Lister {
+    registrations: LocalRef<StableMap<StorableId, Registration>>,
+}
+
+impl Lister {
+    pub fn new(registrations: LocalRef<StableMap<StorableId, Registration>>) -> Self {
+        Self { registrations }
+    }
+}
+
+impl List for Lister {
+    fn list(&self) -> Result<Vec<(String, Registration)>, ListError> {
+        Ok(self.registrations.with(|rs| {
+            rs.borrow()
+                .iter()
+                .map(|(id, r)| (id.to_string(), r))
+                .collect()
+        }))
+    }
+}
+
+impl<T: List, A: Authorize> List for WithAuthorize<T, A> {
+    fn list(&self) -> Result<Vec<(String, Registration)>, ListError> {
+        if let Err(err) = self.1.authorize(&caller()) {
+            return Err(match err {
+                AuthorizeError::Unauthorized => ListError::Unauthorized,
+                AuthorizeError::UnexpectedError(err) => ListError::UnexpectedError(err),
+            });
+        };
+
+        self.0.list()
     }
 }
 
@@ -447,33 +564,30 @@ impl Expirer {
     }
 }
 
-impl Expire for Expirer {
-    fn expire(&self, t: u64) -> Result<(), ExpireError> {
+impl Expirer {
+    fn get_id(&self, t: u64) -> Option<String> {
         self.expirations.with(|exps| {
             let mut exps = exps.borrow_mut();
-            #[allow(clippy::while_let_loop)]
-            loop {
-                // Check for next expiration
-                let p = match exps.peek() {
-                    Some((_, p)) => p.0,
-                    None => break,
-                };
+            // Check for next expiration
+            let p = exps.peek().map(|(_, p)| p.0)?;
 
-                if p > t {
-                    break;
-                }
-
-                let id = match exps.pop() {
-                    Some((id, _)) => id,
-                    None => break,
-                };
-
-                // Remove registration
-                self.remover.with(|r| r.borrow().remove(&id))?;
+            if p > t {
+                return None;
             }
-            set_root_hash();
-            Ok(())
+
+            exps.pop().map(|(id, _)| id)
         })
+    }
+}
+
+impl Expire for Expirer {
+    fn expire(&self, t: u64) -> Result<(), ExpireError> {
+        while let Some(id) = self.get_id(t) {
+            // Remove registration
+            self.remover.with(|r| r.borrow().remove(&id))?;
+        }
+        set_root_hash();
+        Ok(())
     }
 }
 
@@ -535,6 +649,11 @@ mod tests {
     fn create_ok() -> Result<(), Error> {
         crate::ID_SEED.with(|s| s.borrow_mut().insert((), 0));
 
+        REGISTRATION_EXPIRATION_TTL.with(|s| {
+            let mut s = s.borrow_mut();
+            s.insert((), 60 * 60 * 24 * 3);
+        });
+
         let creator = Creator::new(&ID_GENERATOR, &REGISTRATIONS, &NAMES, &EXPIRATIONS);
 
         let id = creator.create(
@@ -542,7 +661,7 @@ mod tests {
             &Principal::from_text("aaaaa-aa")?, // canister
         )?;
 
-        // Check regsitration
+        // Check registration
         let reg = REGISTRATIONS
             .with(|regs| regs.borrow().get(&id.to_owned().into()))
             .expect("expected registration to exist but none found");
@@ -610,6 +729,11 @@ mod tests {
             canister: Principal::from_text("aaaaa-aa")?,
             state: State::PendingOrder,
         };
+
+        REGISTRATION_EXPIRATION_TTL.with(|s| {
+            let mut s = s.borrow_mut();
+            s.insert((), 60 * 60 * 24 * 3);
+        });
 
         REGISTRATIONS.with(|regs| regs.borrow_mut().insert("id".to_string().into(), reg));
 

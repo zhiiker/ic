@@ -4,20 +4,15 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Eq, PartialEq, Debug, Default, Deserialize, Serialize)]
 /// The source of the unix domain socket to be used for inter-process
 /// communication.
 pub enum IncomingSource {
     /// We use systemd's created socket.
+    #[default]
     Systemd,
-    /// We use the corresponing path as socket.
+    /// We use the corresponding path as socket.
     Path(PathBuf),
-}
-
-impl Default for IncomingSource {
-    fn default() -> Self {
-        IncomingSource::Systemd
-    }
 }
 
 /// This struct contains configuration options for the BTC Adapter.
@@ -51,11 +46,25 @@ pub struct Config {
     /// Specifies which unix domain socket should be used for serving incoming requests.
     #[serde(default)]
     pub incoming_source: IncomingSource,
+    /// Specifies the address limits used by the `AddressBook`.
+    #[serde(default)]
+    pub address_limits: (usize, usize),
 }
 
 /// Set the default idle seconds to one hour.
 fn default_idle_seconds() -> u64 {
     3600
+}
+
+/// This function is used to get the address limits for the `AddressBook`
+/// based on the provided `Network`.
+pub(crate) fn address_limits(network: Network) -> (usize, usize) {
+    match network {
+        Network::Bitcoin => (500, 2000),
+        Network::Testnet => (100, 1000),
+        Network::Signet => (1, 1),
+        Network::Regtest => (1, 1),
+    }
 }
 
 impl Config {
@@ -80,6 +89,7 @@ impl Default for Config {
             ipv6_only: false,
             logger: LoggerConfig::default(),
             incoming_source: Default::default(),
+            address_limits: address_limits(Network::Bitcoin), // Address limits used for Bitcoin mainnet
         }
     }
 }
@@ -113,6 +123,7 @@ pub mod test {
 
         pub fn with_network(mut self, network: Network) -> Self {
             self.config.network = network;
+            self.config.address_limits = address_limits(network);
             self
         }
 

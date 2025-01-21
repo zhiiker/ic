@@ -21,7 +21,7 @@ use std::fmt;
 /// assert_eq!("0xdeadbeef", format!("{:?}", DebugBlob(&[0xde, 0xad, 0xbe, 0xef][..])));
 /// assert_eq!("30×01", format!("{:?}", DebugBlob(&vec![1; 30][..])));
 /// ```
-#[derive(PartialEq, Eq)]
+#[derive(Eq, PartialEq)]
 pub struct DebugBlob<'a>(pub &'a [u8]);
 
 impl fmt::Debug for DebugBlob<'_> {
@@ -96,7 +96,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[should_panic(expected = "left: `8×01 4×02 4×03`,\n right: `8×01 4×02 3×03 1×04`")]
+    #[should_panic(expected = "left: 8×01 4×02 4×03\n right: 8×01 4×02 3×03 1×04")]
     fn test_debug_blob() {
         assert_eq!(
             DebugBlob(&[1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]),

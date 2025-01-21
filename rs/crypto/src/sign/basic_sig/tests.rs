@@ -1,11 +1,10 @@
-#![allow(clippy::unwrap_used)]
-
 use super::*;
 use crate::common::test_utils::crypto_component::crypto_component_with_csp;
 use crate::sign::tests::*;
 use assert_matches::assert_matches;
 use ic_crypto_internal_csp::key_id::KeyId;
 use ic_crypto_test_utils_csp::MockAllCryptoServiceProvider;
+use ic_crypto_test_utils_reproducible_rng::reproducible_rng;
 use ic_types::crypto::{AlgorithmId, SignableMock};
 use ic_types::messages::MessageId;
 use ic_types::registry::RegistryClientError;
@@ -195,6 +194,7 @@ mod verify_basic_sig {
         let crypto_component = TempCryptoComponent::builder()
             .with_keys_in_registry_version(NodeKeysToGenerate::only_node_signing_key(), REG_V2)
             .with_node_id(NODE_1)
+            .with_rng(reproducible_rng())
             .build();
         let msg = SignableMock::new(b"message".to_vec());
 
@@ -292,6 +292,7 @@ mod verify_sig_batch {
         let crypto = TempCryptoComponent::builder()
             .with_keys_in_registry_version(NodeKeysToGenerate::only_node_signing_key(), REG_V2)
             .with_node_id(NODE_1)
+            .with_rng(reproducible_rng())
             .build();
 
         let msg = SignableMock::new(b"Hello World!".to_vec());
@@ -310,6 +311,7 @@ mod verify_sig_batch {
 
     #[test]
     fn should_correctly_verify_batch_with_multiple_signatures() {
+        let mut rng = reproducible_rng();
         let registry_data = Arc::new(ProtoRegistryDataProvider::new());
         let registry_client =
             Arc::new(FakeRegistryClient::new(Arc::clone(&registry_data) as Arc<_>));
@@ -321,6 +323,7 @@ mod verify_sig_batch {
                 Arc::clone(&registry_data) as Arc<_>,
             )
             .with_node_id(NODE_1)
+            .with_rng(rng.fork())
             .build();
         let crypto_2 = TempCryptoComponent::builder()
             .with_keys_in_registry_version(NodeKeysToGenerate::only_node_signing_key(), REG_V2)
@@ -329,6 +332,7 @@ mod verify_sig_batch {
                 Arc::clone(&registry_data) as Arc<_>,
             )
             .with_node_id(NODE_2)
+            .with_rng(rng)
             .build();
         registry_client.reload();
         let msg = SignableMock::new(b"message".to_vec());
@@ -349,6 +353,7 @@ mod verify_sig_batch {
 
     #[test]
     fn should_not_verify_batch_on_different_messages() {
+        let mut rng = reproducible_rng();
         let registry_data = Arc::new(ProtoRegistryDataProvider::new());
         let registry_client =
             Arc::new(FakeRegistryClient::new(Arc::clone(&registry_data) as Arc<_>));
@@ -360,6 +365,7 @@ mod verify_sig_batch {
                 Arc::clone(&registry_data) as Arc<_>,
             )
             .with_node_id(NODE_1)
+            .with_rng(rng.fork())
             .build();
         let crypto_2 = TempCryptoComponent::builder()
             .with_keys_in_registry_version(NodeKeysToGenerate::only_node_signing_key(), REG_V2)
@@ -368,6 +374,7 @@ mod verify_sig_batch {
                 Arc::clone(&registry_data) as Arc<_>,
             )
             .with_node_id(NODE_2)
+            .with_rng(rng)
             .build();
         registry_client.reload();
 
@@ -387,6 +394,62 @@ mod verify_sig_batch {
 
         signatures.insert(NODE_1, &sig_node1_on_msg);
         signatures.insert(NODE_2, &sig_node2_on_other_msg);
+
+        let sig_batch = crypto_1.combine_basic_sig(signatures, REG_V2);
+        assert!(sig_batch.is_ok());
+
+        assert_matches!(
+            crypto_1.verify_basic_sig_batch(&sig_batch.unwrap(), &msg, REG_V2),
+            Err(CryptoError::SignatureVerification { .. })
+        );
+    }
+
+    #[test]
+    fn should_not_verify_batch_with_corrupted_signature() {
+        let mut rng = reproducible_rng();
+        let registry_data = Arc::new(ProtoRegistryDataProvider::new());
+        let registry_client =
+            Arc::new(FakeRegistryClient::new(Arc::clone(&registry_data) as Arc<_>));
+
+        let crypto_1 = TempCryptoComponent::builder()
+            .with_keys_in_registry_version(NodeKeysToGenerate::only_node_signing_key(), REG_V2)
+            .with_registry_client_and_data(
+                Arc::clone(&registry_client) as Arc<_>,
+                Arc::clone(&registry_data) as Arc<_>,
+            )
+            .with_node_id(NODE_1)
+            .with_rng(rng.fork())
+            .build();
+        let crypto_2 = TempCryptoComponent::builder()
+            .with_keys_in_registry_version(NodeKeysToGenerate::only_node_signing_key(), REG_V2)
+            .with_registry_client_and_data(
+                Arc::clone(&registry_client) as Arc<_>,
+                Arc::clone(&registry_data) as Arc<_>,
+            )
+            .with_node_id(NODE_2)
+            .with_rng(rng)
+            .build();
+        registry_client.reload();
+
+        let msg = SignableMock::new(b"Hello World!".to_vec());
+        let sig_node1 = crypto_1.sign_basic(&msg, NODE_1, REG_V2).unwrap();
+        let sig_node2 = crypto_2.sign_basic(&msg, NODE_2, REG_V2).unwrap();
+        let sig_node2_corrupted = {
+            let mut sig = sig_node2.get().0;
+            sig[0] ^= 0x80; // flip first bit
+            BasicSigOf::new(BasicSig(sig))
+        };
+
+        let mut signatures = BTreeMap::new();
+        assert!(crypto_1
+            .verify_basic_sig(&sig_node1, &msg, NODE_1, REG_V2)
+            .is_ok());
+        assert!(crypto_1
+            .verify_basic_sig(&sig_node2_corrupted, &msg, NODE_2, REG_V2)
+            .is_err());
+
+        signatures.insert(NODE_1, &sig_node1);
+        signatures.insert(NODE_2, &sig_node2_corrupted);
 
         let sig_batch = crypto_1.combine_basic_sig(signatures, REG_V2);
         assert!(sig_batch.is_ok());
@@ -489,61 +552,6 @@ mod verify_basic_sig_by_public_key {
         );
 
         assert_matches!(result, Err(CryptoError::MalformedSignature { .. }));
-    }
-
-    #[test]
-    fn should_delegate_to_csp_for_verify_basic_sig_by_public_key() {
-        let request_id = request_id();
-        let (sig, pk) = request_id_signature_and_public_key(&request_id, AlgorithmId::Ed25519);
-        let mut csp = MockAllCryptoServiceProvider::new();
-        let msg_clone = request_id.clone();
-        let expected_signature = SigConverter::for_target(AlgorithmId::Ed25519)
-            .try_from_basic(&sig)
-            .expect("invalid signature");
-        let expected_public_key = CspPublicKey::try_from(&pk).expect("invalid public key");
-        csp.expect_verify()
-            .times(1)
-            .withf(move |signature, message_bytes, algorithm_id, public_key| {
-                *signature == expected_signature
-                    && *message_bytes == msg_clone.as_signed_bytes()
-                    && *algorithm_id == AlgorithmId::Ed25519
-                    && *public_key == expected_public_key
-            })
-            .return_const(Ok(()));
-        let crypto = crypto_component_with_csp(csp, registry_panicking_on_usage());
-
-        assert!(crypto
-            .verify_basic_sig_by_public_key(&sig, &request_id, &pk)
-            .is_ok());
-    }
-
-    #[test]
-    fn should_return_error_from_csp_for_verify_basic_sig_by_public_key() {
-        let request_id = request_id();
-        let (sig, pk) = request_id_signature_and_public_key(&request_id, AlgorithmId::Ed25519);
-        let mut csp = MockAllCryptoServiceProvider::new();
-        let msg_clone = request_id.clone();
-        let expected_signature = SigConverter::for_target(AlgorithmId::Ed25519)
-            .try_from_basic(&sig)
-            .expect("invalid signature");
-        let expected_public_key = CspPublicKey::try_from(&pk).expect("invalid public key");
-        let expected_error = CryptoError::InvalidArgument {
-            message: "invalid arg from csp".to_string(),
-        };
-        csp.expect_verify()
-            .times(1)
-            .withf(move |signature, message_bytes, algorithm_id, public_key| {
-                *signature == expected_signature
-                    && *message_bytes == msg_clone.as_signed_bytes()
-                    && *algorithm_id == AlgorithmId::Ed25519
-                    && *public_key == expected_public_key
-            })
-            .return_const(Err(expected_error.clone()));
-        let crypto = crypto_component_with_csp(csp, registry_panicking_on_usage());
-
-        let result = crypto.verify_basic_sig_by_public_key(&sig, &request_id, &pk);
-
-        assert_matches!(result, Err(error) if error == expected_error)
     }
 
     fn request_id() -> MessageId {

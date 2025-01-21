@@ -1,6 +1,6 @@
 //! An error that occurs if the threshold signature data has not been loaded
 //! into the threshold signature data store.
-use crate::crypto::threshold_sig::ni_dkg::DkgId;
+use crate::crypto::threshold_sig::ni_dkg::NiDkgId;
 use crate::crypto::CryptoError;
 use std::fmt;
 
@@ -8,9 +8,9 @@ use std::fmt;
 /// threshold signature data store. Refer to the documentation of
 /// `ThresholdSigner` and `ThresholdSigVerifier` for details on how to act upon
 /// this error.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub enum ThresholdSigDataNotFoundError {
-    ThresholdSigDataNotFound { dkg_id: DkgId },
+    ThresholdSigDataNotFound { dkg_id: NiDkgId },
 }
 
 impl fmt::Display for ThresholdSigDataNotFoundError {

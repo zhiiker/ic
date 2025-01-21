@@ -39,10 +39,15 @@ options may be specified:
   --hostname name
     Name to assign to the host. Will be used in logging.
 
-  --name_servers servers
+  --ipv4_name_servers servers
     DNS servers to use. Can be multiple servers separated by space (make sure
     to quote the argument string so it appears as a single argument to the
-    script, e.g. --name_servers "8.8.8.8 1.1.1.1").
+    script, e.g., --name_servers "8.8.8.8 1.1.1.1").
+
+  --ipv6_name_servers servers
+    DNS servers to use. Can be multiple servers separated by space (make sure
+    to quote the argument string so it appears as a single argument to the
+    script, e.g., --name_servers "2606:4700:4700::1111 2606:4700:4700::1001").
 
   --elasticsearch_url url
     Logging url to use.
@@ -70,43 +75,94 @@ options may be specified:
     Specify an initial denylist of canisters for the Boundary Nodes
 
   --denylist_url url
-    Specify the url for the denylist updater
-
-  --prober-identity path
-    specify an identity file for the prober
+    Specify the url where to download denylist
 
   --system-domains
-    comma-delimited list of domains serving system canisters (e.g. ic0.dev or ic0.app)
+    comma-delimited list of domains serving system canisters (e.g., ic0.dev or ic0.app)
 
   --application-domains
-    comma-delimited list of domains serving application canisters (e.g. ic0.dev or ic0.app)
+    comma-delimited list of domains serving application canisters (e.g., ic0.dev or ic0.app)
 
   --certdir
     specify the directory holding TLS certificates for the hosted domain
-    (default: None i.e. snakeoil/self certified certificate will be used)
+    (default: None i.e., snakeoil/self certified certificate will be used)
 
   --ipv4_http_ips
-    the ipv4 blocks (e.g. "1.2.3.4/5") to be whitelisted for inbound http(s)
+    the ipv4 blocks (e.g., "1.2.3.4/5") to be whitelisted for inbound http(s)
     traffic. Multiple block may be specified separated by commas.
 
-  --ipv6_http_ips)
-    the ipv6 blocks (e.g. "1:2:3:4::/64") to be whitelisted for inbound http(s)
+  --ipv6_http_ips
+    the ipv6 blocks (e.g., "1:2:3:4::/64") to be whitelisted for inbound http(s)
     traffic. Multiple block may be specified separated by commas.
 
-  --ipv6_debug_ips)
-    the ipv6 blocks (e.g. "1:2:3:4::/64") to be whitelisted for inbound debug
-    (e.g. ssh) traffic. Multiple block may be specified separated by commas.
+  --ipv6_debug_ips
+    the ipv6 blocks (e.g., "1:2:3:4::/64") to be whitelisted for inbound debug
+    (e.g., ssh) traffic. Multiple block may be specified separated by commas.
 
-  --ipv6_monitoring_ips)
-    the ipv6 blocks (e.g. "1:2:3:4::/64") to be whitelisted for inbound
-    monitoring (e.g. prometheus) traffic. Multiple block may be specified separated by
+  --ipv6_monitoring_ips
+    the ipv6 blocks (e.g., "1:2:3:4::/64") to be whitelisted for inbound
+    monitoring (e.g., prometheus) traffic. Multiple block may be specified separated by
     commas.
+
+  --canary-proxy-port
+    the portnumber to run the canary proxy on. Canary proxy disabled if not provided
+
+  --certificate_orchestrator_uri
+    the API domain to reach the certificate orchestrator canister (e.g., https://ic0.app/).
+
+  --certificate_orchestrator_canister_id
+    the canister ID of the certificate orchestrator.
+
+  --certificate_issuer_delegation_domain
+    the delegation domain, which is used for the DNS-01 ACME challenges.
+
+  --certificate_issuer_name_servers
+    name servers used for verifying custom-domains DNS configuration
+
+  --certificate_issuer_name_servers_port
+    port used for communicating with name servers
+
+  --certificate_issuer_acme_provider_url
+    URL of the ACME provider (e.g., https://acme-v02.api.letsencrypt.org for Let's Encrypt).
+
+  --certificate_issuer_cloudflare_api_url
+    the URL of the DNS provider that controls the delegation domain.
+
+  --certificate_issuer_cloudflare_api_key
+    the API key that controls the delegation domain.
+
+  --certificate_issuer_identity
+    path to the file containing an allowlisted identity in the certificate orchestrator.
+
+  --certificate_issuer_encryption_key
+    path to the file containing the symmetric encryption key to encrypt the certificates
+    (and the corresponding private keys) before uploading them to the certificate
+    orchestrator canister.
+
+  --certificate_issuer_task_delay_sec
+    delay in seconds that is added to the processing deadline for any task that
+    the certificate issuer submits to the certificate orchestrator.
+
+  --certificate_issuer_task_error_delay_sec
+    delay in seconds that is added to the processing deadline for any task that
+    failed while processing in the certificate issuer.
+
+  --certificate_issuer_peek_sleep_sec
+    time between peeks by the certificate issuer to fetch a new task from the
+    certificate orchestrator.
+
+  --ic_registry_local_store
+    path to a local registry store to be used instead of the one provided by the
+    registry replicator.
+
+  --env
+    deployment environment (dev/prod/test)
 
 EOF
 }
 
 # Arguments:
-# - $1 the comma seperated list of IPv4 addresses/prefixes
+# - $1 the comma separated list of IPv4 addresses/prefixes
 function check_ipv4_prefixes() {
     local ipv4_prefixes="$1"
     local fail=0
@@ -127,7 +183,7 @@ function check_ipv4_prefixes() {
 }
 
 # Arguments:
-# - $1 the comma seperated list of IPv6 addresses/prefixes
+# - $1 the comma separated list of IPv6 addresses/prefixes
 function check_ipv6_prefixes() {
     local ipv6_prefixes="$1"
     local fail=0
@@ -145,6 +201,30 @@ function check_ipv6_prefixes() {
     return ${fail}
 }
 
+# check variables ensures that either ALL or NONE
+# of the given variable names are set
+#
+# Arguments:
+# - $@ space separated list of variable names
+function check_variables() {
+    declare -a REQUIRED_VARIABLES=($@)
+
+    COUNT=0
+    if [[ "${#REQUIRED_VARIABLES[@]}" -gt 0 ]]; then
+        for VAR in "${REQUIRED_VARIABLES[@]}"; do
+            if [[ -v "${VAR}" && ! -z "${!VAR}" ]]; then
+                ((COUNT++))
+            fi
+        done
+    fi
+
+    if ! [[ "${COUNT}" == 0 || "${COUNT}" == "${#REQUIRED_VARIABLES[@]}" ]]; then
+        return 1
+    fi
+
+    return 0
+}
+
 # Arguments:
 # - $1 the tar file to build
 # - all remaining arguments: parameters to encode into the bootstrap
@@ -152,7 +232,16 @@ function build_ic_bootstrap_tar() {
     local OUT_FILE="$1"
     shift
 
-    local IPV4_HTTP_IPS IPV6_HTTP_IPS IPV6_DEBUG_IPS IPV6_MONITORING_IPS REQUIRE_SEO_CERTIFICATION REQUIRE_UNDERSCORE_CERTIFICATION
+    # Firewall
+    local IPV4_HTTP_IPS IPV6_HTTP_IPS IPV6_DEBUG_IPS IPV6_MONITORING_IPS
+    # Canary Proxy
+    local CANARY_PROXY_PORT
+    # Custom domains
+    local CERTIFICATE_ORCHESTRATOR_URI CERTIFICATE_ORCHESTRATOR_CANISTER_ID CERTIFICATE_ISSUER_DELEGATION_DOMAIN
+    local CERTIFICATE_ISSUER_ACME_PROVIDER_URL CERTIFICATE_ISSUER_CLOUDFLARE_API_URL CERTIFICATE_ISSUER_CLOUDFLARE_API_KEY
+    local CERTIFICATE_ISSUER_NAME_SERVERS CERTIFICATE_ISSUER_NAME_SERVERS_PORT CERTIFICATE_ISSUER_IDENTITY CERTIFICATE_ISSUER_ENCRYPTION_KEY
+    local CERTIFICATE_ISSUER_TASK_DELAY_SEC CERTIFICATE_ISSUER_TASK_ERROR_DELAY_SEC CERTIFICATE_ISSUER_PEEK_SLEEP_SEC
+
     while true; do
         if [ $# == 0 ]; then
             break
@@ -173,8 +262,11 @@ function build_ic_bootstrap_tar() {
             --hostname)
                 local HOSTNAME="$2"
                 ;;
-            --name_servers)
-                local NAME_SERVERS="$2"
+            --ipv4_name_servers)
+                local IPV4_NAME_SERVERS="$2"
+                ;;
+            --ipv6_name_servers)
+                local IPV6_NAME_SERVERS="$2"
                 ;;
             --elasticsearch_url)
                 local ELASTICSEARCH_URL="$2"
@@ -196,9 +288,6 @@ function build_ic_bootstrap_tar() {
                 ;;
             --denylist_url)
                 local DENYLIST_URL="$2"
-                ;;
-            --prober-identity)
-                local PROBER_IDENTITY="$2"
                 ;;
             --system-domains)
                 local SYSTEM_DOMAINS="$2"
@@ -224,12 +313,55 @@ function build_ic_bootstrap_tar() {
             --ipv6_monitoring_ips)
                 IPV6_MONITORING_IPS="$2"
                 ;;
-            --require_seo_certification)
-                REQUIRE_SEO_CERTIFICATION="$2"
+            --canary-proxy-port)
+                CANARY_PROXY_PORT="$2"
                 ;;
-            --require_underscore_certification)
-                REQUIRE_UNDERSCORE_CERTIFICATION="$2"
+            --certificate_orchestrator_uri)
+                CERTIFICATE_ORCHESTRATOR_URI="$2"
                 ;;
+            --certificate_orchestrator_canister_id)
+                CERTIFICATE_ORCHESTRATOR_CANISTER_ID="$2"
+                ;;
+            --certificate_issuer_delegation_domain)
+                CERTIFICATE_ISSUER_DELEGATION_DOMAIN="$2"
+                ;;
+            --certificate_issuer_name_servers)
+                CERTIFICATE_ISSUER_NAME_SERVERS="$2"
+                ;;
+            --certificate_issuer_name_servers_port)
+                CERTIFICATE_ISSUER_NAME_SERVERS_PORT="$2"
+                ;;
+            --certificate_issuer_acme_provider_url)
+                CERTIFICATE_ISSUER_ACME_PROVIDER_URL="$2"
+                ;;
+            --certificate_issuer_cloudflare_api_url)
+                CERTIFICATE_ISSUER_CLOUDFLARE_API_URL="$2"
+                ;;
+            --certificate_issuer_cloudflare_api_key)
+                CERTIFICATE_ISSUER_CLOUDFLARE_API_KEY="$2"
+                ;;
+            --certificate_issuer_identity)
+                CERTIFICATE_ISSUER_IDENTITY="$2"
+                ;;
+            --certificate_issuer_encryption_key)
+                CERTIFICATE_ISSUER_ENCRYPTION_KEY="$2"
+                ;;
+            --certificate_issuer_task_delay_sec)
+                CERTIFICATE_ISSUER_TASK_DELAY_SEC="$2"
+                ;;
+            --certificate_issuer_task_error_delay_sec)
+                CERTIFICATE_ISSUER_TASK_ERROR_DELAY_SEC="$2"
+                ;;
+            --certificate_issuer_peek_sleep_sec)
+                CERTIFICATE_ISSUER_PEEK_SLEEP_SEC="$2"
+                ;;
+            --ic_registry_local_store)
+                IC_REGISTRY_LOCAL_STORE="$2"
+                ;;
+            --env)
+                ENV="$2"
+                ;;
+
             *)
                 err "Unrecognized option: $1"
                 usage
@@ -249,6 +381,14 @@ function build_ic_bootstrap_tar() {
         fail=1
     fi
 
+    if [ -z ${ENV+x} ]; then
+        err "--env not set"
+        fail=1
+    elif [[ ! "${ENV}" =~ ^(dev|prod|test)$ ]]; then
+        err "--env should be set to one of: dev/prod/test"
+        fail=1
+    fi
+
     if [[ -z "${NNS_PUBLIC_KEY:-}" ]]; then
         err "missing nns_public_key"
         fail=1
@@ -261,7 +401,7 @@ function build_ic_bootstrap_tar() {
     IFS="," read -a SYSTEM_DOMAINS <<<$SYSTEM_DOMAINS
 
     for DOMAIN in "${SYSTEM_DOMAINS[@]}"; do
-        if [[ ! "${DOMAIN}" =~ ^.*\..*$ ]]; then
+        if [[ ! "${DOMAIN}" =~ ^.*\..*$ && ! "${DOMAIN}" =~ ^\[[0-9a-f:]*\]$ ]]; then
             err "malformed domain name: '${DOMAIN}'"
             fail=1
         fi
@@ -274,7 +414,7 @@ function build_ic_bootstrap_tar() {
     IFS="," read -a APPLICATION_DOMAINS <<<$APPLICATION_DOMAINS
 
     for DOMAIN in "${APPLICATION_DOMAINS[@]}"; do
-        if [[ ! "${DOMAIN}" =~ ^.*\..*$ ]]; then
+        if [[ ! "${DOMAIN}" =~ ^.*\..*$ && ! "${DOMAIN}" =~ ^\[[0-9a-f:]*\]$ ]]; then
             err "malformed domain name: '${DOMAIN}'"
             fail=1
         fi
@@ -298,6 +438,25 @@ function build_ic_bootstrap_tar() {
     check_ipv6_prefixes ${IPV6_DEBUG_IPS:=""} || fail=1
     check_ipv6_prefixes ${IPV6_MONITORING_IPS:=""} || fail=1
 
+    # Verify Configuration for Custom-Domains
+    CUSTOM_DOMAINS_VARIABLES=(
+        CERTIFICATE_ORCHESTRATOR_URI
+        CERTIFICATE_ORCHESTRATOR_CANISTER_ID
+        CERTIFICATE_ISSUER_DELEGATION_DOMAIN
+        CERTIFICATE_ISSUER_NAME_SERVERS
+        CERTIFICATE_ISSUER_NAME_SERVERS_PORT
+        CERTIFICATE_ISSUER_ACME_PROVIDER_URL
+        CERTIFICATE_ISSUER_CLOUDFLARE_API_URL
+        CERTIFICATE_ISSUER_CLOUDFLARE_API_KEY
+        CERTIFICATE_ISSUER_IDENTITY
+        CERTIFICATE_ISSUER_ENCRYPTION_KEY
+    )
+
+    if ! check_variables "${CUSTOM_DOMAINS_VARIABLES[@]}"; then
+        err "some of the certificate issuance options are not set. Either all or none have to be set"
+        fail=1
+    fi
+
     if [[ "${fail}" == 1 ]]; then
         exit 1
     fi
@@ -309,7 +468,8 @@ ipv6_address=${IPV6_ADDRESS:-}
 ipv6_gateway=${IPV6_GATEWAY:-}
 ipv4_address=${IPV4_ADDRESS:-}
 ipv4_gateway=${IPV4_GATEWAY:-}
-name_servers=${NAME_SERVERS:-}
+ipv4_name_servers=${IPV4_NAME_SERVERS:-}
+ipv6_name_servers=${IPV6_NAME_SERVERS:-}
 hostname=${HOSTNAME}
 ipv6_replica_ips=${IPV6_REPLICA_IPS}
 EOF
@@ -327,10 +487,10 @@ EOF
     # setup the deny list
     if [[ -n "${DENYLIST:-}" ]]; then
         echo "Using deny list ${DENYLIST}"
-        cp "${DENYLIST}" "${BOOTSTRAP_TMPDIR}/denylist.map"
+        cp "${DENYLIST}" "${BOOTSTRAP_TMPDIR}/denylist.json"
     else
         echo "Using empty denylist"
-        touch "${BOOTSTRAP_TMPDIR}/denylist.map"
+        echo '{"canisters":{}}' >"${BOOTSTRAP_TMPDIR}/denylist.json"
     fi
 
     # setup the bn_vars
@@ -339,22 +499,19 @@ EOF
     cat >"${BN_VARS_PATH}" <<EOF
 $(printf "system_domains=%s\n" "${SYSTEM_DOMAINS[@]}")
 $(printf "application_domains=%s\n" "${APPLICATION_DOMAINS[@]}")
+canary_proxy_port=${CANARY_PROXY_PORT:-}
 denylist_url=${DENYLIST_URL:-}
+env=${ENV:-}
 elasticsearch_url=${ELASTICSEARCH_URL}
 elasticsearch_tags=${ELASTICSEARCH_TAGS:-}
 ipv4_http_ips=${IPV4_HTTP_IPS}
 ipv6_http_ips=${IPV6_HTTP_IPS}
 ipv6_debug_ips=${IPV6_DEBUG_IPS}
 ipv6_monitoring_ips=${IPV6_MONITORING_IPS}
-require_seo_certification=${REQUIRE_SEO_CERTIFICATION:-}
-require_underscore_certification=${REQUIRE_UNDERSCORE_CERTIFICATION:-}
+logging_url=${LOGGING_URL:-"http://127.0.0.1:12345"}
+logging_user=${LOGGING_USER:-"undefined"}
+logging_password=${LOGGING_PASSWORD:-"undefined"}
 EOF
-
-    # setup the prober identity
-    if [[ -n "${PROBER_IDENTITY:-}" ]]; then
-        echo "Using prober identity ${PROBER_IDENTITY}"
-        cp "${PROBER_IDENTITY}" "${BOOTSTRAP_TMPDIR}/prober_identity.pem"
-    fi
 
     # setup the certificates
     if [[ -n "${CERT_DIR:-}" && -f "${CERT_DIR}/fullchain.pem" && -f "${CERT_DIR}/privkey.pem" && -f "${CERT_DIR}/chain.pem" ]]; then
@@ -365,7 +522,38 @@ EOF
         cp "${CERT_DIR}/chain.pem" "${BOOTSTRAP_TMPDIR}/certs"
     fi
 
-    tar cf "${OUT_FILE}" -C "${BOOTSTRAP_TMPDIR}" .
+    # setup custom domains
+    if [[ ! -z "${CERTIFICATE_ORCHESTRATOR_URI:-}" ]]; then
+        cp "${CERTIFICATE_ISSUER_IDENTITY}" "${BOOTSTRAP_TMPDIR}/certificate_issuer_identity.pem"
+        cp "${CERTIFICATE_ISSUER_ENCRYPTION_KEY}" "${BOOTSTRAP_TMPDIR}/certificate_issuer_enc_key.pem"
+
+        cat >"${BOOTSTRAP_TMPDIR}/certificate_issuer.conf" <<EOF
+certificate_orchestrator_uri=${CERTIFICATE_ORCHESTRATOR_URI}
+certificate_orchestrator_canister_id=${CERTIFICATE_ORCHESTRATOR_CANISTER_ID}
+certificate_issuer_delegation_domain=${CERTIFICATE_ISSUER_DELEGATION_DOMAIN}
+certificate_issuer_name_servers=${CERTIFICATE_ISSUER_NAME_SERVERS}
+certificate_issuer_name_servers_port=${CERTIFICATE_ISSUER_NAME_SERVERS_PORT}
+certificate_issuer_acme_provider_url=${CERTIFICATE_ISSUER_ACME_PROVIDER_URL}
+certificate_issuer_cloudflare_api_url=${CERTIFICATE_ISSUER_CLOUDFLARE_API_URL}
+certificate_issuer_cloudflare_api_key=${CERTIFICATE_ISSUER_CLOUDFLARE_API_KEY}
+${CERTIFICATE_ISSUER_TASK_DELAY_SEC:+certificate_issuer_task_delay_sec=${CERTIFICATE_ISSUER_TASK_DELAY_SEC}}
+${CERTIFICATE_ISSUER_TASK_ERROR_DELAY_SEC:+certificate_issuer_task_error_delay_sec=${CERTIFICATE_ISSUER_TASK_ERROR_DELAY_SEC}}
+${CERTIFICATE_ISSUER_PEEK_SLEEP_SEC:+certificate_issuer_peek_sleep_sec=${CERTIFICATE_ISSUER_PEEK_SLEEP_SEC}}
+EOF
+    fi
+
+    # use the registry local store
+    if [[ -n "${IC_REGISTRY_LOCAL_STORE:-}" ]]; then
+        echo "Using the registry local store at ${IC_REGISTRY_LOCAL_STORE}"
+        cp -r "${IC_REGISTRY_LOCAL_STORE}" "${BOOTSTRAP_TMPDIR}/ic_registry_local_store"
+    fi
+
+    tar cf "${OUT_FILE}" \
+        --sort=name \
+        --owner=root:0 \
+        --group=root:0 \
+        --mtime="UTC 1970-01-01 00:00:00" \
+        -C "${BOOTSTRAP_TMPDIR}" .
     rm -rf "${BOOTSTRAP_TMPDIR}"
 }
 
@@ -378,11 +566,15 @@ function build_ic_bootstrap_diskimage() {
     shift
 
     local TMPDIR=$(mktemp -d)
-    build_ic_bootstrap_tar "${TMPDIR}/ic-bootstrap.tar" "$@"
+    local TAR="${TMPDIR}/ic-bootstrap.tar"
+    build_ic_bootstrap_tar "${TAR}" "$@"
 
-    truncate -s 10M "${OUT_FILE}"
-    mkfs.vfat "${OUT_FILE}"
-    mcopy -i "${OUT_FILE}" -o "${TMPDIR}/ic-bootstrap.tar" ::
+    size=$(du --bytes "${TAR}" | awk '{print $1}')
+    size=$((2 * size + 1048576))
+    echo "image size: $size"
+    truncate -s $size "${OUT_FILE}"
+    mkfs.vfat -n CONFIG "${OUT_FILE}"
+    mcopy -i "${OUT_FILE}" -o "${TAR}" ::
 
     rm -rf "${TMPDIR}"
 }

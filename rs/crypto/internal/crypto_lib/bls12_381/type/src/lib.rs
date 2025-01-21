@@ -1,10 +1,32 @@
-//! Wrapper for BLS12-381 operations
+//! BLS12-381 wrapper types and common operations
+//!
+//! This crate provides a stable API for various operations relevant
+//! both to generic uses of BLS12-381 (point multiplication, pairings, ...)
+//! as well as Internet Computer specific functionality, especially functions
+//! necessary to implement the Non Interactive Distributed Key Generation
+//!
+//! It also offers optimized implementations of point multiplication and
+//! multiscalar multiplication which are substantially faster than the basic
+//! implementations from the bls12_381 crate, which this crate uses for
+//! its underlying arithmetic
+//!
+//! It also includes implementations of polynomial arithmetic and
+//! Lagrange interpolation.
 
 #![forbid(unsafe_code)]
 #![forbid(missing_docs)]
 #![warn(rust_2018_idioms)]
 #![warn(future_incompatible)]
 #![allow(clippy::needless_range_loop)]
+
+mod interpolation;
+mod poly;
+
+pub use interpolation::{InterpolationError, LagrangeCoefficients};
+pub use poly::Polynomial;
+
+/// The index of a node.
+pub type NodeIndex = u32;
 
 #[cfg(test)]
 mod tests;
@@ -46,6 +68,10 @@ pub enum PairingInvalidScalar {
 #[derive(Clone, Eq, PartialEq, Zeroize, ZeroizeOnDrop)]
 pub struct Scalar {
     value: ic_bls12_381::Scalar,
+}
+
+lazy_static::lazy_static! {
+    static ref SCALAR_ZERO: Scalar = Scalar::new(ic_bls12_381::Scalar::zero());
 }
 
 impl Ord for Scalar {
@@ -115,6 +141,17 @@ impl Scalar {
         Self::from_u64(v as u64)
     }
 
+    /// Create a scalar used for threshold polynomial evaluation
+    ///
+    /// Normally this is used in threshold schemes, where a polynomial
+    /// `f` is evaluated as `f(x)` where `x` is an integer > 0 which
+    /// is unique to the node. In this scenario, `f(0)` reveals the
+    /// full secret and is never computed. Thus, we number the nodes
+    /// starting from index 1 instead of 0.
+    pub fn from_node_index(node_index: NodeIndex) -> Self {
+        Self::from_u64(node_index as u64 + 1)
+    }
+
     /// Create a scalar from a small integer value
     pub fn from_isize(v: isize) -> Self {
         if v < 0 {
@@ -139,7 +176,7 @@ impl Scalar {
 
     /// Randomly generate a scalar in a way that is compatible with MIRACL
     ///
-    /// This should not be used for new code but only for compatability in
+    /// This should not be used for new code but only for compatibility in
     /// situations where MIRACL's BIG::randomnum was previously used
     pub fn miracl_random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
         /*
@@ -185,6 +222,11 @@ impl Scalar {
     /// Return the scalar 0
     pub fn zero() -> Self {
         Self::new(ic_bls12_381::Scalar::zero())
+    }
+
+    /// Return the scalar 0, as a static reference
+    pub fn zero_ref() -> &'static Self {
+        &SCALAR_ZERO
     }
 
     /// Return the scalar 1
@@ -366,6 +408,18 @@ impl Scalar {
         }
         // le_bytes[32..64] left as zero
 
+        let s = ic_bls12_381::Scalar::from_bytes_wide(&le_bytes);
+        le_bytes.zeroize();
+        Self::new(s)
+    }
+
+    /// Decode a scalar as a big-endian byte string, reducing modulo group order
+    pub fn from_bytes_wide(input: &[u8; 64]) -> Self {
+        let mut le_bytes = {
+            let mut buf = *input;
+            buf.reverse();
+            buf
+        };
         let s = ic_bls12_381::Scalar::from_bytes_wide(&le_bytes);
         le_bytes.zeroize();
         Self::new(s)
@@ -798,7 +852,7 @@ macro_rules! define_affine_and_projective_types {
                 const WINDOW_MASK: u8 = (1 << Self::WINDOW_BITS) - 1;
 
                 // The total number of windows in a scalar
-                const WINDOWS : usize = (Self::SUBGROUP_BITS + Self::WINDOW_BITS - 1) / Self::WINDOW_BITS;
+                const WINDOWS: usize = Self::SUBGROUP_BITS.div_ceil(Self::WINDOW_BITS);
 
                 // We must select from 2^WINDOW_BITS elements in each table
                 // group. However one element of the table group is always the
@@ -820,7 +874,7 @@ macro_rules! define_affine_and_projective_types {
 
                         tbl_i[0] = accum;
                         for j in 1..Self::WINDOW_ELEMENTS {
-                            // Our table indexes are off by one due to the ommitted
+                            // Our table indexes are off by one due to the omitted
                             // identity element. So here we are checking if we are
                             // about to compute a point that is a doubling of a point
                             // we have previously computed. If so we can compute it
@@ -915,6 +969,12 @@ macro_rules! define_affine_and_projective_types {
             precomputed: Option<Arc<paste! { [<$affine PrecomputedTable>] }>>,
         }
 
+        impl AsRef<$affine> for $affine {
+            fn as_ref(&self) -> &Self{
+                return &self
+            }
+        }
+
         impl Eq for $affine {}
 
         impl PartialEq for $affine {
@@ -1000,7 +1060,7 @@ macro_rules! define_affine_and_projective_types {
             /// BLS12381G2_XMD:SHA-256_SSWU_RO_ suite.
             ///
             /// # Arguments
-            /// * `domain_sep` - some protocol specific domain seperator
+            /// * `domain_sep` - some protocol specific domain separator
             /// * `input` - the input which will be hashed
             pub fn hash(domain_sep: &[u8], input: &[u8]) -> Self {
                 $projective::hash(domain_sep, input).into()
@@ -1013,7 +1073,7 @@ macro_rules! define_affine_and_projective_types {
             /// BLS12381G2_XMD:SHA-256_SSWU_RO_ suite.
             ///
             /// # Arguments
-            /// * `domain_sep` - some protocol specific domain seperator
+            /// * `domain_sep` - some protocol specific domain separator
             /// * `input` - the input which will be hashed
             pub fn hash_with_precomputation(domain_sep: &[u8], input: &[u8]) -> Self {
                 let mut pt = Self::hash(domain_sep, input);
@@ -1154,6 +1214,12 @@ macro_rules! define_affine_and_projective_types {
             value: ic_bls12_381::$projective
         }
 
+        impl AsRef<$projective> for $projective {
+            fn as_ref(&self) -> &Self {
+                return &self
+            }
+        }
+
         impl $projective {
             /// The size in bytes of this type
             pub const BYTES: usize = $size;
@@ -1255,7 +1321,7 @@ macro_rules! define_affine_and_projective_types {
             /// BLS12381G2_XMD:SHA-256_SSWU_RO_ suite.
             ///
             /// # Arguments
-            /// * `domain_sep` - some protocol specific domain seperator
+            /// * `domain_sep` - some protocol specific domain separator
             /// * `input` - the input which will be hashed
             pub fn hash(domain_sep: &[u8], input: &[u8]) -> Self {
                 let pt =
@@ -1589,10 +1655,17 @@ macro_rules! declare_muln_vartime_dispatch_for {
             }
 
             fn muln_vartime_naive(points: &[Self], scalars: &[Scalar]) -> Self {
+                let (accum, points, scalars) = if points.len() % 2 == 0 {
+                    (Self::identity(), points, scalars)
+                } else {
+                    (&points[0] * &scalars[0], &points[1..], &scalars[1..])
+                };
                 points
-                    .iter()
-                    .zip(scalars.iter())
-                    .fold(Self::identity(), |accum, (p, s)| accum + p * s)
+                    .chunks(2)
+                    .zip(scalars.chunks(2))
+                    .fold(accum, |accum, (c_p, c_s)| {
+                        accum + Self::mul2(&c_p[0], &c_s[0], &c_p[1], &c_s[1])
+                    })
             }
         }
     };
@@ -1673,12 +1746,15 @@ macro_rules! declare_muln_vartime_affine_impl_for {
             /// Warning: this function leaks information about the scalars via
             /// memory-based side channels. Do not use this function with secret
             /// scalars.
-            pub fn muln_affine_vartime(points: &[$affine], scalars: &[Scalar]) -> Self {
+            pub fn muln_affine_vartime<T: AsRef<$affine>>(
+                points: &[T],
+                scalars: &[Scalar],
+            ) -> Self {
                 let count = std::cmp::min(points.len(), scalars.len());
                 let mut proj_points = Vec::with_capacity(count);
 
                 for i in 0..count {
-                    proj_points.push(<$proj>::from(&points[i]));
+                    proj_points.push(<$proj>::from(points[i].as_ref()));
                 }
 
                 Self::muln_vartime(&proj_points[..], scalars)
@@ -1812,10 +1888,10 @@ macro_rules! declare_windowed_scalar_mul_ops_for {
 /// These values were derived from benchmarks on a single machine,
 /// but seem to match fairly closely with simulated estimates of
 /// the cost of Pippenger's
-const G1_PROJECTIVE_USE_W3_LARGER_THAN: usize = 12;
-const G1_PROJECTIVE_USE_W4_LARGER_THAN: usize = 64;
-const G2_PROJECTIVE_USE_W3_LARGER_THAN: usize = 8;
-const G2_PROJECTIVE_USE_W4_LARGER_THAN: usize = 64;
+const G1_PROJECTIVE_USE_W3_IF_EQ_OR_GT: usize = 13;
+const G1_PROJECTIVE_USE_W4_IF_EQ_OR_GT: usize = 64;
+const G2_PROJECTIVE_USE_W3_IF_EQ_OR_GT: usize = 15;
+const G2_PROJECTIVE_USE_W4_IF_EQ_OR_GT: usize = 64;
 
 define_affine_and_projective_types!(G1Affine, G1Projective, 48);
 declare_addsub_ops_for!(G1Projective);
@@ -1824,8 +1900,8 @@ declare_windowed_scalar_mul_ops_for!(G1Projective, 4);
 declare_mul2_impl_for!(G1Projective, G1Mul2Table, 2, 3);
 declare_muln_vartime_dispatch_for!(
     G1Projective,
-    G1_PROJECTIVE_USE_W3_LARGER_THAN,
-    G1_PROJECTIVE_USE_W4_LARGER_THAN
+    G1_PROJECTIVE_USE_W3_IF_EQ_OR_GT,
+    G1_PROJECTIVE_USE_W4_IF_EQ_OR_GT
 );
 declare_muln_vartime_impls_for!(G1Projective, 3, 4);
 declare_muln_vartime_affine_impl_for!(G1Projective, G1Affine);
@@ -1839,8 +1915,8 @@ declare_windowed_scalar_mul_ops_for!(G2Projective, 4);
 declare_mul2_impl_for!(G2Projective, G2Mul2Table, 2, 3);
 declare_muln_vartime_dispatch_for!(
     G2Projective,
-    G2_PROJECTIVE_USE_W3_LARGER_THAN,
-    G2_PROJECTIVE_USE_W4_LARGER_THAN
+    G2_PROJECTIVE_USE_W3_IF_EQ_OR_GT,
+    G2_PROJECTIVE_USE_W4_IF_EQ_OR_GT
 );
 declare_muln_vartime_impls_for!(G2Projective, 3, 4);
 declare_muln_vartime_affine_impl_for!(G2Projective, G2Affine);
@@ -1848,7 +1924,7 @@ impl_debug_using_serialize_for!(G2Affine);
 impl_debug_using_serialize_for!(G2Projective);
 
 /// An element of the group Gt
-#[derive(Clone, Debug, Eq, PartialEq, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Eq, PartialEq, Debug, Zeroize, ZeroizeOnDrop)]
 pub struct Gt {
     value: ic_bls12_381::Gt,
 }
@@ -1953,6 +2029,8 @@ impl Gt {
     ///
     /// These are not deserializable, and serve only to uniquely identify
     /// the group element.
+    ///
+    /// We do guarantee that the tag of an element will remain stable over time
     pub fn tag(&self) -> [u8; Self::BYTES] {
         self.value.to_bytes()
     }
@@ -2259,7 +2337,7 @@ struct WindowInfo<const WINDOW_SIZE: usize> {}
 
 impl<const WINDOW_SIZE: usize> WindowInfo<WINDOW_SIZE> {
     const SIZE: usize = WINDOW_SIZE;
-    const WINDOWS: usize = (Scalar::BYTES * 8 + Self::SIZE - 1) / Self::SIZE;
+    const WINDOWS: usize = (Scalar::BYTES * 8).div_ceil(Self::SIZE);
 
     const MASK: u8 = 0xFFu8 >> (8 - Self::SIZE);
     const ELEMENTS: usize = (1 << Self::SIZE) as usize;

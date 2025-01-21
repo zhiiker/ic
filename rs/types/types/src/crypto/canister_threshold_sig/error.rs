@@ -1,5 +1,6 @@
 //! Defines errors that may occur in the context of canister threshold
 //! signatures.
+use crate::crypto::impl_display_using_debug;
 use crate::crypto::{AlgorithmId, CryptoError};
 use crate::registry::RegistryClientError;
 use crate::{Height, NodeId, RegistryVersion};
@@ -7,19 +8,7 @@ use ic_protobuf::proxy::ProxyDecodeError;
 use ic_protobuf::registry::crypto::v1::AlgorithmId as AlgorithmIdProto;
 use serde::{Deserialize, Serialize};
 
-macro_rules! impl_display_using_debug {
-    ($t:ty) => {
-        impl std::fmt::Display for $t {
-            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(f, "{:?}", self)
-            }
-        }
-    };
-}
-
-pub(crate) use impl_display_using_debug;
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum IDkgTranscriptIdError {
     DecreasedBlockHeight {
         existing_height: Height,
@@ -28,15 +17,15 @@ pub enum IDkgTranscriptIdError {
 }
 impl_display_using_debug!(IDkgTranscriptIdError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PresignatureQuadrupleCreationError {
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
+pub enum EcdsaPresignatureQuadrupleCreationError {
     InconsistentAlgorithmIds,
     InconsistentReceivers,
     InvalidTranscriptOrigin(String),
 }
-impl_display_using_debug!(PresignatureQuadrupleCreationError);
+impl_display_using_debug!(EcdsaPresignatureQuadrupleCreationError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum ThresholdEcdsaSigInputsCreationError {
     InconsistentAlgorithmIds,
     InconsistentReceivers,
@@ -46,7 +35,7 @@ pub enum ThresholdEcdsaSigInputsCreationError {
 }
 impl_display_using_debug!(ThresholdEcdsaSigInputsCreationError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum IDkgParamsValidationError {
     TooManyReceivers { receivers_count: usize },
     TooManyDealers { dealers_count: usize },
@@ -60,9 +49,10 @@ pub enum IDkgParamsValidationError {
 }
 impl_display_using_debug!(IDkgParamsValidationError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum InitialIDkgDealingsValidationError {
     DealerNotAllowed { node_id: NodeId },
+    DealersAndReceiversNotDisjoint,
     DeserializationError { error: String },
     InvalidTranscriptOperation,
     MismatchingDealing,
@@ -78,14 +68,14 @@ impl From<InitialIDkgDealingsValidationError> for ProxyDecodeError {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ThresholdEcdsaGetPublicKeyError {
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
+pub enum CanisterThresholdGetPublicKeyError {
     InvalidArgument(String),
     InternalError(String),
 }
-impl_display_using_debug!(ThresholdEcdsaGetPublicKeyError);
+impl_display_using_debug!(CanisterThresholdGetPublicKeyError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum IDkgCreateTranscriptError {
     SerializationError {
         internal_error: String,
@@ -114,7 +104,7 @@ pub enum IDkgCreateTranscriptError {
 }
 impl_display_using_debug!(IDkgCreateTranscriptError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum IDkgVerifyTranscriptError {
     InvalidArgument(String),
     InvalidDealingSignatureBatch {
@@ -126,15 +116,29 @@ pub enum IDkgVerifyTranscriptError {
 }
 impl_display_using_debug!(IDkgVerifyTranscriptError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum IDkgOpenTranscriptError {
-    PrivateKeyNotFound { key_id: String },
-    MissingDealingInTranscript { dealer_id: NodeId },
-    InternalError { internal_error: String },
+    PrivateKeyNotFound {
+        key_id: String,
+    },
+    PublicKeyNotFound {
+        node_id: NodeId,
+        registry_version: RegistryVersion,
+    },
+    MissingDealingInTranscript {
+        dealer_id: NodeId,
+    },
+    RegistryError(RegistryClientError),
+    InternalError {
+        internal_error: String,
+    },
+    TransientInternalError {
+        internal_error: String,
+    },
 }
 impl_display_using_debug!(IDkgOpenTranscriptError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum IDkgRetainKeysError {
     InternalError { internal_error: String },
     SerializationError { internal_error: String },
@@ -142,7 +146,7 @@ pub enum IDkgRetainKeysError {
 }
 impl_display_using_debug!(IDkgRetainKeysError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum IDkgLoadTranscriptError {
     InsufficientOpenings {
         internal_error: String,
@@ -176,7 +180,7 @@ pub enum IDkgLoadTranscriptError {
 }
 impl_display_using_debug!(IDkgLoadTranscriptError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum IDkgCreateDealingError {
     NotADealer {
         node_id: NodeId,
@@ -206,13 +210,13 @@ pub enum IDkgCreateDealingError {
     SecretSharesNotFound {
         commitment_string: String,
     },
-    AlgorithmMismatchWithSKS {
-        algorithm_id: AlgorithmId,
+    TransientInternalError {
+        internal_error: String,
     },
 }
 impl_display_using_debug!(IDkgCreateDealingError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum IDkgVerifyDealingPublicError {
     TranscriptIdMismatch,
     InvalidDealing {
@@ -225,7 +229,7 @@ pub enum IDkgVerifyDealingPublicError {
 }
 impl_display_using_debug!(IDkgVerifyDealingPublicError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum IDkgVerifyDealingPrivateError {
     InvalidDealing(String),
     NotAReceiver,
@@ -245,11 +249,13 @@ pub enum IDkgVerifyDealingPrivateError {
         algorithm_id: Option<AlgorithmIdProto>,
     },
     InternalError(String),
-    CspVaultRpcError(String),
+    TransientInternalError {
+        internal_error: String,
+    },
 }
 impl_display_using_debug!(IDkgVerifyDealingPrivateError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum IDkgVerifyInitialDealingsError {
     MismatchingTranscriptParams,
     PublicVerificationFailure {
@@ -260,7 +266,7 @@ pub enum IDkgVerifyInitialDealingsError {
 impl_display_using_debug!(IDkgVerifyInitialDealingsError);
 
 /// Occurs if verifying a complaint using `IDkgProtocol::verify_complaint` fails.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum IDkgVerifyComplaintError {
     InvalidComplaint,
     InvalidArgument {
@@ -295,7 +301,7 @@ pub enum IDkgVerifyComplaintError {
 }
 impl_display_using_debug!(IDkgVerifyComplaintError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum IDkgVerifyOpeningError {
     TranscriptIdMismatch,
     DealerIdMismatch,
@@ -305,33 +311,36 @@ pub enum IDkgVerifyOpeningError {
 }
 impl_display_using_debug!(IDkgVerifyOpeningError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum ThresholdEcdsaVerifySigShareError {
     InternalError { internal_error: String },
     SerializationError { internal_error: String },
     InvalidSignatureShare,
     InvalidArgumentMissingSignerInTranscript { signer_id: NodeId },
+    InvalidArguments(String),
 }
 impl_display_using_debug!(ThresholdEcdsaVerifySigShareError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ThresholdEcdsaSignShareError {
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
+pub enum ThresholdEcdsaCreateSigShareError {
     InternalError { internal_error: String },
     NotAReceiver,
     SerializationError { internal_error: String },
     SecretSharesNotFound { commitment_string: String },
+    TransientInternalError { internal_error: String },
 }
-impl_display_using_debug!(ThresholdEcdsaSignShareError);
+impl_display_using_debug!(ThresholdEcdsaCreateSigShareError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum ThresholdEcdsaVerifyCombinedSignatureError {
     InternalError { internal_error: String },
     InvalidSignature,
     SerializationError { internal_error: String },
+    InvalidArguments(String),
 }
 impl_display_using_debug!(ThresholdEcdsaVerifyCombinedSignatureError);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
 pub enum ThresholdEcdsaCombineSigSharesError {
     InternalError { internal_error: String },
     UnsatisfiedReconstructionThreshold { threshold: u32, share_count: usize },
@@ -339,3 +348,60 @@ pub enum ThresholdEcdsaCombineSigSharesError {
     SignerNotAllowed { node_id: NodeId },
 }
 impl_display_using_debug!(ThresholdEcdsaCombineSigSharesError);
+
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
+pub enum ThresholdSchnorrVerifySigShareError {
+    InternalError(String),
+    SerializationError(String),
+    InvalidSignatureShare,
+    InvalidArgumentMissingSignerInTranscript { signer_id: NodeId },
+    InvalidArguments(String),
+}
+impl_display_using_debug!(ThresholdSchnorrVerifySigShareError);
+
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
+pub enum ThresholdSchnorrCreateSigShareError {
+    InternalError(String),
+    NotAReceiver,
+    SerializationError(String),
+    SecretSharesNotFound { commitment_string: String },
+    TransientInternalError(String),
+    InvalidArguments(String),
+}
+impl_display_using_debug!(ThresholdSchnorrCreateSigShareError);
+
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
+pub enum ThresholdSchnorrVerifyCombinedSigError {
+    InternalError(String),
+    InvalidSignature,
+    SerializationError(String),
+    InvalidArguments(String),
+}
+impl_display_using_debug!(ThresholdSchnorrVerifyCombinedSigError);
+
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
+pub enum ThresholdSchnorrCombineSigSharesError {
+    InternalError(String),
+    UnsatisfiedReconstructionThreshold { threshold: u32, share_count: usize },
+    SerializationError(String),
+    SignerNotAllowed { node_id: NodeId },
+    InvalidArguments(String),
+}
+impl_display_using_debug!(ThresholdSchnorrCombineSigSharesError);
+
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
+pub enum ThresholdSchnorrSigInputsCreationError {
+    InconsistentAlgorithmIds(String, String),
+    InconsistentReceivers,
+    InvalidPreSignatureOrigin(String),
+    InvalidUseOfTaprootHash,
+    UnsupportedAlgorithm(String),
+}
+impl_display_using_debug!(ThresholdSchnorrSigInputsCreationError);
+
+#[derive(Clone, Eq, PartialEq, Debug, Deserialize, Serialize)]
+pub enum ThresholdSchnorrPresignatureTranscriptCreationError {
+    InvalidTranscriptOrigin(String),
+    UnsupportedAlgorithm(String),
+}
+impl_display_using_debug!(ThresholdSchnorrPresignatureTranscriptCreationError);

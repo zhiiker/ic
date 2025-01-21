@@ -1,24 +1,26 @@
 use assert_matches::assert_matches;
 use candid::Encode;
+use ic_config::execution_environment::DEFAULT_WASM_MEMORY_LIMIT;
+use ic_config::subnet_config::CyclesAccountManagerConfig;
 use ic_config::Config;
 use ic_error_types::{ErrorCode, RejectCode};
-use ic_ic00_types::{
-    self as ic00, CanisterIdRecord, CanisterInstallMode, CanisterSettingsArgsBuilder,
-    CanisterStatusResultV2, CanisterStatusType, EmptyBlob, InstallCodeArgs, Method, Payload,
-    UpdateSettingsArgs, IC_00,
+use ic_management_canister_types::{
+    self as ic00, CanisterChange, CanisterIdRecord, CanisterInstallMode,
+    CanisterSettingsArgsBuilder, CanisterStatusResultV2, CanisterStatusType, EmptyBlob,
+    InstallCodeArgs, Method, Payload, UpdateSettingsArgs, IC_00,
 };
 use ic_registry_provisional_whitelist::ProvisionalWhitelist;
 use ic_replica_tests as utils;
 use ic_replica_tests::assert_reject;
 use ic_test_utilities::assert_utils::assert_balance_equals;
+use ic_test_utilities::universal_canister::management::CanisterUpgradeOptions;
 use ic_test_utilities::universal_canister::{call_args, management, wasm, UNIVERSAL_CANISTER_WASM};
 use ic_types::{ingress::WasmResult, CanisterId, ComputeAllocation, Cycles, NumBytes, PrincipalId};
 use maplit::btreeset;
-use std::{collections::BTreeSet, str::FromStr};
+use std::{collections::BTreeSet, mem::size_of, str::FromStr};
 
 const BALANCE_EPSILON: u64 = 1_000_000;
 const NUM_CYCLES: u128 = 1_000_000_000;
-const CANISTER_CREATION_FEE: Cycles = Cycles::new(1_000_000_000_000);
 const CANISTER_FREEZE_BALANCE_RESERVE: Cycles = Cycles::new(5_000_000_000_000);
 
 #[test]
@@ -400,7 +402,7 @@ fn provisional_create_canister_with_cycles_respects_whitelist() {
                     ),
                 ),
             ),
-            RejectCode::DestinationInvalid,
+            RejectCode::CanisterError,
         );
     });
 }
@@ -480,7 +482,7 @@ fn provisional_top_up_canister_respects_whitelist() {
                     ),
                 ),
             ),
-            RejectCode::DestinationInvalid,
+            RejectCode::CanisterError,
         );
     });
 }
@@ -497,7 +499,8 @@ fn can_create_canister_with_cycles_from_another_canister() {
             test.canister_state(&canister_id).system_state.balance();
 
         // Create another canister with some cycles.
-        let cycles_for_new_canister = CANISTER_CREATION_FEE + Cycles::new(100_000_000);
+        let config = CyclesAccountManagerConfig::application_subnet();
+        let cycles_for_new_canister = config.canister_creation_fee + Cycles::new(100_000_000);
         let new_canister_id_payload = test
             .ingress(
                 canister_id,
@@ -549,7 +552,7 @@ fn provisional_create_canister_with_cycles_and_top_up() {
     let provisional_whitelist = ProvisionalWhitelist::Set(btreeset!(
         // PrincipalId of CanisterA that is created below.  This code assumes
         // that we can predict the canister Ids that are generated in
-        // CanisterManager and may need upating if that is no longer the case.
+        // CanisterManager and may need updating if that is no longer the case.
         PrincipalId::from_str("rwlgt-iiaaa-aaaaa-aaaaa-cai").unwrap(),
         PrincipalId::new_anonymous(),
     ));
@@ -704,12 +707,21 @@ fn can_get_canister_information() {
                 None,
                 canister_a.get(),
                 vec![canister_a.get()],
-                NumBytes::from(0),
+                NumBytes::from((2 * size_of::<CanisterChange>() + 2 * size_of::<PrincipalId>()) as u64),
                 num_cycles.get(),
                 ComputeAllocation::default().as_percent(),
                 None,
                 2592000,
+                Some(5_000_000_000_000u128),
+                Default::default(),
                 0u128,
+                0u128,
+                0u128,
+                0u128,
+                0u128,
+                0u128,
+                Some(DEFAULT_WASM_MEMORY_LIMIT.get()),
+                0u64,
             )
         );
 
@@ -726,7 +738,6 @@ fn can_get_canister_information() {
                         canister_b,
                         UNIVERSAL_CANISTER_WASM.to_vec(),
                         vec![],
-                        None,
                         None,
                         None,
                     )
@@ -750,7 +761,7 @@ fn can_get_canister_information() {
             Ok(WasmResult::Reply(res)) => assert_canister_status_result_equals(
                 CanisterStatusResultV2::new(
                     CanisterStatusType::Running,
-                    Some(ic_crypto_sha::Sha256::hash(UNIVERSAL_CANISTER_WASM).to_vec()),
+                    Some(ic_crypto_sha2::Sha256::hash(&UNIVERSAL_CANISTER_WASM).to_vec()),
                     canister_a.get(),
                     vec![canister_a.get()],
                     // We don't assert a specific memory size since the universal canister's
@@ -760,7 +771,16 @@ fn can_get_canister_information() {
                     ComputeAllocation::default().as_percent(),
                     None,
                     259200,
+                    None,
+                    Default::default(),
                     0u128,
+                    0u128,
+                    0u128,
+                    0u128,
+                    0u128,
+                    0u128,
+                    Some(DEFAULT_WASM_MEMORY_LIMIT.get()),
+                    0u64,
                 ),
                 CanisterStatusResultV2::decode(&res).unwrap(),
                 2 * BALANCE_EPSILON,
@@ -775,10 +795,10 @@ fn cannot_run_method_on_empty_canister() {
         let canister = test.create_canister().unwrap();
         match test.ingress(canister, "hello", vec![]) {
             Err(err) => {
-                assert_eq!(err.code(), ErrorCode::CanisterWasmModuleNotFound);
-                assert_eq!(
-                    err.description(),
-                    "Attempt to execute a message on canister rwlgt-iiaaa-aaaaa-aaaaa-cai which contains no Wasm module"
+                err.assert_contains(
+                    ErrorCode::CanisterWasmModuleNotFound,
+                    "Error from Canister rwlgt-iiaaa-aaaaa-aaaaa-cai: Attempted \
+                    to execute a message, but the canister contains no Wasm module.",
                 );
             }
             rest => panic!("Unexpected behaviour {:?}", rest),
@@ -805,7 +825,6 @@ fn installing_a_canister_with_lower_memory_allocation_than_it_uses_fails() {
                     None,
                     // Set memory allocation to 42 bytes (i.e. something ridiculously small).
                     Some(42),
-                    None,
                 )
                 .encode(),
             ),
@@ -821,7 +840,6 @@ fn installing_a_canister_with_lower_memory_allocation_than_it_uses_fails() {
                 canister_id,
                 UNIVERSAL_CANISTER_WASM.to_vec(),
                 vec![],
-                None,
                 None,
                 None,
             )
@@ -842,7 +860,6 @@ fn installing_a_canister_with_lower_memory_allocation_than_it_uses_fails() {
                     None,
                     // Set memory allocation to 10 bytes.
                     Some(10),
-                    None,
                 )
                 .encode(),
             ),
@@ -878,7 +895,6 @@ fn upgrading_a_canister_with_lower_memory_allocation_than_it_needs_fails() {
                 vec![],
                 None,
                 None,
-                None,
             )
             .encode(),
         )
@@ -896,7 +912,6 @@ fn upgrading_a_canister_with_lower_memory_allocation_than_it_needs_fails() {
                     vec![],
                     None,
                     Some(10),
-                    None,
                 )
                 .encode(),
             ),
@@ -932,4 +947,82 @@ fn assert_canister_status_result_equals(
         Cycles::from(actual.cycles()),
         Cycles::from(epsilon),
     );
+}
+
+#[test]
+// Tests canister Upgrade with skipping pre_upgrade hook, using CanisterInstallModeV2.
+fn test_canister_skip_upgrade() {
+    utils::simple_canister_test(|canister| {
+        let num_cycles = Cycles::new(1 << 70);
+
+        // Create a new canister from within a canister.
+        let reply = match canister
+            .update(wasm().call(management::create_canister(num_cycles.into_parts())))
+            .unwrap()
+        {
+            WasmResult::Reply(reply) => reply,
+            _ => panic!("Unexpected result"),
+        };
+
+        let canister_id = CanisterIdRecord::decode(&reply).unwrap().get_canister_id();
+
+        // Install canister code.
+        assert_matches!(
+            canister.update(wasm().call(management::install_code(
+                canister_id,
+                &*UNIVERSAL_CANISTER_WASM
+            ))),
+            Ok(WasmResult::Reply(_))
+        );
+
+        let set_trap_pre_upgrade = wasm().set_pre_upgrade(wasm().trap()).reply().build();
+
+        // Set pre_upgrade to trap.
+        assert_matches!(
+            canister.update(
+                wasm().inter_update(canister_id, call_args().other_side(set_trap_pre_upgrade),)
+            ),
+            Ok(WasmResult::Reply(_))
+        );
+
+        // Upgrade without skipping pre_upgrade should fail.
+        assert_matches!(
+            canister.update(wasm().call(
+                management::install_code(canister_id, &*UNIVERSAL_CANISTER_WASM).with_mode(
+                    management::InstallMode::Upgrade(Some(CanisterUpgradeOptions {
+                        skip_pre_upgrade: Some(false),
+                        wasm_memory_persistence: None,
+                    })),
+                ),
+            )),
+            Ok(WasmResult::Reject(_))
+        );
+
+        // Upgrade with skipping pre upgrade should succeed.
+        assert_matches!(
+            canister.update(wasm().call(
+                management::install_code(canister_id, &*UNIVERSAL_CANISTER_WASM).with_mode(
+                    management::InstallMode::Upgrade(Some(CanisterUpgradeOptions {
+                        skip_pre_upgrade: Some(true),
+                        wasm_memory_persistence: None,
+                    }))
+                ),
+            )),
+            Ok(WasmResult::Reply(_))
+        );
+
+        // Check that canister is upgraded. We try to execute another upgrade without skipping pre_upgrade,
+        // and it should succeed since there's a no-op pre_ugprade method after the upgrade.
+        assert_matches!(
+            canister.update(wasm().call(
+                management::install_code(canister_id, &*UNIVERSAL_CANISTER_WASM).with_mode(
+                    management::InstallMode::Upgrade(Some(CanisterUpgradeOptions {
+                        skip_pre_upgrade: Some(false),
+                        wasm_memory_persistence: None,
+                    })),
+                ),
+            )),
+            Ok(WasmResult::Reply(_))
+        );
+    });
 }

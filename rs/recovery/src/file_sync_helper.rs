@@ -1,16 +1,20 @@
-use crate::cli::wait_for_confirmation;
-use crate::command_helper::exec_cmd;
-use crate::error::{RecoveryError, RecoveryResult};
-use crate::ssh_helper;
-use core::time;
+use crate::{
+    cli::wait_for_confirmation,
+    command_helper::exec_cmd,
+    error::{RecoveryError, RecoveryResult},
+    ssh_helper,
+};
 use ic_http_utils::file_downloader::FileDownloader;
+use ic_replay::consent_given;
 use ic_types::ReplicaVersion;
 use slog::{info, warn, Logger};
-use std::fs::{self, File, ReadDir};
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::thread;
+use std::{
+    fs::{self, File, ReadDir},
+    io::Write,
+    path::{Path, PathBuf},
+    process::Command,
+    time::Duration,
+};
 
 /// Given the name and replica version of a binary, download the artifact to the
 /// target directory, unzip it, and add executable permissions.
@@ -19,7 +23,7 @@ pub async fn download_binary(
     logger: &Logger,
     replica_version: ReplicaVersion,
     binary_name: String,
-    target_dir: PathBuf,
+    target_dir: &Path,
 ) -> RecoveryResult<PathBuf> {
     let binary_url = format!(
         "https://download.dfinity.systems/ic/{}/release/{}.gz",
@@ -28,8 +32,14 @@ pub async fn download_binary(
 
     let mut file = target_dir.join(format!("{}.gz", binary_name));
 
-    info!(logger, "Downloading {} to {:?}...", binary_name, file);
-    let file_downloader = FileDownloader::new(None);
+    info!(
+        logger,
+        "Downloading {} to {}...",
+        binary_name,
+        file.display()
+    );
+    let file_downloader =
+        FileDownloader::new_with_timeout(Some(logger.clone().into()), Duration::from_secs(60));
     file_downloader
         .download_file(&binary_url, &file, None)
         .await
@@ -56,6 +66,7 @@ pub async fn download_binary(
     Ok(file)
 }
 
+/// If auto-retry is set to false, the user will be prompted for retries on rsync failures.
 pub fn rsync_with_retries(
     logger: &Logger,
     excludes: Vec<&str>,
@@ -63,9 +74,10 @@ pub fn rsync_with_retries(
     target: &str,
     require_confirmation: bool,
     key_file: Option<&PathBuf>,
-    retries: usize,
+    auto_retry: bool,
+    max_retries: usize,
 ) -> RecoveryResult<Option<String>> {
-    for _ in 0..retries {
+    for _ in 0..max_retries {
         match rsync(
             logger,
             excludes.clone(),
@@ -75,35 +87,38 @@ pub fn rsync_with_retries(
             key_file,
         ) {
             Err(e) => {
-                warn!(logger, "Rsync failed: {:?}, retrying...", e);
+                warn!(logger, "Rsync failed: {:?}", e);
+                if auto_retry {
+                    // In non-interactive cases, we wait a short while
+                    // before re-trying rsync.
+                    info!(logger, "Retrying in 10 seconds...");
+                    std::thread::sleep(Duration::from_secs(10));
+                } else if !consent_given("Do you want to retry the  download for this node?") {
+                    return Err(RecoveryError::RsyncFailed);
+                }
             }
             success => return success,
         }
-        thread::sleep(time::Duration::from_secs(10));
     }
-    Err(RecoveryError::UnexpectedError("All retries failed".into()))
+    Err(RecoveryError::RsyncFailed)
 }
 
 /// Copy the files from src to target using [rsync](https://linux.die.net/man/1/rsync) and options `--delete`, `-acP`.
 /// File and directory names part of the `excludes` vector are discarded.
-pub fn rsync(
+pub fn rsync<I>(
     logger: &Logger,
-    excludes: Vec<&str>,
+    excludes: I,
     src: &str,
     target: &str,
     require_confirmation: bool,
     key_file: Option<&PathBuf>,
-) -> RecoveryResult<Option<String>> {
-    let mut rsync = Command::new("rsync");
-    rsync.arg("--delete").arg("-acP").arg("--no-g");
-    excludes
-        .iter()
-        .map(|e| format!("--exclude={}", e))
-        .for_each(|e| {
-            rsync.arg(e);
-        });
-    rsync.arg(src).arg(target);
-    rsync.arg("-e").arg(ssh_helper::get_rsync_ssh_arg(key_file));
+) -> RecoveryResult<Option<String>>
+where
+    I: IntoIterator,
+    I::Item: std::fmt::Display,
+{
+    let mut rsync = get_rsync_command(excludes, src, target, key_file);
+
     info!(logger, "");
     info!(logger, "About to execute:");
     info!(logger, "{:?}", rsync);
@@ -125,6 +140,20 @@ pub fn rsync(
     }
 }
 
+fn get_rsync_command<I>(excludes: I, src: &str, target: &str, key_file: Option<&PathBuf>) -> Command
+where
+    I: IntoIterator,
+    I::Item: std::fmt::Display,
+{
+    let mut rsync = Command::new("rsync");
+    rsync.arg("--delete").arg("-acP").arg("--no-g");
+    rsync.args(excludes.into_iter().map(|e| format!("--exclude={}", e)));
+    rsync.arg(src).arg(target);
+    rsync.arg("-e").arg(ssh_helper::get_rsync_ssh_arg(key_file));
+
+    rsync
+}
+
 pub fn write_file(file: &Path, content: String) -> RecoveryResult<()> {
     let mut f = File::create(file).map_err(|e| RecoveryError::file_error(file, e))?;
     write!(f, "{}", content).map_err(|e| RecoveryError::file_error(file, e))?;
@@ -133,6 +162,10 @@ pub fn write_file(file: &Path, content: String) -> RecoveryResult<()> {
 
 pub fn write_bytes(file: &Path, bytes: Vec<u8>) -> RecoveryResult<()> {
     fs::write(file, bytes).map_err(|e| RecoveryError::file_error(file, e))
+}
+
+pub fn read_bytes(file: &Path) -> RecoveryResult<Vec<u8>> {
+    fs::read(file).map_err(|e| RecoveryError::file_error(file, e))
 }
 
 pub fn read_file(file: &Path) -> RecoveryResult<String> {
@@ -160,6 +193,26 @@ pub fn remove_dir(path: &Path) -> RecoveryResult<()> {
     }
 }
 
+pub fn clear_dir(path: &Path) -> RecoveryResult<()> {
+    if path_exists(path)? {
+        for entry in fs::read_dir(path).map_err(|e| RecoveryError::dir_error(path, e))? {
+            let entry = entry.map_err(|e| RecoveryError::dir_error(path, e))?;
+            let file_type = entry
+                .file_type()
+                .map_err(|e| RecoveryError::dir_error(path, e))?;
+            if file_type.is_dir() {
+                fs::remove_dir_all(entry.path())
+            } else {
+                fs::remove_file(entry.path())
+            }
+            .map_err(|e| RecoveryError::dir_error(entry.path().as_path(), e))?
+        }
+        Ok(())
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::tempdir;
@@ -179,5 +232,29 @@ mod tests {
         let non_existing_path = tmp.path().join("non_existing_subdir");
 
         assert!(!path_exists(&non_existing_path).unwrap());
+    }
+
+    #[test]
+    fn get_rsync_command_test() {
+        let rsync = get_rsync_command(
+            ["exclude1", "exclude2"],
+            "/tmp/src",
+            "/tmp/target",
+            Some(&PathBuf::from("/tmp/key_file")),
+        );
+
+        assert_eq!(rsync.get_program(), "rsync");
+        assert_eq!(
+            rsync.get_args().collect::<Vec<_>>(),
+            vec![
+                "--delete",
+                "-acP",
+                "--no-g",
+                "--exclude=exclude1",
+                "--exclude=exclude2",
+                "/tmp/src",
+                "/tmp/target",
+                "-e",
+                "ssh -o StrictHostKeyChecking=no -o NumberOfPasswordPrompts=0 -o ConnectionAttempts=4 -o ConnectTimeout=15 -A -i /tmp/key_file"]);
     }
 }

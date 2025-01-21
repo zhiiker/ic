@@ -4,6 +4,7 @@ package ic_sns_wasm.pb.v1;
 
 import "ic_base_types/pb/v1/types.proto";
 import "ic_sns_init/pb/v1/sns_init.proto";
+import "ic_nervous_system/pb/v1/nervous_system.proto";
 
 // The type of canister a particular WASM is intended to be installed on.
 enum SnsCanisterType {
@@ -31,6 +32,7 @@ message StableCanisterState {
   UpgradePath upgrade_path = 4;
   bool access_controls_enabled = 5;
   repeated ic_base_types.pb.v1.PrincipalId allowed_principals = 6;
+  map<uint64, uint64> nns_proposal_to_deployed_sns = 7;
 }
 
 // Details the offset and size of a WASM binary in stable memory and the hash of this binary.
@@ -38,6 +40,7 @@ message SnsWasmStableIndex {
   bytes hash = 1;
   uint32 offset = 2;
   uint32 size = 3;
+  repeated MetadataSection metadata = 4;
 }
 
 // Specifies the upgrade path for SNS instances.
@@ -74,6 +77,7 @@ message SnsSpecificSnsUpgrade {
 message SnsWasm {
   bytes wasm = 1;
   SnsCanisterType canister_type = 2;
+  optional uint64 proposal_id = 3;
 }
 
 // The error response returned in response objects on failed or partially failed operations.
@@ -147,6 +151,16 @@ message GetWasmResponse {
   SnsWasm wasm = 1;
 }
 
+// Similar to GetWasmRequest, but only returns the NNS proposal ID that blessed the wasm.
+message GetProposalIdThatAddedWasmRequest {
+  bytes hash = 1;
+}
+
+// The NNS proposal ID that blessed the wasm, if it was recorded. 
+message GetProposalIdThatAddedWasmResponse {
+  optional uint64 proposal_id = 1;
+}
+
 // Payload to deploy a new SNS.
 message DeployNewSnsRequest {
   // The initial payload to initialize the SNS with.
@@ -161,6 +175,8 @@ message DeployNewSnsResponse {
   SnsCanisterIds canisters = 2;
   // Error when the request fails.
   SnsWasmError error = 3;
+  // The status of the dapp canisters being transferred to an SNS.
+  DappCanistersTransferResult dapp_canisters_transfer_result = 4;
 }
 
 // The CanisterIds of the SNS canisters that are created.
@@ -175,6 +191,24 @@ message SnsCanisterIds {
   ic_base_types.pb.v1.PrincipalId swap = 4;
   // PrincipalId of the index canister.
   ic_base_types.pb.v1.PrincipalId index = 5;
+}
+
+// The status of the dapp canisters that are being transferred to an SNS.
+message DappCanistersTransferResult {
+  // Dapp canisters that were restored to their original controllers due to some error
+  // encountered in the SNS deployment process.
+  repeated ic_nervous_system.pb.v1.Canister restored_dapp_canisters = 1;
+
+  // Dapp canisters that were transferred to an SNS. This can either be as a result of
+  // a completely successful SNS deployment where all dapps were transferred to the SNS,
+  // or a result of a partially failed SNS deployment, where only some of the dapps
+  // were fully transferred to the SNS, and can not be restored by the SNS-W canister.
+  repeated ic_nervous_system.pb.v1.Canister sns_controlled_dapp_canisters = 2;
+
+  // Dapp canisters that are still under the control of the NNS. This is a result of an
+  // error when restoring dapps to their original controller and requires additional work
+  // to fully restore them.
+  repeated ic_nervous_system.pb.v1.Canister nns_controlled_dapp_canisters = 3;
 }
 
 // Message to list deployed sns instances.
@@ -219,7 +253,7 @@ message SnsVersion {
 
 // A human readable SnsVersion
 message PrettySnsVersion {
-  string root_wasm_hash =1;
+  string root_wasm_hash = 1;
   string governance_wasm_hash = 2;
   string ledger_wasm_hash = 3;
   string swap_wasm_hash = 4;
@@ -230,7 +264,8 @@ message PrettySnsVersion {
 
 // The request type accepted by the get_next_sns_version canister method.
 message GetNextSnsVersionRequest {
-  // The current version recorded on the SNS (in Governance, the "deployed_version" field)
+  // The current version recorded on the SNS (in Governance, the "deployed_version" field). This
+  // field is still required when governance_canister_id is provided.
   SnsVersion current_version = 1;
   // If supplied, will replace "caller" to allow verifying the response a particular
   // SNS would receive
@@ -285,8 +320,51 @@ message UpdateSnsSubnetListResponse {
 // SNS instances to.
 message GetSnsSubnetIdsRequest {}
 
-// The request type of get_sns_subnet_ids. Used to request the list of SNS subnet IDs that SNS-WASM will deploy
+// The response type of get_sns_subnet_ids. Used to request the list of SNS subnet IDs that SNS-WASM will deploy
 // SNS instances to.
 message GetSnsSubnetIdsResponse {
   repeated ic_base_types.pb.v1.PrincipalId sns_subnet_ids = 1;
+}
+
+// The request type of get_deployed_sns_by_proposal_id. Used to get a `DeployedSns` by the ProposalId in the
+// NNS that created it.
+message GetDeployedSnsByProposalIdRequest {
+  uint64 proposal_id = 1;
+}
+
+// The response type of get_deployed_sns_by_proposal_id. Used to get a `DeployedSns` by the ProposalId in the
+// NNS that created it.
+message GetDeployedSnsByProposalIdResponse {
+  oneof get_deployed_sns_by_proposal_id_result {
+    SnsWasmError error = 1;
+    DeployedSns deployed_sns = 2;
+  }
+}
+
+// The request type for get_wasm_metadata, which returns the metadata for a given wasm
+message GetWasmMetadataRequest {
+  optional bytes hash = 1;
+}
+
+message MetadataSection {
+  // First part of the section. Normally, this is either "icp:private" or "icp:public".
+  optional string visibility = 1;
+
+  // Second part of the section. For example, this might be "candid:service".
+  optional string name = 2;
+
+  // Last part of the section, containing its raw contents.
+  optional bytes contents = 3;
+}
+
+// The response for get_wasm_metadata, which returns the metadata for a given wasm
+message GetWasmMetadataResponse {
+  message Ok {
+    repeated MetadataSection sections = 1;
+  }
+
+  oneof result {
+    Ok ok = 1;
+    SnsWasmError error = 2;
+  }
 }

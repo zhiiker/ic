@@ -3,11 +3,11 @@
 
 use crate::address::BitcoinAddress;
 use crate::signature::EncodedSignature;
-use ic_crypto_sha::Sha256;
+use ic_crypto_sha2::Sha256;
 use serde_bytes::{ByteBuf, Bytes};
 use std::fmt;
 
-pub use ic_btc_interface::{OutPoint, Satoshi};
+pub use ic_btc_interface::{OutPoint, Satoshi, Txid};
 
 /// The current Bitcoin transaction encoding version.
 /// See https://github.com/bitcoin/bitcoin/blob/c90f86e4c7760a9f7ed0a574f54465964e006a64/src/primitives/transaction.h#L291.
@@ -26,6 +26,8 @@ pub const SIGHASH_ALL: u32 = 1;
 /// Bitcoin script opcodes.
 mod ops {
     pub const PUSH_20: u8 = 0x14;
+    pub const PUSH_32: u8 = 0x20;
+    pub const OP_PUSHNUM_1: u8 = 0x51;
     pub const DUP: u8 = 0x76;
     pub const HASH160: u8 = 0xa9;
     pub const EQUAL: u8 = 0x87;
@@ -33,31 +35,11 @@ mod ops {
     pub const CHECKSIG: u8 = 0xac;
 }
 
-pub struct DisplayTxid<'a>(pub &'a [u8]);
-
-impl fmt::Display for DisplayTxid<'_> {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // In Bitcoin, you display hash bytes in reverse order.
-        //
-        // > Due to historical accident, the tx and block hashes that bitcoin core
-        // > uses are byte-reversed. I’m not entirely sure why. Maybe something
-        // > like using openssl bignum to store hashes or something like that,
-        // > then printing them as a number.
-        // > -- Wladimir van der Laan
-        //
-        // Source: https://learnmeabitcoin.com/technical/txid
-        for b in self.0.iter().rev() {
-            write!(fmt, "{:02x}", *b)?
-        }
-        Ok(())
-    }
-}
-
 pub struct DisplayOutpoint<'a>(pub &'a OutPoint);
 
 impl fmt::Display for DisplayOutpoint<'_> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(fmt, "{}:{}", DisplayTxid(&self.0.txid), self.0.vout)
+        write!(fmt, "{}:{}", &self.0.txid, self.0.vout)
     }
 }
 
@@ -214,7 +196,7 @@ pub fn write_compact_size(n: usize, buf: &mut impl Buffer) {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Eq, PartialEq, Debug)]
 pub struct SignedInput {
     pub previous_output: OutPoint,
     pub sequence: u32,
@@ -224,25 +206,27 @@ pub struct SignedInput {
     pub pubkey: ByteBuf,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct UnsignedInput {
     pub previous_output: OutPoint,
     pub value: Satoshi,
     pub sequence: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct TxOut {
     pub value: Satoshi,
     pub address: BitcoinAddress,
 }
 
 /// Encodes the scriptPubkey required to unlock an output for the specified address.
-pub fn encode_address_scipt_pubkey(btc_address: &BitcoinAddress, buf: &mut impl Buffer) {
+pub fn encode_address_script_pubkey(btc_address: &BitcoinAddress, buf: &mut impl Buffer) {
     match btc_address {
         BitcoinAddress::P2wpkhV0(pkhash) => encode_p2wpkh_script_pubkey(pkhash, buf),
+        BitcoinAddress::P2wshV0(pkhash) => encode_p2wsh_script(pkhash, buf),
         BitcoinAddress::P2pkh(pkhash) => encode_sighash_script_code(pkhash, buf),
         BitcoinAddress::P2sh(pkhash) => encode_p2sh_script_code(pkhash, buf),
+        BitcoinAddress::P2trV1(pk) => encode_p2tr_script_pubkey(pk, buf),
     }
 }
 
@@ -306,7 +290,14 @@ impl<'a> TxSigHasher<'a> {
         }
     }
 
-    pub fn encode_sighash_data(&self, index: usize, pkhash: &[u8; 20], buf: &mut impl Buffer) {
+    pub fn encode_sighash_data(
+        &self,
+        input: &UnsignedInput,
+        pkhash: &[u8; 20],
+        buf: &mut impl Buffer,
+    ) {
+        debug_assert!(self.tx.inputs.contains(input));
+
         // Double SHA256 of the serialization of:
         //      1. nVersion of the transaction (4-byte little endian)
         TX_VERSION.encode(buf);
@@ -314,7 +305,6 @@ impl<'a> TxSigHasher<'a> {
         buf.write(&self.hash_prevouts[..]);
         //      3. hashSequence (32-byte hash)
         buf.write(&self.hash_sequence[..]);
-        let input = &self.tx.inputs[index];
         //      4. outpoint (32-byte hash + 4-byte little endian)
         input.previous_output.encode(buf);
         //      5. scriptCode of the input (serialized as scripts inside CTxOuts)
@@ -337,9 +327,7 @@ impl<'a> TxSigHasher<'a> {
     /// # Panics
     ///
     /// This function panics if the `index` is invalid transaction input index.
-    pub fn sighash(&self, index: usize, pkhash: &[u8; 20]) -> [u8; 32] {
-        assert!(index < self.tx.inputs.len());
-
+    pub fn sighash(&self, input: &UnsignedInput, pkhash: &[u8; 20]) -> [u8; 32] {
         // Spec:
         // https://github.com/bitcoin/bips/blob/master/bip-0143.mediawiki#specification
         //
@@ -347,12 +335,12 @@ impl<'a> TxSigHasher<'a> {
         // https://github.com/bitcoin/bitcoin/blob/5668ccec1d3785632caf4b74c1701019ecc88f41/src/script/interpreter.cpp#L1567-L1633
 
         let mut hasher = Sha256::new();
-        self.encode_sighash_data(index, pkhash, &mut hasher);
+        self.encode_sighash_data(input, pkhash, &mut hasher);
         Sha256::hash(&hasher.finish())
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Eq, PartialEq, Debug)]
 pub struct UnsignedTransaction {
     pub inputs: Vec<UnsignedInput>,
     pub outputs: Vec<TxOut>,
@@ -360,8 +348,8 @@ pub struct UnsignedTransaction {
 }
 
 impl UnsignedTransaction {
-    pub fn txid(&self) -> [u8; 32] {
-        Sha256::hash(&encode_into(self, Sha256::new()))
+    pub fn txid(&self) -> Txid {
+        Sha256::hash(&encode_into(self, Sha256::new())).into()
     }
 
     pub fn serialized_len(&self) -> usize {
@@ -369,7 +357,7 @@ impl UnsignedTransaction {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Eq, PartialEq, Debug)]
 pub struct SignedTransaction {
     pub inputs: Vec<SignedInput>,
     pub outputs: Vec<TxOut>,
@@ -477,7 +465,7 @@ impl<T: Encode> Encode for [T] {
 
 impl Encode for OutPoint {
     fn encode(&self, buf: &mut impl Buffer) {
-        buf.write(&self.txid);
+        buf.write(self.txid.as_ref());
         self.vout.encode(buf)
     }
 }
@@ -499,6 +487,17 @@ fn encode_p2wpkh_script_pubkey(pkhash: &[u8; 20], buf: &mut impl Buffer) {
     buf.write(&pkhash[..]);
 }
 
+fn encode_p2tr_script_pubkey(pkhash: &[u8; 32], buf: &mut impl Buffer) {
+    // https://docs.rs/bitcoin/latest/src/bitcoin/address.rs.html#389
+    buf.write(&[34, ops::OP_PUSHNUM_1, ops::PUSH_32]);
+    buf.write(&pkhash[..]);
+}
+
+fn encode_p2wsh_script(pkhash: &[u8; 32], buf: &mut impl Buffer) {
+    buf.write(&[34, 0, ops::PUSH_32]);
+    buf.write(&pkhash[..]);
+}
+
 impl Encode for SignedInput {
     fn encode(&self, buf: &mut impl Buffer) {
         // See: https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki#p2wpkh
@@ -513,7 +512,7 @@ impl Encode for SignedInput {
 impl Encode for TxOut {
     fn encode(&self, buf: &mut impl Buffer) {
         self.value.encode(buf);
-        encode_address_scipt_pubkey(&self.address, buf);
+        encode_address_script_pubkey(&self.address, buf);
     }
 }
 

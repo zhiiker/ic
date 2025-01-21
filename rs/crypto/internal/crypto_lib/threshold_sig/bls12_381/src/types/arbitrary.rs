@@ -1,7 +1,5 @@
 //! Generate data for proptests
 
-#![allow(clippy::unwrap_used)]
-
 use super::*;
 use crate::crypto;
 use ic_crypto_internal_bls12_381_type::Scalar;
@@ -53,11 +51,11 @@ pub fn threshold_sig_secret_key_bytes() -> impl Strategy<Value = SecretKeyBytes>
 
 #[cfg(test)]
 pub fn individual_signature_bytes() -> impl Strategy<Value = IndividualSignatureBytes> {
-    individual_signature().prop_map(|signature| signature.into())
+    individual_signature().prop_map(|signature| IndividualSignatureBytes::from(&signature))
 }
 #[cfg(test)]
 pub fn combined_signature_bytes() -> impl Strategy<Value = CombinedSignatureBytes> {
-    combined_signature().prop_map(|signature| signature.into())
+    combined_signature().prop_map(|signature| CombinedSignatureBytes::from(&signature))
 }
 
 #[cfg(test)]

@@ -6,41 +6,60 @@ use std::path::{Path, PathBuf};
 use ic_base_types::{CanisterId, NumBytes, PrincipalId};
 use ic_config::flag_status::FlagStatus;
 use ic_embedders::wasm_executor::CanisterStateChanges;
-use ic_ic00_types::CanisterInstallMode;
-use ic_interfaces::{
-    execution_environment::{
-        HypervisorError, HypervisorResult, SubnetAvailableMemory, SubnetAvailableMemoryError,
-        WasmExecutionOutput,
-    },
-    messages::CanisterCall,
+use ic_interfaces::execution_environment::{
+    HypervisorError, HypervisorResult, SubnetAvailableMemoryError, WasmExecutionOutput,
 };
 use ic_logger::{error, fatal, info, warn};
-use ic_replicated_state::{CanisterState, ExecutionState};
+use ic_management_canister_types::{
+    CanisterChangeDetails, CanisterChangeOrigin, CanisterInstallModeV2,
+};
+use ic_replicated_state::canister_state::system_state::ReservationError;
+use ic_replicated_state::metadata_state::subnet_call_context_manager::InstallCodeCallId;
+use ic_replicated_state::{num_bytes_try_from, CanisterState, ExecutionState};
 use ic_state_layout::{CanisterLayout, CheckpointLayout, ReadOnly};
 use ic_sys::PAGE_SIZE;
 use ic_system_api::ExecutionParameters;
 use ic_types::{
-    funds::Cycles, CanisterTimer, ComputeAllocation, Height, MemoryAllocation, NumInstructions,
-    Time,
+    funds::Cycles, messages::CanisterCall, CanisterLog, CanisterTimer, ComputeAllocation, Height,
+    MemoryAllocation, NumInstructions, Time,
 };
+use ic_wasm_types::WasmHash;
 
 use crate::{
     canister_manager::{
         CanisterManagerError, CanisterMgrConfig, DtsInstallCodeResult, InstallCodeResult,
     },
-    execution_environment::RoundContext,
+    canister_settings::{validate_canister_settings, CanisterSettings},
+    execution_environment::{log_dirty_pages, RoundContext},
     CompilationCostHandling, RoundLimits,
 };
+use ic_cycles_account_manager::WasmExecutionMode;
 
 #[cfg(test)]
 mod tests;
 
-/// Indicates whether to keep the old stable memory or replace it with the new
-/// (empty) stable memory.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum StableMemoryHandling {
+/// Indicates whether the memory is kept or replaced with new (initial) memory.
+/// Applicable to both the stable memory and the main memory of a canister.
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub(crate) enum MemoryHandling {
+    /// Retain the memory.
     Keep,
+    /// Reset the memory.
     Replace,
+}
+
+/// Specifies the handling of the canister's memories.
+/// * On install and re-install:
+///   - Replace both the stable memory and the main memory.
+/// * On upgrade:
+///   - For canisters with enhanced orthogonal persistence (Motoko):
+///     Retain both the main memory and the stable memory.
+///   - For all other canisters:
+///     Retain only the stable memory and erase the main memory.
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub(crate) struct CanisterMemoryHandling {
+    pub stable_memory_handling: MemoryHandling,
+    pub main_memory_handling: MemoryHandling,
 }
 
 /// The main steps of `install_code` execution that may fail with an error or
@@ -52,11 +71,23 @@ pub(crate) enum InstallCodeStep {
     ReplaceExecutionStateAndAllocations {
         instructions_from_compilation: NumInstructions,
         maybe_execution_state: HypervisorResult<ExecutionState>,
-        stable_memory_handling: StableMemoryHandling,
+        memory_handling: CanisterMemoryHandling,
+    },
+    ClearCertifiedData,
+    DeactivateGlobalTimer,
+    BumpCanisterVersion,
+    AddCanisterChange {
+        timestamp_nanos: Time,
+        origin: CanisterChangeOrigin,
+        mode: CanisterInstallModeV2,
+        module_hash: WasmHash,
     },
     HandleWasmExecution {
         canister_state_changes: Option<CanisterStateChanges>,
         output: WasmExecutionOutput,
+    },
+    ChargeForLargeWasmAssembly {
+        instructions: NumInstructions,
     },
 }
 
@@ -110,15 +141,43 @@ impl InstallCodeHelper {
     }
 
     pub fn clear_certified_data(&mut self) {
+        self.steps.push(InstallCodeStep::ClearCertifiedData);
         self.canister.system_state.certified_data = Vec::new();
     }
 
     pub fn deactivate_global_timer(&mut self) {
+        self.steps.push(InstallCodeStep::DeactivateGlobalTimer);
         self.canister.system_state.global_timer = CanisterTimer::Inactive;
     }
 
     pub fn bump_canister_version(&mut self) {
+        self.steps.push(InstallCodeStep::BumpCanisterVersion);
         self.canister.system_state.canister_version += 1;
+    }
+
+    pub fn add_canister_change(
+        &mut self,
+        timestamp_nanos: Time,
+        origin: CanisterChangeOrigin,
+        mode: CanisterInstallModeV2,
+        module_hash: WasmHash,
+    ) {
+        self.steps.push(InstallCodeStep::AddCanisterChange {
+            timestamp_nanos,
+            origin: origin.clone(),
+            mode,
+            module_hash: module_hash.clone(),
+        });
+        let details = CanisterChangeDetails::code_deployment(mode.into(), module_hash.to_slice());
+        self.canister
+            .system_state
+            .add_canister_change(timestamp_nanos, origin, details);
+    }
+
+    pub fn charge_for_large_wasm_assembly(&mut self, instructions: NumInstructions) {
+        self.steps
+            .push(InstallCodeStep::ChargeForLargeWasmAssembly { instructions });
+        self.reduce_instructions_by(instructions);
     }
 
     pub fn execution_parameters(&self) -> &ExecutionParameters {
@@ -134,8 +193,17 @@ impl InstallCodeHelper {
     }
 
     pub fn canister_memory_usage(&self) -> NumBytes {
-        self.canister
-            .memory_usage(self.execution_parameters.subnet_type)
+        self.canister.memory_usage()
+    }
+
+    pub fn canister_message_memory_usage(&self) -> NumBytes {
+        self.canister.message_memory_usage()
+    }
+
+    pub fn reduce_instructions_by(&mut self, instructions: NumInstructions) {
+        self.execution_parameters
+            .instruction_limits
+            .reduce_by(instructions);
     }
 
     /// Returns a struct with all the necessary information to replay the
@@ -156,13 +224,13 @@ impl InstallCodeHelper {
         original: &OriginalContext,
         round: &RoundContext,
         round_limits: &RoundLimits,
-    ) -> Result<Self, (CanisterManagerError, NumInstructions)> {
+    ) -> Result<Self, (CanisterManagerError, NumInstructions, CanisterLog)> {
         let mut helper = Self::new(clean_canister, original);
         let paused_instructions_left = paused.instructions_left;
         for state_change in paused.steps.into_iter() {
             helper
                 .replay_step(state_change, original, round, round_limits)
-                .map_err(|err| (err, paused_instructions_left))?;
+                .map_err(|err| (err, paused_instructions_left, helper.take_canister_log()))?;
         }
         assert_eq!(paused_instructions_left, helper.instructions_left());
         Ok(helper)
@@ -190,9 +258,126 @@ impl InstallCodeHelper {
             self.canister.system_state.balance()
         );
 
+        let instructions_used = NumInstructions::from(
+            message_instruction_limit
+                .get()
+                .saturating_sub(instructions_left.get()),
+        );
+
+        round.cycles_account_manager.refund_unused_execution_cycles(
+            &mut self.canister.system_state,
+            instructions_left,
+            message_instruction_limit,
+            original.prepaid_execution_cycles,
+            round.counters.execution_refund_error,
+            original.subnet_size,
+            original.wasm_execution_mode,
+            round.log,
+        );
+
         self.canister
             .system_state
-            .apply_ingress_induction_cycles_debit(self.canister.canister_id(), round.log);
+            .apply_ingress_induction_cycles_debit(
+                self.canister.canister_id(),
+                round.log,
+                round.counters.charging_from_balance_error,
+            );
+
+        let wasm_memory_usage = self
+            .canister
+            .execution_state
+            .as_ref()
+            .map_or(NumBytes::new(0), |es| {
+                num_bytes_try_from(es.wasm_memory.size).unwrap()
+            });
+
+        if let Some(wasm_memory_limit) = self.canister.system_state.wasm_memory_limit {
+            // A Wasm memory limit of 0 means unlimited.
+            if wasm_memory_limit.get() != 0 && wasm_memory_usage > wasm_memory_limit {
+                let err = HypervisorError::WasmMemoryLimitExceeded {
+                    bytes: wasm_memory_usage,
+                    limit: wasm_memory_limit,
+                };
+                return finish_err(
+                    clean_canister,
+                    self.instructions_left(),
+                    original,
+                    round,
+                    CanisterManagerError::Hypervisor(self.canister.canister_id(), err),
+                    self.take_canister_log(),
+                );
+            }
+        }
+
+        if self.allocated_bytes > self.deallocated_bytes {
+            let bytes = self.allocated_bytes - self.deallocated_bytes;
+
+            let reservation_cycles = round.cycles_account_manager.storage_reservation_cycles(
+                bytes,
+                &original.execution_parameters.subnet_memory_saturation,
+                original.subnet_size,
+            );
+
+            match self
+                .canister
+                .system_state
+                .reserve_cycles(reservation_cycles)
+            {
+                Ok(()) => {}
+                Err(err) => {
+                    let err = match err {
+                        ReservationError::InsufficientCycles {
+                            requested,
+                            available,
+                        } => CanisterManagerError::InsufficientCyclesInMemoryGrow {
+                            bytes,
+                            available,
+                            required: requested,
+                        },
+                        ReservationError::ReservedLimitExceed { requested, limit } => {
+                            CanisterManagerError::ReservedCyclesLimitExceededInMemoryGrow {
+                                bytes,
+                                requested,
+                                limit,
+                            }
+                        }
+                    };
+                    return finish_err(
+                        clean_canister,
+                        self.instructions_left(),
+                        original,
+                        round,
+                        err,
+                        self.take_canister_log(),
+                    );
+                }
+            }
+
+            let threshold = round.cycles_account_manager.freeze_threshold_cycles(
+                self.canister.system_state.freeze_threshold,
+                self.canister.memory_allocation(),
+                self.canister.memory_usage(),
+                self.canister.message_memory_usage(),
+                self.canister.compute_allocation(),
+                original.subnet_size,
+                self.canister.system_state.reserved_balance(),
+            );
+            if self.canister.system_state.balance() < threshold {
+                let err = CanisterManagerError::InsufficientCyclesInMemoryGrow {
+                    bytes,
+                    available: self.canister.system_state.balance(),
+                    required: threshold,
+                };
+                return finish_err(
+                    clean_canister,
+                    self.instructions_left(),
+                    original,
+                    round,
+                    err,
+                    self.take_canister_log(),
+                );
+            }
+        }
 
         let mut subnet_available_memory = round_limits.subnet_available_memory;
         subnet_available_memory.increment(
@@ -207,26 +392,33 @@ impl InstallCodeHelper {
         ) {
             match err {
                 SubnetAvailableMemoryError::InsufficientMemory {
-                    requested_total,
+                    execution_requested,
                     message_requested: _,
                     wasm_custom_sections_requested,
-                    available_total,
+                    available_execution,
                     available_messages: _,
                     available_wasm_custom_sections,
                 } => {
+                    let err = if wasm_custom_sections_requested.get() as i128
+                        > available_wasm_custom_sections as i128
+                    {
+                        CanisterManagerError::SubnetWasmCustomSectionCapacityOverSubscribed {
+                            requested: wasm_custom_sections_requested,
+                            available: NumBytes::new(available_wasm_custom_sections.max(0) as u64),
+                        }
+                    } else {
+                        CanisterManagerError::SubnetMemoryCapacityOverSubscribed {
+                            requested: execution_requested,
+                            available: NumBytes::new(available_execution.max(0) as u64),
+                        }
+                    };
                     return finish_err(
                         clean_canister,
                         self.instructions_left(),
                         original,
                         round,
-                        CanisterManagerError::SubnetMemoryCapacityOverSubscribed {
-                            requested_total,
-                            requested_wasm_custom_sections: wasm_custom_sections_requested,
-                            available_total: NumBytes::new(available_total.max(0) as u64),
-                            available_wasm_custom_sections: NumBytes::new(
-                                available_wasm_custom_sections.max(0) as u64,
-                            ),
-                        },
+                        err,
+                        self.take_canister_log(),
                     );
                 }
             }
@@ -249,6 +441,7 @@ impl InstallCodeHelper {
                         requested: new_compute_allocation,
                         available: available.max(old_compute_allocation.as_percent()),
                     },
+                    self.take_canister_log(),
                 );
             }
             round_limits.compute_allocation_used = others + new_compute_allocation.as_percent();
@@ -264,31 +457,31 @@ impl InstallCodeHelper {
 
         round_limits.subnet_available_memory = subnet_available_memory;
 
-        round.cycles_account_manager.refund_unused_execution_cycles(
-            &mut self.canister.system_state,
-            instructions_left,
-            message_instruction_limit,
-            original.prepaid_execution_cycles,
-            round.execution_refund_error_counter,
-            original.subnet_size,
-            round.log,
-        );
-
         if original.config.rate_limiting_of_instructions == FlagStatus::Enabled {
             self.canister.scheduler_state.install_code_debit += self.instructions_consumed();
         }
 
-        let instructions_used = NumInstructions::from(
-            message_instruction_limit
-                .get()
-                .saturating_sub(instructions_left.get()),
-        );
-
         let old_wasm_hash = get_wasm_hash(&clean_canister);
         let new_wasm_hash = get_wasm_hash(&self.canister);
+
+        if original.log_dirty_pages == FlagStatus::Enabled {
+            log_dirty_pages(
+                round.log,
+                &original.canister_id,
+                original.message.method_name(),
+                self.total_heap_delta.get() as usize / PAGE_SIZE,
+                instructions_used,
+            );
+        }
+
+        if original.mode == CanisterInstallModeV2::Reinstall {
+            self.canister.clear_log();
+        }
+
         DtsInstallCodeResult::Finished {
             canister: self.canister,
             message: original.message,
+            call_id: original.call_id,
             instructions_used,
             result: Ok(InstallCodeResult {
                 heap_delta: self.total_heap_delta,
@@ -302,6 +495,7 @@ impl InstallCodeHelper {
     pub fn validate_input(
         &mut self,
         original: &OriginalContext,
+        round: &RoundContext,
         round_limits: &RoundLimits,
     ) -> Result<(), CanisterManagerError> {
         self.steps.push(InstallCodeStep::ValidateInput);
@@ -309,29 +503,43 @@ impl InstallCodeHelper {
         let config = &original.config;
         let id = self.canister.system_state.canister_id;
 
-        validate_compute_allocation(
-            round_limits.compute_allocation_used,
-            &self.canister,
-            original.requested_compute_allocation,
-            &original.config,
-        )?;
-
-        validate_memory_allocation(
-            &round_limits.subnet_available_memory,
-            &self.canister,
-            original.requested_memory_allocation,
-            config,
-        )?;
-
         validate_controller(&self.canister, &original.sender)?;
 
+        validate_canister_settings(
+            CanisterSettings {
+                controllers: None,
+                compute_allocation: original.requested_compute_allocation,
+                memory_allocation: original.requested_memory_allocation,
+                wasm_memory_threshold: None,
+                freezing_threshold: None,
+                reserved_cycles_limit: None,
+                log_visibility: None,
+                wasm_memory_limit: None,
+            },
+            self.canister.memory_usage(),
+            self.canister.message_memory_usage(),
+            self.canister.memory_allocation(),
+            &round_limits.subnet_available_memory,
+            &original.execution_parameters.subnet_memory_saturation,
+            self.canister.compute_allocation(),
+            round_limits.compute_allocation_used,
+            original.config.compute_capacity,
+            original.config.max_controllers,
+            self.canister.system_state.freeze_threshold,
+            self.canister.system_state.balance(),
+            round.cycles_account_manager,
+            original.subnet_size,
+            self.canister.system_state.reserved_balance(),
+            self.canister.system_state.reserved_balance_limit(),
+        )?;
+
         match original.mode {
-            CanisterInstallMode::Install => {
+            CanisterInstallModeV2::Install => {
                 if self.canister.execution_state.is_some() {
                     return Err(CanisterManagerError::CanisterNonEmpty(id));
                 }
             }
-            CanisterInstallMode::Reinstall | CanisterInstallMode::Upgrade => {}
+            CanisterInstallModeV2::Reinstall | CanisterInstallModeV2::Upgrade(..) => {}
         }
 
         if self.canister.scheduler_state.install_code_debit.get() > 0
@@ -344,8 +552,8 @@ impl InstallCodeHelper {
     }
 
     /// Replaces the execution state of the current canister with the freshly
-    /// created execution state. The stable memory is conditionally replaced
-    /// based on the given `stable_memory_handling`.
+    /// created execution state. The stable memory and the main memory are
+    /// conditionally replaced based on the given `memory_handling`.
     ///
     /// It also updates the compute and memory allocations with the requested
     /// values in `original` context.
@@ -353,22 +561,19 @@ impl InstallCodeHelper {
         &mut self,
         instructions_from_compilation: NumInstructions,
         maybe_execution_state: HypervisorResult<ExecutionState>,
-        stable_memory_handling: StableMemoryHandling,
+        memory_handling: CanisterMemoryHandling,
         original: &OriginalContext,
     ) -> Result<(), CanisterManagerError> {
         self.steps
             .push(InstallCodeStep::ReplaceExecutionStateAndAllocations {
                 instructions_from_compilation,
                 maybe_execution_state: maybe_execution_state.clone(),
-                stable_memory_handling,
+                memory_handling,
             });
 
-        self.execution_parameters
-            .instruction_limits
-            .reduce_by(instructions_from_compilation);
+        self.reduce_instructions_by(instructions_from_compilation);
 
-        let subnet_type = self.execution_parameters.subnet_type;
-        let old_memory_usage = self.canister.memory_usage(subnet_type);
+        let old_memory_usage = self.canister.memory_usage();
         let old_memory_allocation = self.canister.system_state.memory_allocation;
         let old_compute_allocation = self.canister.scheduler_state.compute_allocation;
         let old_wasm_custom_sections_memory_used = self
@@ -383,13 +588,17 @@ impl InstallCodeHelper {
 
         let new_wasm_custom_sections_memory_used = execution_state.metadata.memory_usage();
 
-        execution_state.stable_memory =
-            match (stable_memory_handling, self.canister.execution_state.take()) {
-                (StableMemoryHandling::Keep, Some(old)) => old.stable_memory,
-                (StableMemoryHandling::Keep, None) | (StableMemoryHandling::Replace, _) => {
-                    execution_state.stable_memory
-                }
-            };
+        if let Some(old) = self.canister.execution_state.take() {
+            match memory_handling.stable_memory_handling {
+                MemoryHandling::Keep => execution_state.stable_memory = old.stable_memory,
+                MemoryHandling::Replace => {}
+            }
+            match memory_handling.main_memory_handling {
+                MemoryHandling::Keep => execution_state.wasm_memory = old.wasm_memory,
+                MemoryHandling::Replace => {}
+            }
+        };
+
         self.canister.execution_state = Some(execution_state);
 
         // Update the compute allocation.
@@ -404,6 +613,7 @@ impl InstallCodeHelper {
             .requested_memory_allocation
             .unwrap_or(old_memory_allocation);
         self.canister.system_state.memory_allocation = new_memory_allocation;
+        self.execution_parameters.memory_allocation = new_memory_allocation;
 
         // It is impossible to transition from `MemoryAllocation::Reserved` to
         // `MemoryAllocation::BestEffort` because `None` in `InstallCodeArgs` is
@@ -418,10 +628,9 @@ impl InstallCodeHelper {
         self.execution_parameters.canister_memory_limit =
             self.canister.memory_limit(best_effort_limit);
 
-        let new_memory_usage = self.canister.memory_usage(subnet_type);
+        let new_memory_usage = self.canister.memory_usage();
         if new_memory_usage > self.execution_parameters.canister_memory_limit {
             return Err(CanisterManagerError::NotEnoughMemoryAllocationGiven {
-                canister_id: self.canister.canister_id(),
                 memory_allocation_given: new_memory_allocation,
                 memory_usage_needed: new_memory_usage,
             });
@@ -463,26 +672,52 @@ impl InstallCodeHelper {
         }
     }
 
+    /// Takes the canister log.
+    pub(crate) fn take_canister_log(&mut self) -> CanisterLog {
+        std::mem::take(&mut self.canister.system_state.canister_log)
+    }
+
     /// Checks the result of Wasm execution and applies the state changes.
+    ///
+    /// Returns the amount of instructions consumed along with the result of
+    /// applying the state changes.
     pub fn handle_wasm_execution(
         &mut self,
         canister_state_changes: Option<CanisterStateChanges>,
-        output: WasmExecutionOutput,
+        mut output: WasmExecutionOutput,
         original: &OriginalContext,
         round: &RoundContext,
-    ) -> Result<(), CanisterManagerError> {
+    ) -> (NumInstructions, Result<(), CanisterManagerError>) {
+        self.canister
+            .system_state
+            .canister_log
+            .append(&mut output.canister_log);
         self.steps.push(InstallCodeStep::HandleWasmExecution {
             canister_state_changes: canister_state_changes.clone(),
             output: output.clone(),
         });
 
+        let instructions_consumed = NumInstructions::from(
+            self.execution_parameters
+                .instruction_limits
+                .message()
+                .get()
+                .saturating_sub(output.num_instructions_left.get()),
+        );
+
         self.execution_parameters
             .instruction_limits
             .update(output.num_instructions_left);
 
+        debug_assert!(output
+            .wasm_result
+            .clone()
+            .map_or(true, |result| result.is_none()));
         match output.wasm_result {
             Ok(None) => {}
             Ok(Some(_response)) => {
+                debug_assert!(false);
+                round.counters.invalid_system_call_error.inc();
                 fatal!(round.log, "[EXC-BUG] System methods cannot use msg_reply.");
             }
             Err(err) => {
@@ -499,7 +734,10 @@ impl InstallCodeHelper {
                         limit
                     );
                 }
-                return Err((self.canister().canister_id(), err).into());
+                return (
+                    instructions_consumed,
+                    Err((self.canister().canister_id(), err).into()),
+                );
             }
         };
 
@@ -517,9 +755,10 @@ impl InstallCodeHelper {
                 round.hypervisor.subnet_id(),
                 round.log,
             ) {
+                debug_assert_eq!(err, HypervisorError::OutOfMemory);
                 match &err {
                     HypervisorError::WasmEngineError(err) => {
-                        // TODO(RUN-299): Increment a critical error counter here.
+                        round.counters.state_changes_error.inc();
                         error!(
                             round.log,
                             "[EXC-BUG]: Failed to apply state changes due to a bug: {}", err
@@ -532,14 +771,17 @@ impl InstallCodeHelper {
                         )
                     }
                     _ => {
-                        // TODO(RUN-299): Increment a critical error counter here.
+                        round.counters.state_changes_error.inc();
                         error!(
                             round.log,
                             "[EXC-BUG]: Failed to apply state changes due to an unexpected error: {}", err
                         )
                     }
                 }
-                return Err((self.canister.canister_id(), err).into());
+                return (
+                    instructions_consumed,
+                    Err((self.canister.canister_id(), err).into()),
+                );
             }
             let execution_state = self.canister.execution_state.as_mut().unwrap();
             execution_state.wasm_memory = wasm_memory;
@@ -553,9 +795,9 @@ impl InstallCodeHelper {
                 }
             }
             self.total_heap_delta +=
-                NumBytes::from((output.instance_stats.dirty_pages * PAGE_SIZE) as u64);
+                NumBytes::from((output.instance_stats.dirty_pages() * PAGE_SIZE) as u64);
         }
-        Ok(())
+        (instructions_consumed, Ok(()))
     }
 
     // A helper method to replay the given step.
@@ -567,21 +809,50 @@ impl InstallCodeHelper {
         round_limits: &RoundLimits,
     ) -> Result<(), CanisterManagerError> {
         match step {
-            InstallCodeStep::ValidateInput => self.validate_input(original, round_limits),
+            InstallCodeStep::ValidateInput => self.validate_input(original, round, round_limits),
             InstallCodeStep::ReplaceExecutionStateAndAllocations {
                 instructions_from_compilation,
                 maybe_execution_state,
-                stable_memory_handling,
+                memory_handling,
             } => self.replace_execution_state_and_allocations(
                 instructions_from_compilation,
                 maybe_execution_state,
-                stable_memory_handling,
+                memory_handling,
                 original,
             ),
+            InstallCodeStep::ClearCertifiedData => {
+                self.clear_certified_data();
+                Ok(())
+            }
+            InstallCodeStep::DeactivateGlobalTimer => {
+                self.deactivate_global_timer();
+                Ok(())
+            }
+            InstallCodeStep::BumpCanisterVersion => {
+                self.bump_canister_version();
+                Ok(())
+            }
+            InstallCodeStep::AddCanisterChange {
+                timestamp_nanos,
+                origin,
+                mode,
+                module_hash,
+            } => {
+                self.add_canister_change(timestamp_nanos, origin, mode, module_hash);
+                Ok(())
+            }
             InstallCodeStep::HandleWasmExecution {
                 canister_state_changes,
                 output,
-            } => self.handle_wasm_execution(canister_state_changes, output, original, round),
+            } => {
+                let (_, result) =
+                    self.handle_wasm_execution(canister_state_changes, output, original, round);
+                result
+            }
+            InstallCodeStep::ChargeForLargeWasmAssembly { instructions } => {
+                self.charge_for_large_wasm_assembly(instructions);
+                Ok(())
+            }
         }
     }
 }
@@ -591,10 +862,11 @@ impl InstallCodeHelper {
 #[derive(Debug)]
 pub(crate) struct OriginalContext {
     pub execution_parameters: ExecutionParameters,
-    pub mode: CanisterInstallMode,
+    pub mode: CanisterInstallModeV2,
     pub canister_layout_path: PathBuf,
     pub config: CanisterMgrConfig,
     pub message: CanisterCall,
+    pub call_id: InstallCodeCallId,
     pub prepaid_execution_cycles: Cycles,
     pub time: Time,
     pub compilation_cost_handling: CompilationCostHandling,
@@ -603,6 +875,8 @@ pub(crate) struct OriginalContext {
     pub requested_memory_allocation: Option<MemoryAllocation>,
     pub sender: PrincipalId,
     pub canister_id: CanisterId,
+    pub log_dirty_pages: FlagStatus,
+    pub wasm_execution_mode: WasmExecutionMode,
 }
 
 pub(crate) fn validate_controller(
@@ -615,71 +889,6 @@ pub(crate) fn validate_controller(
             controllers_expected: canister.system_state.controllers.clone(),
             controller_provided: *controller,
         });
-    }
-    Ok(())
-}
-
-/// Validate compute allocation is strictly less than scheduler compute capacity,
-/// so it's guaranteed there is always at least 1% of free compute.
-pub(crate) fn validate_compute_allocation(
-    total_subnet_compute_allocation_used: u64,
-    canister: &CanisterState,
-    new_compute_allocation: Option<ComputeAllocation>,
-    config: &CanisterMgrConfig,
-) -> Result<(), CanisterManagerError> {
-    if let Some(new_compute_allocation) = new_compute_allocation {
-        let old_compute_allocation = canister.compute_allocation();
-        if new_compute_allocation.as_percent() > old_compute_allocation.as_percent() {
-            let others = total_subnet_compute_allocation_used
-                .saturating_sub(old_compute_allocation.as_percent());
-            // Plus one guarantees there is always at least 1% of free compute.
-            let available = config.compute_capacity.saturating_sub(others + 1);
-            if new_compute_allocation.as_percent() > available {
-                return Err(CanisterManagerError::SubnetComputeCapacityOverSubscribed {
-                    requested: new_compute_allocation,
-                    available: available.max(old_compute_allocation.as_percent()),
-                });
-            }
-        }
-    }
-    Ok(())
-}
-
-// Ensures that the subnet has enough memory capacity left to install the
-// canister.
-pub(crate) fn validate_memory_allocation(
-    available_memory: &SubnetAvailableMemory,
-    canister: &CanisterState,
-    memory_allocation: Option<MemoryAllocation>,
-    config: &CanisterMgrConfig,
-) -> Result<(), CanisterManagerError> {
-    if let Some(memory_allocation) = memory_allocation {
-        if let MemoryAllocation::Reserved(requested_allocation) = memory_allocation {
-            if requested_allocation < canister.memory_usage(config.own_subnet_type) {
-                return Err(CanisterManagerError::NotEnoughMemoryAllocationGiven {
-                    canister_id: canister.canister_id(),
-                    memory_allocation_given: memory_allocation,
-                    memory_usage_needed: canister.memory_usage(config.own_subnet_type),
-                });
-            }
-        }
-        let canister_current_allocation = match canister.memory_allocation() {
-            MemoryAllocation::Reserved(bytes) => bytes,
-            MemoryAllocation::BestEffort => canister.memory_usage(config.own_subnet_type),
-        };
-        if memory_allocation.bytes().get() as i128
-            > available_memory.get_total_memory() as i128
-                + canister_current_allocation.get() as i128
-        {
-            return Err(CanisterManagerError::SubnetMemoryCapacityOverSubscribed {
-                requested_total: memory_allocation.bytes(),
-                requested_wasm_custom_sections: NumBytes::from(0),
-                available_total: NumBytes::from((available_memory.get_total_memory()).max(0) as u64),
-                available_wasm_custom_sections: NumBytes::from(
-                    (available_memory.get_wasm_custom_sections_memory()).max(0) as u64,
-                ),
-            });
-        }
     }
     Ok(())
 }
@@ -703,30 +912,40 @@ pub(crate) fn canister_layout(
         .expect("failed to obtain canister layout")
 }
 
-/// Finishes an `install_code` execution early due to an error. The only state
-/// change that is applied to the clean canister state is refunding the prepaid
-/// execution cycles.
+/// Finishes an `install_code` execution early due to an error.
+///
+/// The only state changes applied to the clean canister state:
+///  - saving the new canister log
+///  - refunding the prepaid execution cycles
 pub(crate) fn finish_err(
     clean_canister: CanisterState,
     instructions_left: NumInstructions,
     original: OriginalContext,
     round: RoundContext,
     err: CanisterManagerError,
+    new_canister_log: CanisterLog,
 ) -> DtsInstallCodeResult {
     let mut new_canister = clean_canister;
 
+    new_canister.set_log(new_canister_log);
     new_canister
         .system_state
-        .apply_ingress_induction_cycles_debit(new_canister.canister_id(), round.log);
+        .apply_ingress_induction_cycles_debit(
+            new_canister.canister_id(),
+            round.log,
+            round.counters.charging_from_balance_error,
+        );
 
     let message_instruction_limit = original.execution_parameters.instruction_limits.message();
+
     round.cycles_account_manager.refund_unused_execution_cycles(
         &mut new_canister.system_state,
         instructions_left,
         message_instruction_limit,
         original.prepaid_execution_cycles,
-        round.execution_refund_error_counter,
+        round.counters.execution_refund_error,
         original.subnet_size,
+        original.wasm_execution_mode,
         round.log,
     );
 
@@ -743,6 +962,7 @@ pub(crate) fn finish_err(
     DtsInstallCodeResult::Finished {
         canister: new_canister,
         message: original.message,
+        call_id: original.call_id,
         instructions_used,
         result: Err(err),
     }

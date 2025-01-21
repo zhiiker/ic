@@ -8,13 +8,14 @@ use core::fmt;
 
 /// Occurs if loading a transcript using `NiDkgAlgorithm::load_transcript`
 /// fails.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub enum DkgLoadTranscriptError {
     FsEncryptionPublicKeyNotInRegistry(FsEncryptionPublicKeyNotInRegistryError),
     Registry(RegistryClientError),
     InvalidTranscript(InvalidArgumentError),
     MalformedFsEncryptionPublicKey(MalformedFsEncryptionPublicKeyError),
     TransientInternalError(InternalError),
+    InternalError(InternalError),
     // Reminder: document error definition changes on `NiDkgAlgorithm::load_transcript`.
 }
 
@@ -31,6 +32,9 @@ impl fmt::Display for DkgLoadTranscriptError {
             }
             DkgLoadTranscriptError::InvalidTranscript(error) => write!(f, "{}{}", prefix, error),
             DkgLoadTranscriptError::TransientInternalError(error) => {
+                write!(f, "{}{}", prefix, error)
+            }
+            DkgLoadTranscriptError::InternalError(error) => {
                 write!(f, "{}{}", prefix, error)
             }
         }

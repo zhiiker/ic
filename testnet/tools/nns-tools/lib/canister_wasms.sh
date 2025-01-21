@@ -1,6 +1,30 @@
 #!/bin/bash
 
-get_sns_canister_wasm_gz_for_type() {
+assert_that_a_prebuilt_nns_wasm_is_available() {
+    local CANISTER_TYPE=$1
+    local VERSION=$2
+
+    DOWNLOAD_NAME=$(_canister_download_name_for_nns_canister_type "$CANISTER_TYPE")
+    DOWNLOAD_URL="https://download.dfinity.systems/ic/${VERSION}/canisters/${DOWNLOAD_NAME}.wasm.gz"
+    if ! curl "${DOWNLOAD_URL}" --head --fail --silent &>/dev/null; then
+        print_red "There is no pre-built NNS $CANISTER_TYPE WASM at commit $VERSION."
+        exit 1
+    fi
+}
+
+assert_that_a_prebuilt_sns_wasm_is_available() {
+    local CANISTER_TYPE=$1
+    local VERSION=$2
+
+    DOWNLOAD_NAME=$(_canister_download_name_for_sns_canister_type "$CANISTER_TYPE")
+    DOWNLOAD_URL="https://download.dfinity.systems/ic/${VERSION}/canisters/${DOWNLOAD_NAME}.wasm.gz"
+    if ! curl "${DOWNLOAD_URL}" --head --fail --silent &>/dev/null; then
+        print_red "There is no pre-built SNS $CANISTER_TYPE WASM at commit $VERSION."
+        exit 1
+    fi
+}
+
+download_sns_canister_wasm_gz_for_type() {
     local CANISTER_TYPE=$1
     local VERSION=$2
 
@@ -22,13 +46,16 @@ _download_canister_gz() {
     DOWNLOAD_NAME=$1
     GIT_HASH=$2
 
-    # See note at variable declaration
+    DOWNLOAD_URL="https://download.dfinity.systems/ic/${GIT_HASH}/canisters/${DOWNLOAD_NAME}.wasm.gz"
     OUTPUT_FILE="$MY_DOWNLOAD_DIR/$DOWNLOAD_NAME-$GIT_HASH.wasm.gz"
 
-    curl --silent "https://download.dfinity.systems/ic/$GIT_HASH/canisters/$DOWNLOAD_NAME.wasm.gz" \
-        --output "$OUTPUT_FILE"
+    curl \
+        "${DOWNLOAD_URL}" \
+        --output "${OUTPUT_FILE}" \
+        --fail \
+        --silent
 
-    echo "$OUTPUT_FILE"
+    echo "${OUTPUT_FILE}"
 }
 
 _canister_download_name_for_sns_canister_type() {
@@ -39,7 +66,7 @@ _canister_download_name_for_sns_canister_type() {
     type__ledger="ic-icrc1-ledger"
     type__swap="sns-swap-canister"
     type__archive="ic-icrc1-archive"
-    type__index="ic-icrc1-index"
+    type__index="ic-icrc1-index-ng"
 
     local INDEX=type__${CANISTER_TYPE}
     echo ${!INDEX}
@@ -52,6 +79,10 @@ _canister_download_name_for_nns_canister_type() {
         echo "$CANISTER_TYPE"_canister
     elif [ "$CANISTER_TYPE" == "ledger" ]; then
         echo "ledger-canister_notify-method"
+    elif [ "$CANISTER_TYPE" == "icp-ledger-archive" ] || [ "$CANISTER_TYPE" == "icp-ledger-archive-1" ] || [ "$CANISTER_TYPE" == "icp-ledger-archive-2" ]; then
+        echo "ledger-archive-node-canister"
+    elif [ "$CANISTER_TYPE" == "icp-index" ]; then
+        echo "ic-icp-index-canister"
     else
         echo "$CANISTER_TYPE"-canister
     fi

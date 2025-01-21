@@ -8,10 +8,10 @@ use ic_canister_client_sender::Sender;
 use ic_config::crypto::CryptoConfig;
 use ic_crypto_node_key_generation::generate_node_keys_once;
 use ic_nervous_system_common_test_keys::TEST_NEURON_1_OWNER_KEYPAIR;
-use ic_nns_common::registry::encode_or_panic;
 use ic_nns_test_utils::registry::{
     get_committee_signing_key, get_dkg_dealing_key, get_idkg_dealing_encryption_key,
     get_node_operator_record, get_node_record, get_node_signing_key, get_transport_tls_certificate,
+    new_node_keys_and_node_id,
 };
 use ic_nns_test_utils::{
     itest_helpers::{
@@ -22,7 +22,7 @@ use ic_nns_test_utils::{
 };
 use ic_protobuf::registry::crypto::v1::PublicKey;
 use ic_protobuf::registry::{
-    node::v1::{ConnectionEndpoint, NodeRecord, Protocol},
+    node::v1::{ConnectionEndpoint, NodeRecord},
     node_operator::v1::NodeOperatorRecord,
     subnet::v1::SubnetRecord,
 };
@@ -31,9 +31,10 @@ use ic_registry_keys::{
     make_subnet_record_key,
 };
 use ic_registry_transport::{insert, pb::v1::RegistryAtomicMutateRequest};
-use ic_test_utilities::types::ids::{node_test_id, user_test_id};
+use ic_test_utilities_types::ids::{node_test_id, user_test_id};
 use ic_types::crypto::KeyPurpose;
 use ic_types::NodeId;
+use prost::Message;
 use registry_canister::init::RegistryCanisterInitPayloadBuilder;
 use registry_canister::mutations::node_management::common::make_add_node_registry_mutations;
 use registry_canister::mutations::node_management::do_remove_nodes::RemoveNodesPayload;
@@ -52,16 +53,14 @@ fn remove_nodes_with_duplicate_endpoints_succeeds() {
             node_allowance: 5,
             ..Default::default()
         };
-        let node1 = {
+        let node_record_1 = {
             let xnet_connection_endpoint = ConnectionEndpoint {
                 ip_addr: "129.0.0.1".to_string(),
                 port: 1234,
-                protocol: Protocol::Http1 as i32,
             };
             let http_connection_endpoint = ConnectionEndpoint {
                 ip_addr: "129.0.0.1".to_string(),
                 port: 4321,
-                protocol: Protocol::Http1 as i32,
             };
             NodeRecord {
                 node_operator_id: user_test_id(NO_ID).get().to_vec(),
@@ -70,16 +69,14 @@ fn remove_nodes_with_duplicate_endpoints_succeeds() {
                 ..Default::default()
             }
         };
-        let node2 = {
+        let node_record_2 = {
             let xnet_connection_endpoint = ConnectionEndpoint {
                 ip_addr: "129.0.1.1".to_string(),
                 port: 1234,
-                protocol: Protocol::Http1 as i32,
             };
             let http_connection_endpoint = ConnectionEndpoint {
                 ip_addr: "129.0.1.1".to_string(),
                 port: 4321,
-                protocol: Protocol::Http1 as i32,
             };
             NodeRecord {
                 node_operator_id: user_test_id(NO_ID).get().to_vec(),
@@ -88,39 +85,39 @@ fn remove_nodes_with_duplicate_endpoints_succeeds() {
                 ..Default::default()
             }
         };
+        let (valid_pks_1, node_id_1) = new_node_keys_and_node_id();
+        let mut mutations_1 =
+            make_add_node_registry_mutations(node_id_1, node_record_1, valid_pks_1);
+        let (valid_pks_2, node_id_2) = new_node_keys_and_node_id();
+        let mut mutations_2 =
+            make_add_node_registry_mutations(node_id_2, node_record_2, valid_pks_2);
+        let mut mutations = vec![
+            insert(
+                make_node_operator_record_key(user_test_id(NO_ID).get()).as_bytes(),
+                node_operator.encode_to_vec(),
+            ),
+            insert(
+                make_node_operator_record_key(user_test_id(TEST_ID).get()).as_bytes(),
+                node_operator2.encode_to_vec(),
+            ),
+        ];
+        mutations.append(&mut mutations_1);
+        mutations.append(&mut mutations_2);
         let (init_mutation, _, mut nodes_to_remove, _) = prepare_registry(1, NUM_NODES.into());
         let registry = set_up_registry_canister(
             &runtime,
             RegistryCanisterInitPayloadBuilder::new()
                 .push_init_mutate_request(init_mutation)
                 .push_init_mutate_request(RegistryAtomicMutateRequest {
-                    mutations: vec![
-                        insert(
-                            make_node_operator_record_key(user_test_id(NO_ID).get()).as_bytes(),
-                            encode_or_panic(&node_operator),
-                        ),
-                        insert(
-                            make_node_operator_record_key(user_test_id(TEST_ID).get()).as_bytes(),
-                            encode_or_panic(&node_operator2),
-                        ),
-                        insert(
-                            make_node_record_key(node_test_id(NO_ID)).as_bytes(),
-                            encode_or_panic(&node1),
-                        ),
-                        insert(
-                            make_node_record_key(node_test_id(NO_ID + 1)).as_bytes(),
-                            encode_or_panic(&node2),
-                        ),
-                    ],
-
+                    mutations,
                     preconditions: vec![],
                 })
                 .build(),
         )
         .await;
 
-        nodes_to_remove.push(node_test_id(NO_ID));
-        nodes_to_remove.push(node_test_id(NO_ID + 1));
+        nodes_to_remove.push(node_id_1);
+        nodes_to_remove.push(node_id_2);
 
         // Ensure there is a value for each of the nodes
         for node_id in nodes_to_remove.clone() {
@@ -170,7 +167,14 @@ fn remove_nodes_with_duplicate_endpoints_succeeds() {
     });
 }
 
+// TODO(NNS-2289): This test fails, as the basic registry setup generates correct node keys,
+//   so it is not the case anymore that the unassigned nodes are missing some keys.
+//   Moreover, when the invariants are enabled in a blocking way, the test will continue to fail,
+//   as the attempt to setup registry data in an inconsistent state (violating the invariants).
+//   One way of fixing the test would be introducing a special "test-only" API for preparing
+//   registry in an inconsistent state.
 #[test]
+#[ignore]
 fn remove_nodes_succeeds_with_missing_encryption_keys_in_registry() {
     local_test_on_nns_subnet(|runtime| async move {
         let node_operator = NodeOperatorRecord {
@@ -185,12 +189,10 @@ fn remove_nodes_succeeds_with_missing_encryption_keys_in_registry() {
             let xnet_connection_endpoint = ConnectionEndpoint {
                 ip_addr: "129.0.1.1".to_string(),
                 port: 1234,
-                protocol: Protocol::Http1 as i32,
             };
             let http_connection_endpoint = ConnectionEndpoint {
                 ip_addr: "129.0.1.1".to_string(),
                 port: 4321,
-                protocol: Protocol::Http1 as i32,
             };
             NodeRecord {
                 node_operator_id: user_test_id(NO_ID).get().to_vec(),
@@ -218,22 +220,22 @@ fn remove_nodes_succeeds_with_missing_encryption_keys_in_registry() {
                     mutations: vec![
                         insert(
                             make_node_operator_record_key(user_test_id(NO_ID).get()).as_bytes(),
-                            encode_or_panic(&node_operator),
+                            node_operator.encode_to_vec(),
                         ),
                         insert(
                             make_node_operator_record_key(user_test_id(TEST_ID).get()).as_bytes(),
-                            encode_or_panic(&node_operator2),
+                            node_operator2.encode_to_vec(),
                         ),
                         insert(
                             make_node_record_key(node_test_id(NO_ID)).as_bytes(),
-                            encode_or_panic(&node),
+                            node.encode_to_vec(),
                         ),
                         insert(
                             make_crypto_node_key(
                                 node_test_id(NO_ID),
                                 KeyPurpose::DkgDealingEncryption,
                             ),
-                            encode_or_panic(&node_dkg_key),
+                            node_dkg_key.encode_to_vec(),
                         ),
                     ],
 
@@ -329,12 +331,10 @@ fn remove_nodes_removes_all_keys() {
             let xnet_connection_endpoint = ConnectionEndpoint {
                 ip_addr: "129.0.1.1".to_string(),
                 port: 1234,
-                protocol: Protocol::Http1 as i32,
             };
             let http_connection_endpoint = ConnectionEndpoint {
                 ip_addr: "129.0.1.1".to_string(),
                 port: 4321,
-                protocol: Protocol::Http1 as i32,
             };
             NodeRecord {
                 node_operator_id: user_test_id(NO_ID).get().to_vec(),
@@ -352,10 +352,10 @@ fn remove_nodes_removes_all_keys() {
 
         // Add the node along with keys and certs
         let mut mutations = make_add_node_registry_mutations(node_id, node, valid_pks);
-        // Add node operator records
+        // Add node operator record
         mutations.push(insert(
             make_node_operator_record_key(user_test_id(NO_ID).get()).as_bytes(),
-            encode_or_panic(&node_operator),
+            node_operator.encode_to_vec(),
         ));
 
         let registry = set_up_registry_canister(
@@ -505,7 +505,7 @@ fn nodes_cannot_be_removed_if_any_in_subnet() {
 
         init_mutation.mutations.push(insert(
             make_node_operator_record_key(user_test_id(TEST_ID).get()).as_bytes(),
-            encode_or_panic(&node_operator),
+            node_operator.encode_to_vec(),
         ));
 
         // Prepare the registry with a single node and make it callable by anyone

@@ -1,9 +1,11 @@
 use crate::CspPublicKey;
 use hex::FromHex;
-use ic_crypto_internal_threshold_sig_ecdsa::{EccCurveType, MEGaPublicKey, PolynomialCommitment};
+use ic_crypto_internal_threshold_sig_canister_threshold_sig::{
+    EccCurveType, MEGaPublicKey, PolynomialCommitment,
+};
 use ic_crypto_internal_types::encrypt::forward_secure::CspFsEncryptionPublicKey;
 use ic_crypto_internal_types::sign::threshold_sig::public_coefficients::CspPublicCoefficients;
-use ic_crypto_sha::{Context, DomainSeparationContext, Sha256};
+use ic_crypto_sha2::{Context, DomainSeparationContext, Sha256};
 use ic_crypto_tls_interfaces::TlsPublicKeyCert;
 use ic_types::crypto::{AlgorithmId, CryptoError};
 use std::fmt;
@@ -26,7 +28,7 @@ mod tests;
 /// It is a critical system invariant that the generated `KeyId` remains stable.
 /// This means that the same inputs should *always* produce instances of `KeyId` with the same value.
 /// This should be ensured via testing, especially if an external library is involved in generating those inputs.
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct KeyId([u8; 32]);
 ic_crypto_internal_types::derive_serde!(KeyId, 32);
 
@@ -60,7 +62,7 @@ impl From<[u8; 32]> for KeyId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub enum KeyIdInstantiationError {
     InvalidArguments(String),
 }
@@ -79,7 +81,7 @@ impl From<KeyIdInstantiationError> for CryptoError {
 /// `domain_separator | algorithm_id | size(bytes) | bytes`
 /// where  domain_separator is DomainSeparationContext(KEY_ID_DOMAIN),
 /// algorithm_id is a 1-byte value, and size(pk_bytes) is the size of
-/// pk_bytes as u32 in BigEndian format.                              
+/// pk_bytes as u32 in BigEndian format.
 ///
 /// # Errors
 /// * `KeyIdInstantiationError::InvalidArgument`: if the slice of bytes is too large and its size does not fit in a `u32`.
@@ -99,7 +101,7 @@ where
         })?;
         let mut hash =
             Sha256::new_with_context(&DomainSeparationContext::new(KEY_ID_DOMAIN.to_string()));
-        hash.write(&[alg_id.as_u8()]);
+        hash.write(&[u8::from(alg_id)]);
         hash.write(&bytes_size.to_be_bytes());
         hash.write(bytes);
         Ok(KeyId::from(hash.finish()))
@@ -164,30 +166,20 @@ impl TryFrom<&TlsPublicKeyCert> for KeyId {
     }
 }
 
-impl From<&CspPublicCoefficients> for KeyId {
-    fn from(coefficients: &CspPublicCoefficients) -> Self {
+impl TryFrom<&CspPublicCoefficients> for KeyId {
+    type Error = KeyIdInstantiationError;
+
+    fn try_from(coefficients: &CspPublicCoefficients) -> Result<Self, Self::Error> {
         let mut hash = Sha256::new_with_context(&DomainSeparationContext::new(
             THRESHOLD_PUBLIC_COEFFICIENTS_KEY_ID_DOMAIN,
         ));
-        hash.write(
-            &serde_cbor::to_vec(&coefficients).expect("Failed to serialize public coefficients"),
-        );
-        KeyId::from(hash.finish())
-    }
-}
-
-impl TryFrom<&str> for KeyId {
-    type Error = String;
-
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        if s.starts_with(KEY_ID_PREFIX) && s.ends_with(KEY_ID_SUFFIX) {
-            let key_id_hex = s
-                .get(KEY_ID_PREFIX.len()..s.len() - KEY_ID_SUFFIX.len())
-                .ok_or(format!("Invalid display string for KeyId: {}", s))?;
-            KeyId::from_hex(key_id_hex)
-        } else {
-            Err(format!("Invalid display string for KeyId: {}", s))
-        }
+        hash.write(&serde_cbor::to_vec(&coefficients).map_err(|err| {
+            Self::Error::InvalidArguments(format!(
+                "Failed to serialize public coefficients: {}",
+                err
+            ))
+        })?);
+        Ok(KeyId::from(hash.finish()))
     }
 }
 

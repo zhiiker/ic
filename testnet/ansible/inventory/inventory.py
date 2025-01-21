@@ -56,8 +56,9 @@ class IcDeploymentInventory:
         self._all_nodes_hosts = []
         self._nodes_filter_include = {}
         self._all_nns_hosts = set()
-        self._all_boundary_hosts = set()
+        self._all_api_hosts = set()
         self._all_aux_hosts = set()
+        self._all_boundary_hosts = set()
         self._all_physical_hosts = {}
         self._phy_short_mapping = {}
         self._parent = {}  # link up from a child group/host to the parent group
@@ -169,8 +170,10 @@ class IcDeploymentInventory:
         # Update a list of all IC "nodes" in the deployment
         self._update_all_nodes_hosts(inventory)
         self._update_nns_nodes(inventory)
-        self._update_boundary_nodes(inventory)
+        # All [api] sections were removed from env hosts.ini files.
+        # self._update_api_nodes(inventory)
         self._update_aux_nodes(inventory)
+        self._update_boundary_nodes(inventory)
         self._update_all_physical_nodes_hosts(inventory)
 
         # Check and if necessary fix/set missing node_index
@@ -211,7 +214,7 @@ class IcDeploymentInventory:
                 # That didn't work, try to build IPv6 from the MAC address
                 if ic_host:
                     ipv6_prefix = self._get_ipv6_prefix_for_ic_host(ic_host)
-                    ipv6_subnet = self._get_ipv6_subnet_for_ic_host(ic_host)
+                    ipv6_subnet = "/64"
                     # For the mainnet deployments, the MAC address is calculated based on the number of guests on
                     # the physical host, so we need to enumerate and count the guests on each physical host.
                     # Assign a unique ID to each physical host. This will be a serial number if
@@ -304,14 +307,18 @@ class IcDeploymentInventory:
                     host_vars = self._inventory["_meta"]["hostvars"][str(host)]
                     if "subnet_index" not in host_vars:
                         host_vars["subnet_index"] = 0
-            elif group_name == "boundary":
+            elif group_name == "api":
                 for host in group.hosts:
                     host_vars = self._inventory["_meta"]["hostvars"][str(host)]
-                    host_vars["subnet_index"] = "boundary"
+                    host_vars["subnet_index"] = "api"
             elif group_name == "aux":
                 for host in group.hosts:
                     host_vars = self._inventory["_meta"]["hostvars"][str(host)]
                     host_vars["subnet_index"] = "aux"
+            elif group_name == "boundary":
+                for host in group.hosts:
+                    host_vars = self._inventory["_meta"]["hostvars"][str(host)]
+                    host_vars["subnet_index"] = "boundary"
 
         for hostname in self._all_nodes_hosts:
             host_vars = self._inventory["_meta"]["hostvars"][hostname]
@@ -405,13 +412,17 @@ class IcDeploymentInventory:
         """Return a sorted list of all hosts under the "nns" group."""
         self._all_nns_hosts = set(self._get_all_group_hosts(inventory, "nns"))
 
-    def _update_boundary_nodes(self, inventory):
-        """Return a sorted list of all hosts under the boundary group."""
-        self._all_boundary_hosts = set(self._get_all_group_hosts(inventory, "boundary"))
+    def _update_api_nodes(self, inventory):
+        """Return a sorted list of all hosts under the api group."""
+        self._all_api_hosts = set(self._get_all_group_hosts(inventory, "api"))
 
     def _update_aux_nodes(self, inventory):
         """Return a sorted list of all hosts under the aux group."""
         self._all_aux_hosts = set(self._get_all_group_hosts(inventory, "aux"))
+
+    def _update_boundary_nodes(self, inventory):
+        """Return a sorted list of all hosts under the boundary group."""
+        self._all_boundary_hosts = set(self._get_all_group_hosts(inventory, "boundary"))
 
     def _update_all_physical_nodes_hosts(self, inventory):
         # make a complete list of physical hosts and the IC nodes assigned to them
@@ -466,10 +477,6 @@ class IcDeploymentInventory:
     def _get_ipv6_prefix_for_ic_host(self, ic_host):
         dc = self._get_dc_config_for_ic_host(ic_host)
         return dc.get("vars", {}).get("ipv6_prefix")
-
-    def _get_ipv6_subnet_for_ic_host(self, ic_host):
-        dc = self._get_dc_config_for_ic_host(ic_host)
-        return dc.get("vars", {}).get("ipv6_subnet")
 
     def _get_dc_config_for_ic_host(self, ic_host):
         hostname_short = ic_host.split(".")[0]
@@ -537,9 +544,8 @@ class IcDeploymentInventory:
         }
 
         nodes_vars = self._inventory["nodes"].get("vars", {})
-        result["journalbeat_hosts"] = nodes_vars.get("journalbeat_hosts", [])
-        result["journalbeat_index"] = nodes_vars.get("journalbeat_index", "")
-        result["journalbeat_tags"] = nodes_vars.get("journalbeat_tags", [])
+        result["elasticsearch_hosts"] = nodes_vars.get("elasticsearch_hosts", [])
+        result["elasticsearch_tags"] = nodes_vars.get("elasticsearch_tags", [])
 
         bn_nodes_vars = self._inventory.get("boundary", {}).get("vars", None)
         if bn_nodes_vars is not None:
@@ -570,10 +576,10 @@ class IcDeploymentInventory:
             dc_config = {
                 "name": dc_name,
                 "ipv6_prefix": dc_vars["ipv6_prefix"],
-                "ipv6_subnet": dc_vars["ipv6_subnet"],
                 "nodes": [],
-                "boundary_nodes": [],
+                "api_nodes": [],
                 "aux_nodes": [],
+                "boundary_nodes": [],
             }
 
             for node_name in ic_nodes_by_dc[dc_name]:
@@ -586,10 +592,12 @@ class IcDeploymentInventory:
 
                 if node_name in self._all_nns_hosts:
                     node_config["subnet_type"] = "root_subnet"
-                elif node_name in self._all_boundary_hosts:
-                    node_config["subnet_type"] = "boundary_subnet"
+                elif node_name in self._all_api_hosts:
+                    node_config["subnet_type"] = "api_subnet"
                 elif node_name in self._all_aux_hosts:
                     node_config["subnet_type"] = "aux_subnet"
+                elif node_name in self._all_boundary_hosts:
+                    node_config["subnet_type"] = "boundary_subnet"
                 else:
                     node_config["subnet_type"] = "app_subnet"
 
@@ -612,10 +620,12 @@ class IcDeploymentInventory:
                 if use_hsm:
                     node_config["use_hsm"] = use_hsm
 
-                if node_name in self._all_boundary_hosts:
-                    dc_config["boundary_nodes"].append(node_config)
+                if node_name in self._all_api_hosts:
+                    dc_config["api_nodes"].append(node_config)
                 elif node_name in self._all_aux_hosts:
                     dc_config["aux_nodes"].append(node_config)
+                elif node_name in self._all_boundary_hosts:
+                    dc_config["boundary_nodes"].append(node_config)
                 else:
                     dc_config["nodes"].append(node_config)
 

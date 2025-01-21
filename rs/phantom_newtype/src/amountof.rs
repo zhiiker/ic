@@ -217,7 +217,7 @@ impl<Unit, Repr> AmountOf<Unit, Repr>
 where
     Unit: DisplayerOf<AmountOf<Unit, Repr>>,
 {
-    /// `display` provides a machanism to implement a custom display
+    /// `display` provides a mechanism to implement a custom display
     /// for phantom types.
     ///
     /// ```
@@ -293,6 +293,28 @@ where
     type Output = Self;
     fn add(self, rhs: Self) -> Self {
         Self(self.0 + rhs.0, PhantomData)
+    }
+}
+
+impl<Unit, Repr> num_traits::SaturatingAdd for AmountOf<Unit, Repr>
+where
+    Repr: num_traits::SaturatingAdd,
+{
+    /// Saturating addition. Computes `self + other`, saturating
+    /// at the relevant high or low boundary of the type.
+    fn saturating_add(&self, rhs: &Self) -> Self {
+        Self(self.0.saturating_add(&rhs.0), PhantomData)
+    }
+}
+
+impl<Unit, Repr> num_traits::SaturatingSub for AmountOf<Unit, Repr>
+where
+    Repr: num_traits::SaturatingSub,
+{
+    /// Saturating subtraction. Computes `self - other`, saturating
+    /// at the relevant high or low boundary of the type.
+    fn saturating_sub(&self, rhs: &Self) -> Self {
+        Self(self.0.saturating_sub(&rhs.0), PhantomData)
     }
 }
 

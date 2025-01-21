@@ -1,16 +1,15 @@
 use ic_artifact_pool::ingress_pool::IngressPoolImpl;
 use ic_config::artifact_pool::ArtifactPoolConfig;
 use ic_interfaces::{
-    artifact_pool::{ChangeResult, MutablePool, UnvalidatedArtifact},
     ingress_pool::{
-        ChangeSet, IngressPool, IngressPoolObject, IngressPoolSelect, IngressPoolThrottler,
-        PoolSection, SelectResult, UnvalidatedIngressArtifact, ValidatedIngressArtifact,
+        IngressPool, IngressPoolThrottler, Mutations, PoolSection, UnvalidatedIngressArtifact,
+        ValidatedIngressArtifact,
     },
-    time_source::TimeSource,
+    p2p::consensus::{ArtifactTransmits, MutablePool, UnvalidatedArtifact},
 };
 use ic_logger::replica_logger::no_op_logger;
 use ic_metrics::MetricsRegistry;
-use ic_types::{artifact_kind::IngressArtifact, messages::SignedIngress, NodeId, Time};
+use ic_types::{artifact::IngressMessageId, messages::SignedIngress, NodeId};
 
 pub struct TestIngressPool {
     pub pool: IngressPoolImpl,
@@ -37,6 +36,10 @@ impl IngressPool for TestIngressPool {
     fn unvalidated(&self) -> &dyn PoolSection<UnvalidatedIngressArtifact> {
         self.pool.unvalidated()
     }
+
+    fn exceeds_limit(&self, _peer_id: &NodeId) -> bool {
+        false
+    }
 }
 
 impl IngressPoolThrottler for TestIngressPool {
@@ -45,26 +48,18 @@ impl IngressPoolThrottler for TestIngressPool {
     }
 }
 
-impl MutablePool<IngressArtifact, ChangeSet> for TestIngressPool {
+impl MutablePool<SignedIngress> for TestIngressPool {
+    type Mutations = Mutations;
+
     fn insert(&mut self, unvalidated_artifact: UnvalidatedArtifact<SignedIngress>) {
         self.pool.insert(unvalidated_artifact)
     }
 
-    fn apply_changes(
-        &mut self,
-        time_source: &dyn TimeSource,
-        change_set: ChangeSet,
-    ) -> ChangeResult<IngressArtifact> {
-        self.pool.apply_changes(time_source, change_set)
+    fn remove(&mut self, id: &IngressMessageId) {
+        self.pool.remove(id)
     }
-}
 
-impl IngressPoolSelect for TestIngressPool {
-    fn select_validated<'a>(
-        &self,
-        range: std::ops::RangeInclusive<Time>,
-        f: Box<dyn FnMut(&IngressPoolObject) -> SelectResult<SignedIngress> + 'a>,
-    ) -> Vec<SignedIngress> {
-        self.pool.select_validated(range, f)
+    fn apply(&mut self, change_set: Mutations) -> ArtifactTransmits<SignedIngress> {
+        self.pool.apply(change_set)
     }
 }

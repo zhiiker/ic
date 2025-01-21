@@ -32,15 +32,16 @@ function exit_usage() {
         err '    --dkg-interval-length <dil>           Set DKG interval length (-1 if not provided explicitly, which means - default will be used)'
         err '    --max-ingress-bytes-per-message <dil> Set maximum ingress size in bytes (-1 if not provided explicitly, which means - default will be used)'
         err '    --hosts-ini <hosts_override.ini>      Override the default ansible hosts.ini to set different testnet configuration'
+        err '    --no-api-nodes                        Do not deploy API boundary nodes even if they are declared in the hosts.ini file'
         err '    --no-boundary-nodes                   Do not deploy boundary nodes even if they are declared in the hosts.ini file'
-        err '    --boundary-dev-image		       Use development image of the boundary node VM (includes development service worker'
+        err '    --boundary-dev-image		           Use development image of the boundary node VM'
         err '    --with-testnet-keys                   Initialize the registry with readonly and backup keys from testnet/config/ssh_authorized_keys'
         err '    --allow-specified-ids                 Allow installing canisters at specified IDs'
         err ''
-        err 'To get the latest branch revision that has a disk image pre-built, you can use gitlab-ci/src/artifacts/newest_sha_with_disk_image.sh'
+        err 'To get the latest branch revision that has a disk image pre-built, you can use ci/src/artifacts/newest_sha_with_disk_image.sh'
         err 'Example (deploy latest master to small-a):'
         err ''
-        err '    testnet/tools/icos_deploy.sh small-a --git-revision $(gitlab-ci/src/artifacts/newest_sha_with_disk_image.sh master)'
+        err '    testnet/tools/icos_deploy.sh small-a --git-revision $(ci/src/artifacts/newest_sha_with_disk_image.sh master)'
         err ''
         exit 1
     fi
@@ -106,6 +107,9 @@ while [ $# -gt 0 ]; do
         --boundary-dev-image)
             BOUNDARY_IMAGE_TYPE="-dev"
             ;;
+        --no-api-nodes)
+            USE_API_NODES="false"
+            ;;
         --no-boundary-nodes)
             USE_BOUNDARY_NODES="false"
             ;;
@@ -163,24 +167,27 @@ echo "Deploying to ${deployment} from git revision ${GIT_REVISION}"
 starttime="$(date '+%s')"
 echo "**** Deployment start time: $(dateFromEpoch "${starttime}")"
 
-ipv4_info="$(ip -4 address show | grep -vE 'valid_lft')"
-ipv6_info="$(ip -6 address show | grep -vE 'valid_lft|fe80::')"
+if command -v ip &>/dev/null; then
+    ipv4_info="$(ip -4 address show | grep -vE 'valid_lft')"
+    ipv6_info="$(ip -6 address show | grep -vE 'valid_lft|fe80::')"
 
-echo "-------------------------------------------------------------------------------
-**** Local IPv4 address information:
+    echo "-------------------------------------------------------------------------------
+    **** Local IPv4 address information:
 
-${ipv4_info}
+    ${ipv4_info}
 
--------------------------------------------------------------------------------
-**** Local IPv6 address information:
+    -------------------------------------------------------------------------------
+    **** Local IPv6 address information:
 
-${ipv6_info}
+    ${ipv6_info}
 
--------------------------------------------------------------------------------"
+    -------------------------------------------------------------------------------"
+fi
 
 MEDIA_PATH="${REPO_ROOT}/artifacts/guestos/${deployment}/${GIT_REVISION}"
 BN_MEDIA_PATH="${REPO_ROOT}/artifacts/boundary-guestos/${deployment}/${GIT_REVISION}"
 INVENTORY="${REPO_ROOT}/testnet/env/${deployment}/hosts"
+USE_API_NODES="${USE_API_NODES:-true}"
 USE_BOUNDARY_NODES="${USE_BOUNDARY_NODES:-true}"
 
 rm -rf "${BN_MEDIA_PATH}"
@@ -191,11 +198,20 @@ mkdir -p "${BN_MEDIA_PATH}"
 if jq <"${BN_MEDIA_PATH}/list.json" -e '.boundary.hosts | length == 0' >/dev/null; then
     USE_BOUNDARY_NODES="false"
 fi
+if jq <"${BN_MEDIA_PATH}/list.json" -e '.api.hosts | length == 0' >/dev/null; then
+    USE_API_NODES="false"
+fi
 
 if [[ "${USE_BOUNDARY_NODES}" == "true" ]]; then
     ANSIBLE_ARGS+=("-e" "bn_media_path=${BN_MEDIA_PATH}")
 else
     ANSIBLE_ARGS+=("--skip-tags" "boundary_node_vm")
+fi
+
+if [[ "${USE_API_NODES}" == "true" ]]; then
+    ANSIBLE_ARGS+=("-e" "api_media_path=${API_MEDIA_PATH}")
+else
+    ANSIBLE_ARGS+=("--skip-tags" "api_node_vm")
 fi
 
 if ! [[ -z "${ALLOW_SPECIFIED_IDS+x}" ]]; then
@@ -251,6 +267,7 @@ mkdir -p "${MEDIA_PATH}"
     ${ALLOW_SPECIFIED_IDS:-}
 
 SCP_PREFIX=""
+NNS_PUBLIC_KEY=$(sed '1d;$d' "${MEDIA_PATH}/nns-public-key.pem" | tr -d '\n\r')
 if [ -n "${ANSIBLE_REMOTE_USER:-}" ]; then
     SCP_PREFIX="${ANSIBLE_REMOTE_USER}@"
 fi
@@ -272,13 +289,20 @@ mkdir "${BN_MEDIA_PATH}/certs"
 if [[ -z \${CERT_NAME+x} ]]; then
     err "'.boundary.vars.cert_name' was not defined"
 else
-    (for HOST in "\${HOSTS[@]}"; do
+    # succeed if at least one of the hosts has the necessary certificates
+    SUCCESS=0
+    for HOST in "\${HOSTS[@]}"; do
         echo >&2 "\$(date --rfc-3339=seconds): Copying \$CERT_NAME from server \$HOST"
-        scp -B -o "ConnectTimeout 30" -o "UserKnownHostsFile=/dev/null" -o "StrictHostKeyChecking=no" -r "${SCP_PREFIX}\${HOST}:/etc/letsencrypt/live/\${CERT_NAME}/*" "${BN_MEDIA_PATH}/certs/" && exit
-    done) || {
+        if scp -B -o "ConnectTimeout 30" -o "UserKnownHostsFile=/dev/null" -o "StrictHostKeyChecking=no" -r "${SCP_PREFIX}\${HOST}:/etc/letsencrypt/live/\${CERT_NAME}/*" "${BN_MEDIA_PATH}/certs/"; then
+            SUCCESS=1
+            break
+        fi
+    done
+
+    if [[ \${SUCCESS} -eq 0 ]]; then
         err "failed to find certificate \${CERT_NAME} on any designated server"
         exit 1
-    }
+    fi
 fi
 
 echo >&2 "$(date --rfc-3339=seconds): Running build-deployment.sh"
@@ -319,7 +343,7 @@ fi
 
 # Wait on the boundary node image to finish
 if [[ "${USE_BOUNDARY_NODES}" == "true" ]]; then
-    echo "**** Finishing boundary image - ($(dateFromEpoch "$(date '+%s')"))"
+    echo "**** Finishing boundary image - ($(dateFromEpoch "$(date '+%s')")) (${BOUNDARY_OUT})"
     BOUNDARY_STATUS=0
     wait ${BOUNDARY_PID} || BOUNDARY_STATUS=1
     cat "${BOUNDARY_OUT}" || true
@@ -330,9 +354,23 @@ if [[ "${USE_BOUNDARY_NODES}" == "true" ]]; then
     DOMAIN=$(jq <"${MEDIA_PATH}/${deployment}.json" -r '.bn_vars.domain // empty')
 fi
 
+# Wait on the api node image to finish
+if [[ "${USE_API_NODES}" == "true" ]]; then
+    echo "**** Finishing api image - ($(dateFromEpoch "$(date '+%s')"))"
+    API_STATUS=0
+    wait ${API_PID} || API_STATUS=1
+    cat "${API_OUT}" || true
+    if [[ ${API_STATUS} -ne 0 ]]; then
+        exit $(tail -1 "${API_OUT}" | sed -re "s/.*=\"([0-9]+).*/\1/")
+    fi
+fi
+
 rm -rf "${TMPDIR}"
 echo "-------------------------------------------------------------------------------"
 cd "${REPO_ROOT}/testnet/ansible"
+
+echo "**** Remove eventual monitoring - ($(dateFromEpoch "$(date '+%s')"))"
+ansible ic_p8s_service_discovery_destroy.yml
 
 echo "**** Create new IC instance - ($(dateFromEpoch "$(date '+%s')"))"
 ansible icos_network_redeploy.yml -e ic_state="create"
@@ -344,8 +382,7 @@ echo "**** Install NNS canisters - ($(dateFromEpoch "$(date '+%s')"))"
 ansible icos_network_redeploy.yml -e ic_state="install"
 
 echo "**** Start monitoring - ($(dateFromEpoch "$(date '+%s')"))"
-ansible ic_p8s_network_update.yml -e yes_i_confirm=yes
-ansible ic_p8s_service_discovery_install.yml -e yes_i_confirm=yes -e nns_public_key_path="${MEDIA_PATH}/nns-public-key.pem"
+ansible ic_p8s_service_discovery_install.yml -e nns_public_key="${NNS_PUBLIC_KEY}"
 
 endtime="$(date '+%s')"
 echo "**** Completed deployment at $(dateFromEpoch "${endtime}") (start time was $(dateFromEpoch "${starttime}"))"

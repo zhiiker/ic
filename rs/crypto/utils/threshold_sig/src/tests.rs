@@ -1,4 +1,3 @@
-#![allow(clippy::unwrap_used)]
 use super::*;
 use ic_crypto_internal_csp::types::{CspSignature, ThresBls12_381_Signature};
 use ic_crypto_internal_threshold_sig_bls12381::types::CombinedSignatureBytes;
@@ -67,7 +66,7 @@ const TEST_VECTORS: [TestVector; 6] = [
 fn signature_verification_should_pass_test_vectors() {
     for (index, vector) in TEST_VECTORS.iter().enumerate() {
         let public_key = {
-            let public_key = base64::decode(&vector.public_key).expect("Invalid base64 in test");
+            let public_key = base64::decode(vector.public_key).expect("Invalid base64 in test");
             assert_eq!(
                 public_key.len(),
                 PublicKeyBytes::SIZE,
@@ -80,7 +79,7 @@ fn signature_verification_should_pass_test_vectors() {
             )))
         };
         let signature: CombinedThresholdSigOf<SignableMock> = {
-            let signature = base64::decode(&vector.signature).expect("Invalid base64 in test");
+            let signature = base64::decode(vector.signature).expect("Invalid base64 in test");
             assert_eq!(
                 signature.len(),
                 CombinedSignatureBytes::SIZE,

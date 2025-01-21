@@ -1,17 +1,14 @@
 use super::*;
 use assert_matches::assert_matches;
-use ic_crypto::ed25519_public_key_to_der;
+use ic_crypto_standalone_sig_verifier::ed25519_public_key_to_der;
+use ic_crypto_test_utils_root_of_trust::MockRootOfTrustProvider;
 use ic_test_utilities::crypto::temp_crypto_component_with_fake_registry;
-use ic_test_utilities::types::ids::{canister_test_id, message_test_id, node_test_id};
+use ic_test_utilities_types::ids::{canister_test_id, message_test_id, node_test_id};
 use ic_types::{
     messages::{Delegation, SignedDelegation, UserSignature},
     time::UNIX_EPOCH,
 };
 use std::time::Duration;
-
-fn mock_registry_version() -> RegistryVersion {
-    RegistryVersion::from(0)
-}
 
 #[test]
 fn plain_authentication_correct_signature_passes() {
@@ -36,7 +33,7 @@ fn plain_authentication_correct_signature_passes() {
         &message_id,
         &user_signature,
         UNIX_EPOCH,
-        mock_registry_version()
+        &MockRootOfTrustProvider::new()
     )
     .is_ok());
 
@@ -52,7 +49,7 @@ fn plain_authentication_correct_signature_passes() {
         &message_id,
         &user_signature,
         UNIX_EPOCH,
-        mock_registry_version()
+        &MockRootOfTrustProvider::new()
     )
     .is_ok());
 }
@@ -81,7 +78,7 @@ fn plain_authentication_incorrect_signature_passes() {
             &message_id,
             &user_signature,
             UNIX_EPOCH,
-            mock_registry_version()
+            &MockRootOfTrustProvider::new()
         ),
         Err(InvalidSignature(InvalidBasicSignature(_)))
     );
@@ -136,7 +133,7 @@ fn plain_authentication_with_one_delegation() {
             &message_id,
             &user_signature,
             UNIX_EPOCH,
-            mock_registry_version()
+            &MockRootOfTrustProvider::new()
         ),
         Ok(CanisterIdSet::all())
     );
@@ -149,7 +146,7 @@ fn plain_authentication_with_one_delegation() {
             &message_id,
             &user_signature,
             UNIX_EPOCH + Duration::from_secs(1),
-            mock_registry_version()
+            &MockRootOfTrustProvider::new()
         ),
         Err(RequestValidationError::InvalidDelegationExpiry(_))
     );
@@ -204,7 +201,7 @@ fn plain_authentication_with_one_scoped_delegation() {
             &message_id,
             &user_signature,
             UNIX_EPOCH,
-            mock_registry_version()
+            &MockRootOfTrustProvider::new()
         ),
         Ok(ids) if ids == CanisterIdSet::try_from_iter(vec![canister_test_id(1)]).unwrap()
     );
@@ -305,7 +302,7 @@ fn plain_authentication_with_multiple_delegations() {
             &message_id,
             &user_signature,
             UNIX_EPOCH,
-            mock_registry_version()
+            &MockRootOfTrustProvider::new()
         ),
         Ok(ids) if ids == CanisterIdSet::try_from_iter(vec![canister_test_id(1)]).unwrap()
     );
@@ -315,7 +312,7 @@ fn plain_authentication_with_multiple_delegations() {
             &message_id,
             &user_signature,
             UNIX_EPOCH + Duration::from_secs(2),
-            mock_registry_version()
+            &MockRootOfTrustProvider::new()
         ),
         Ok(_)
     );
@@ -327,7 +324,7 @@ fn plain_authentication_with_multiple_delegations() {
             &message_id,
             &user_signature,
             UNIX_EPOCH + Duration::from_secs(3),
-            mock_registry_version()
+            &MockRootOfTrustProvider::new()
         ),
         Err(RequestValidationError::InvalidDelegationExpiry(_))
     );
@@ -361,7 +358,7 @@ fn plain_authentication_with_malformed_delegation() {
             &message_id,
             &user_signature,
             UNIX_EPOCH,
-            mock_registry_version()
+            &MockRootOfTrustProvider::new()
         ),
         Err(InvalidDelegation(InvalidBasicSignature(_)))
     );
@@ -411,7 +408,7 @@ fn plain_authentication_with_invalid_delegation() {
             &message_id,
             &user_signature,
             UNIX_EPOCH,
-            mock_registry_version()
+            &MockRootOfTrustProvider::new()
         ),
         Err(InvalidDelegation(InvalidPublicKey(_)))
     );
@@ -439,7 +436,7 @@ fn validate_signature_webauthn() {
             &message_id,
             &user_signature,
             UNIX_EPOCH,
-            mock_registry_version()
+            &MockRootOfTrustProvider::new()
         ),
         Ok(CanisterIdSet::all())
     );
@@ -476,7 +473,7 @@ fn validate_signature_webauthn_with_delegations() {
             &message_id,
             &user_signature,
             UNIX_EPOCH,
-            mock_registry_version()
+            &MockRootOfTrustProvider::new()
         ),
         Ok(CanisterIdSet::all())
     );
@@ -494,7 +491,7 @@ mod validate_ingress_expiry {
 
         let result = validate_ingress_expiry(&request, current_time);
 
-        assert_matches!(result, Err(InvalidIngressExpiry(msg)) if msg.contains("Specified ingress_expiry not within expected range"))
+        assert_matches!(result, Err(InvalidRequestExpiry(msg)) if msg.contains("Specified ingress_expiry not within expected range"))
     }
 
     #[test]
@@ -507,7 +504,7 @@ mod validate_ingress_expiry {
 
         let result = validate_ingress_expiry(&request, current_time);
 
-        assert_matches!(result, Err(InvalidIngressExpiry(msg)) if msg.contains("Specified ingress_expiry not within expected range"))
+        assert_matches!(result, Err(InvalidRequestExpiry(msg)) if msg.contains("Specified ingress_expiry not within expected range"))
     }
 
     #[test]
@@ -517,7 +514,7 @@ mod validate_ingress_expiry {
 
         let result = validate_ingress_expiry(&request, current_time);
 
-        assert_matches!(result, Err(InvalidIngressExpiry(msg)) if msg.ends_with("overflows"))
+        assert_matches!(result, Err(InvalidRequestExpiry(msg)) if msg.ends_with("overflows"))
     }
 
     #[test]
@@ -542,7 +539,7 @@ mod validate_ingress_expiry {
                 update: HttpCanisterUpdate {
                     canister_id: Blob(vec![42; 8]),
                     method_name: "some_method".to_string(),
-                    arg: Blob(b"".to_vec()),
+                    arg: Default::default(),
                     sender: Blob(vec![0x04]),
                     nonce: None,
                     ingress_expiry,
@@ -591,14 +588,14 @@ mod canister_id_set {
 
     #[test]
     fn should_efficiently_intersect_large_canister_id_sets() {
-        let mut rng = reproducible_rng();
+        let rng = &mut reproducible_rng();
         let number_of_ids = MAXIMUM_NUMBER_OF_TARGETS_PER_DELEGATION;
         let (first_canister_ids, second_canister_ids) = {
             let mut first_set = BTreeSet::new();
             let mut second_set = BTreeSet::new();
             for _ in 1..=number_of_ids {
-                assert!(first_set.insert(random_canister_id(&mut rng)));
-                assert!(second_set.insert(random_canister_id(&mut rng)));
+                assert!(first_set.insert(random_canister_id(rng)));
+                assert!(second_set.insert(random_canister_id(rng)));
             }
             (
                 CanisterIdSet::try_from_iter(first_set).expect("too many elements"),

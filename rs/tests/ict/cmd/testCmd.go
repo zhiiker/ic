@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -13,11 +14,12 @@ import (
 var DEFAULT_TEST_KEEPALIVE_MINS = 60
 
 type Config struct {
-	isFuzzyMatch bool
-	isDryRun    bool
-	keepAlive   bool
-	filterTests string
-	farmBaseUrl string
+	isFuzzyMatch         bool
+	isDryRun             bool
+	keepAlive            bool
+	filterTests          string
+	farmBaseUrl          string
+	requiredHostFeatures string
 }
 
 func TestCommandWithConfig(cfg *Config) func(cmd *cobra.Command, args []string) error {
@@ -38,10 +40,18 @@ func TestCommandWithConfig(cfg *Config) func(cmd *cobra.Command, args []string) 
 			}
 		}
 		command := []string{"bazel", "test", target, "--config=systest"}
-		// Append all bazel args following the --, i.e. "ict test target -- --verbose_explanations ..."
-		command = append(command, args[1:]...)
-		if !any_contains_substring(command, "--cache_test_results") {
-			command = append(command, "--cache_test_results=no")
+		command = append(command, "--cache_test_results=no")
+		// Try and sync k8s dashboards
+		icDashboardsDir, err := sparse_checkout("git@github.com:dfinity-ops/k8s.git", "", []string{"bases/apps/ic-dashboards"})
+		if err != nil {
+			cmd.PrintErrln(YELLOW + "Failed to sync k8s dashboards. Received the following error: " + err.Error())
+		} else {
+			cmd.PrintErrln(GREEN + "Successfully synced dashboards to path " + icDashboardsDir)
+			icDashboardsDir = filepath.Join(icDashboardsDir, "bases", "apps", "ic-dashboards")
+			cmd.Println(GREEN + "Will use " + icDashboardsDir + " as a root for dashboards")
+
+			command = append(command, fmt.Sprintf("--test_env=IC_DASHBOARDS_DIR=%s", icDashboardsDir))
+			command = append(command, fmt.Sprintf("--sandbox_add_mount_pair=%s", icDashboardsDir))
 		}
 		if len(cfg.filterTests) > 0 {
 			command = append(command, "--test_arg=--include-tests="+cfg.filterTests)
@@ -49,11 +59,17 @@ func TestCommandWithConfig(cfg *Config) func(cmd *cobra.Command, args []string) 
 		if len(cfg.farmBaseUrl) > 0 {
 			command = append(command, "--test_arg=--farm-base-url="+cfg.farmBaseUrl)
 		}
+		if len(cfg.requiredHostFeatures) > 0 {
+			command = append(command, "--test_arg=--set-required-host-features="+cfg.requiredHostFeatures)
+		}
 		if cfg.keepAlive {
-			keepAlive := fmt.Sprintf("--test_timeout=%s", strconv.Itoa(DEFAULT_TEST_KEEPALIVE_MINS * 60))
+			keepAlive := fmt.Sprintf("--test_timeout=%s", strconv.Itoa(DEFAULT_TEST_KEEPALIVE_MINS*60))
 			command = append(command, keepAlive)
 			command = append(command, "--test_arg=--debug-keepalive")
 		}
+		// Append all bazel args following the --, i.e. "ict test target -- --verbose_explanations --test_timeout=20 ..."
+		// Note: arguments provided by the user might override the ones above, i.e. test_timeout, cache_test_results, etc.
+		command = append(command, args[1:]...)
 		// Print Bazel command for debugging puroposes.
 		cmd.Println(CYAN + "Raw Bazel command to be invoked: \n$ " + strings.Join(command, " ") + NC)
 		if cfg.isDryRun {
@@ -74,7 +90,7 @@ func NewTestCmd() *cobra.Command {
 		Use:     "test <system_test_target> [flags] [-- <bazel_args>]",
 		Aliases: []string{"system_test", "t"},
 		Short:   "Run system_test target with Bazel",
-		Example: "  ict test //rs/tests/testing_verification:basic_health_test\n  ict test basic_health_test --dry-run -- --test_tmpdir=./tmp --test_output=errors",
+		Example: "  ict test //rs/tests/idx:basic_health_test\n  ict test basic_health_test --dry-run -- --test_tmpdir=./tmp --test_output=errors\n  ict test //rs/tests/idx:basic_health_test --set-required-host-features \"performance,host=dm1-dll01.dm1.dfinity.network\"",
 		Args:    cobra.MinimumNArgs(1),
 		RunE:    TestCommandWithConfig(&cfg),
 	}
@@ -83,6 +99,7 @@ func NewTestCmd() *cobra.Command {
 	testCmd.Flags().BoolVarP(&cfg.keepAlive, "keepalive", "k", false, fmt.Sprintf("Keep test system alive for %d minutes.", DEFAULT_TEST_KEEPALIVE_MINS))
 	testCmd.PersistentFlags().StringVarP(&cfg.filterTests, "include-tests", "i", "", "Execute only those test functions which contain a substring.")
 	testCmd.PersistentFlags().StringVarP(&cfg.farmBaseUrl, "farm-url", "", "", "Use a custom url for the Farm webservice.")
+	testCmd.PersistentFlags().StringVarP(&cfg.requiredHostFeatures, "set-required-host-features", "", "", "Set and override required host features of all hosts spawned.\nFeatures must be one or more of [dc=<dc-name>, host=<host-name>, AMD-SEV-SNP, SNS-load-test, performance], separated by comma (see Examples).")
 	testCmd.SetOut(os.Stdout)
 	return testCmd
 }

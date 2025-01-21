@@ -4,7 +4,7 @@ use std::{fmt, ops::Add};
 /// Represents the content length of an http request. The ContentLength is
 /// a scalar value that represents the number of bytes (octets) in the
 /// payload of the request. This does not include header sizes.
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Serialize)]
 pub struct ContentLength(u64);
 
 impl ContentLength {
@@ -51,7 +51,7 @@ impl Add for ContentLength {
     }
 }
 
-impl<'a> Add for &'a ContentLength {
+impl Add for &ContentLength {
     type Output = ContentLength;
 
     fn add(self, rhs: &ContentLength) -> ContentLength {
@@ -59,7 +59,7 @@ impl<'a> Add for &'a ContentLength {
     }
 }
 
-impl<'a> Add<&'a ContentLength> for ContentLength {
+impl Add<&ContentLength> for ContentLength {
     type Output = ContentLength;
 
     fn add(self, rhs: &ContentLength) -> ContentLength {
@@ -67,7 +67,7 @@ impl<'a> Add<&'a ContentLength> for ContentLength {
     }
 }
 
-impl<'a> Add<ContentLength> for &'a ContentLength {
+impl Add<ContentLength> for &ContentLength {
     type Output = ContentLength;
 
     fn add(self, rhs: ContentLength) -> ContentLength {

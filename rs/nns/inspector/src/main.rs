@@ -2,20 +2,22 @@
 
 use clap::Parser;
 use ic_base_types::CanisterId;
+use ic_ledger_canister_core::ledger::LedgerContext;
 use ic_nns_constants::{
     CYCLES_MINTING_CANISTER_ID, GENESIS_TOKEN_CANISTER_ID, GOVERNANCE_CANISTER_ID,
     LEDGER_CANISTER_ID, REGISTRY_CANISTER_ID,
 };
-use ic_nns_governance::pb::v1::{Governance as GovernanceProto, Neuron};
+use ic_nns_governance_api::pb::v1::{Governance as GovernanceProto, Neuron};
 use ic_nns_gtc::pb::v1::Gtc as GtcProto;
 use icp_ledger::{AccountIdentifier, Subaccount};
 use prost::Message;
-use std::convert::TryInto;
-use std::fs::File;
-use std::io::{Read, Write};
-use std::path::Path;
-use std::path::PathBuf;
-use std::string::ToString;
+use std::{
+    convert::TryInto,
+    fs::File,
+    io::{Read, Write},
+    path::{Path, PathBuf},
+    string::ToString,
+};
 
 /// Command line argument to the utility.
 #[derive(Debug, Parser)]
@@ -26,14 +28,13 @@ use std::string::ToString;
 )]
 struct CliArgs {
     /// Path to stable the `canister_states` directory
-    #[clap(parse(from_os_str))]
     input: PathBuf,
 
-    #[clap(parse(from_os_str), default_value = ".")]
+    #[clap(default_value = ".")]
     output: PathBuf,
 
     /// The location of the "rs" directory. Used to find .proto files.
-    #[clap(long, parse(from_os_str), default_value = ".")]
+    #[clap(long, default_value = ".")]
     rs: PathBuf,
 }
 
@@ -147,7 +148,7 @@ fn decode_governance_stable_memory(gov_pb: PathBuf, output: &Path, rs: &Path) {
     let cmd = cmd_base
         // -I: where to find included protos (transitively)
         .args(["-I", "nns/governance/proto"])
-        .args(["-I", "rosetta-api/icp_ledger/proto"])
+        .args(["-I", "ledger_suite/icp/proto"])
         .args(["-I", "types/base_types/proto"])
         .args(["-I", "nns/common/proto"])
         // Main arg: the main proto file
@@ -215,7 +216,7 @@ fn decode_governance_stable_memory(gov_pb: PathBuf, output: &Path, rs: &Path) {
 struct GtcAccountRecord {
     account_address: String,
     neuron_ids: String,
-    acount_value_icpts: u32,
+    account_value_icpts: u32,
     has_claimed: bool,
     has_donated: bool,
 }
@@ -226,7 +227,7 @@ fn decode_gtc_stable_memory(gtc_pb: PathBuf, output: &Path, rs: &Path) {
     let cmd = cmd_base
         // -I: where to find included protos (transitively)
         .args(["-I", "nns/governance/proto"])
-        .args(["-I", "rosetta-api/icp_ledger/proto"])
+        .args(["-I", "ledger_suite/icp/proto"])
         .args(["-I", "types/base_types/proto"])
         .args(["-I", "nns/common/proto"])
         .args(["-I", "nns/gtc/proto"])
@@ -267,7 +268,7 @@ fn decode_gtc_stable_memory(gtc_pb: PathBuf, output: &Path, rs: &Path) {
                 .map(|id| id.id.to_string())
                 .collect::<Vec<String>>()
                 .join(";"),
-            acount_value_icpts: s.icpts,
+            account_value_icpts: s.icpts,
             has_claimed: s.has_claimed,
             has_donated: s.has_donated,
         })
@@ -328,7 +329,7 @@ fn decode_ledger_stable_memory(cbor: PathBuf, output: &Path) {
         Ok(l) => l,
     };
     let mut records: Vec<LedgerBalanceRecord> = ledger
-        .balances
+        .balances()
         .store
         .iter()
         .map(|(key, icpts)| LedgerBalanceRecord {

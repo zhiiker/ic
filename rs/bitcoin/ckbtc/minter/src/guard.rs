@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 
 const MAX_CONCURRENT: usize = 100;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Eq, PartialEq, Debug)]
 pub enum GuardError {
     AlreadyProcessing,
     TooManyConcurrentRequests,
@@ -89,29 +89,6 @@ impl Drop for TimerLogicGuard {
     }
 }
 
-#[must_use]
-pub struct DistributeKytFeeGuard(());
-
-impl DistributeKytFeeGuard {
-    pub fn new() -> Option<Self> {
-        mutate_state(|s| {
-            if s.is_distributing_fee {
-                return None;
-            }
-            s.is_distributing_fee = true;
-            Some(DistributeKytFeeGuard(()))
-        })
-    }
-}
-
-impl Drop for DistributeKytFeeGuard {
-    fn drop(&mut self) {
-        mutate_state(|s| {
-            s.is_distributing_fee = false;
-        });
-    }
-}
-
 pub fn balance_update_guard(p: Principal) -> Result<Guard<PendingBalanceUpdates>, GuardError> {
     Guard::new(p)
 }
@@ -124,12 +101,11 @@ pub fn retrieve_btc_guard(p: Principal) -> Result<Guard<RetrieveBtcUpdates>, Gua
 mod tests {
     use crate::{
         guard::{GuardError, MAX_CONCURRENT},
-        lifecycle::init::{init, InitArgs},
+        lifecycle::init::{init, BtcNetwork, InitArgs},
         state::read_state,
     };
+    use candid::Principal;
     use ic_base_types::CanisterId;
-    use ic_btc_interface::Network;
-    use ic_cdk::export::Principal;
 
     use super::{balance_update_guard, TimerLogicGuard};
 
@@ -137,15 +113,18 @@ mod tests {
         Principal::try_from_slice(&id.to_le_bytes()).unwrap()
     }
 
+    #[allow(deprecated)]
     fn test_state_args() -> InitArgs {
         InitArgs {
-            btc_network: Network::Regtest,
-            ecdsa_key_name: "".to_string(),
-            retrieve_btc_min_amount: 0,
+            btc_network: BtcNetwork::Regtest,
+            ecdsa_key_name: "some_key".to_string(),
+            retrieve_btc_min_amount: 2000,
             ledger_id: CanisterId::from_u64(42),
             max_time_in_queue_nanos: 0,
             min_confirmations: None,
             mode: crate::state::Mode::GeneralAvailability,
+            btc_checker_principal: Some(CanisterId::from(0)),
+            check_fee: None,
             kyt_principal: None,
             kyt_fee: None,
         }
@@ -167,7 +146,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_collect)]
     fn guard_prevents_more_than_max_concurrent_principals() {
         // test that at most MAX_CONCURRENT guards can be created if each one
         // is for a different principal

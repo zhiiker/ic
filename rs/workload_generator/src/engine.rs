@@ -37,7 +37,7 @@ use crate::metrics::{
     LATENCY_HISTOGRAM, QUERY_REPLY, UPDATE_SENT, UPDATE_SENT_REPLY, UPDATE_WAIT_REPLY,
 };
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 struct WaitRequest {
     request_id: MessageId,
     request_type: String,
@@ -49,7 +49,7 @@ const START_OFFSET: Duration = Duration::from_millis(500);
 const QUERY_TIMEOUT: Duration = Duration::from_secs(60 * 5);
 const INGRESS_TIMEOUT: Duration = Duration::from_secs(60 * 6);
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Eq, PartialEq, Hash)]
 enum CallFailure {
     None,
     OnSubmit,
@@ -341,14 +341,15 @@ impl Engine {
         arg: Vec<u8>,
         n: usize,
     ) -> bool {
-        let nonce = plan.nonce.clone();
+        let nonce =
+            ic_crypto_sha2::Sha256::hash(&format!("inc {} {}", plan.nonce.clone(), n).into_bytes());
         let deadline = Instant::now() + agent.ingress_timeout;
         let (content, request_id) = prepare_update(
             &agent.sender,
             &plan.canister_id,
             method,
             arg,
-            format!("inc {} {}", nonce, n).into_bytes(),
+            nonce.to_vec(),
             expiry_time_from_now(),
             agent.sender_field.clone(),
         )
@@ -446,7 +447,7 @@ impl Engine {
                 let mut backoff = backoff::ExponentialBackoff {
                     initial_interval: Duration::from_millis(50),
                     current_interval: Duration::from_millis(50), // Should probably be the same as initial_interval
-                    // See fomula here:
+                    // See formula here:
                     // https://docs.rs/backoff/latest/backoff/
                     randomization_factor: 0.01,
                     multiplier: 1.2,

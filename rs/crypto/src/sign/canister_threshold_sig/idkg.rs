@@ -2,7 +2,7 @@ use crate::sign::{get_log_id, log_err, log_ok_content};
 use crate::CryptoComponentImpl;
 use ic_crypto_internal_csp::CryptoServiceProvider;
 use ic_interfaces::crypto::IDkgProtocol;
-use ic_logger::{debug, new_logger};
+use ic_logger::{debug, new_logger, warn};
 use ic_types::crypto::canister_threshold_sig::error::{
     IDkgCreateDealingError, IDkgCreateTranscriptError, IDkgLoadTranscriptError,
     IDkgOpenTranscriptError, IDkgRetainKeysError, IDkgVerifyComplaintError,
@@ -26,10 +26,7 @@ mod utils;
 mod tests;
 
 use ic_crypto_internal_logmon::metrics::{MetricsDomain, MetricsResult, MetricsScope};
-pub use utils::{
-    fetch_idkg_dealing_encryption_public_key_from_registry, get_mega_pubkey,
-    MegaKeyFromRegistryError,
-};
+pub use utils::{retrieve_mega_public_key_from_registry, MegaKeyFromRegistryError};
 
 /// Implementation of the [`IDkgProtocol`] for the crypto component.
 ///
@@ -83,7 +80,7 @@ pub use utils::{
 ///       where for each receiver `r` the encryption is computed as follows:
 ///         * Compute Diffie-Hellman tuple: `DH_r := (IDKG_PK_r, EK, IDKG_PK_r * alpha)`
 ///         * Set associated data: `AD_dr` identifies protocol instance, identity of dealer and receiver
-///         * Hash `(h_0, h_1) := hash_to_scalars(DH_r, AD_dr)` (model in the paper as a random oracle, implemented using [`xmd`] and [`hash2curve`])
+///         * Hash `(h_0, h_1) := hash_to_scalars(DH_r, AD_dr)` (modeled in the paper as a random oracle, implemented using [`xmd`] and [`hash2curve`])
 ///         * `E_{IDKG_PK_r} [p(r), q(r)] := (h_0 + p(r), h_1 + q(r))`
 ///     * Construct a single dealing for all receivers: `Dealing_d := ((C_0, C_1), (EK, pop_ek, E_1, E_2, E_3, E_4))`
 ///     * Sign dealing: `signed_dealing_d := Dealing_d ||Sign_{node_signing_sk_d} [Dealing_d]`
@@ -192,21 +189,21 @@ pub use utils::{
 ///     * `P(x) = P(d) * (d'-x)/(d'-d) + P(d') * (d-x)/(d-d')` and so
 ///     * `P(0) = P(d) * d'/(d'-d) + P(d') * d/(d-d')`
 ///
-/// [`hash2curve`]: ic_crypto_internal_threshold_sig_ecdsa::hash2curve
+/// [`hash2curve`]: ic_crypto_internal_threshold_sig_canister_threshold_sig
 /// [`IDkgTranscriptOperation::Random`]: ic_types::crypto::canister_threshold_sig::idkg::IDkgTranscriptOperation::Random
 /// [`IDkgTranscriptOperation::ReshareOfMasked`]: ic_types::crypto::canister_threshold_sig::idkg::IDkgTranscriptOperation::ReshareOfMasked
-/// [`MEGaCiphertextPair::encrypt`]: ic_crypto_internal_threshold_sig_ecdsa::MEGaCiphertextPair::encrypt
-/// [`PedersenCommitment`]: ic_crypto_internal_threshold_sig_ecdsa::PedersenCommitment
-/// [`ProofOfDLogEquivalence`]: ic_crypto_internal_threshold_sig_ecdsa::zk::ProofOfDLogEquivalence
-/// [`ProofOfEqualOpenings`]: ic_crypto_internal_threshold_sig_ecdsa::zk::ProofOfEqualOpenings
-/// [`SimpleCommitment`]: ic_crypto_internal_threshold_sig_ecdsa::SimpleCommitment
+/// [`MEGaCiphertextPair::encrypt`]: ic_crypto_internal_threshold_sig_canister_threshold_sig::MEGaCiphertextPair::encrypt
+/// [`PedersenCommitment`]: ic_crypto_internal_threshold_sig_canister_threshold_sig::PedersenCommitment
+/// [`ProofOfDLogEquivalence`]: ic_crypto_internal_threshold_sig_canister_threshold_sig::zk::ProofOfDLogEquivalence
+/// [`ProofOfEqualOpenings`]: ic_crypto_internal_threshold_sig_canister_threshold_sig::zk::ProofOfEqualOpenings
+/// [`SimpleCommitment`]: ic_crypto_internal_threshold_sig_canister_threshold_sig::SimpleCommitment
 /// [`xmd`]: ic_crypto_internal_seed::xmd
 impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
     fn create_dealing(
         &self,
         params: &IDkgTranscriptParams,
     ) -> Result<SignedIDkgDealing, IDkgCreateDealingError> {
-        let log_id = get_log_id(&self.logger, module_path!());
+        let log_id = get_log_id(&self.logger);
         let logger = new_logger!(&self.logger;
             crypto.log_id => log_id,
             crypto.trait_name => "IDkgProtocol",
@@ -219,6 +216,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         let start_time = self.metrics.now();
         let result = dealing::create_dealing(
             &self.csp,
+            &self.vault,
             &self.node_id,
             self.registry_client.as_ref(),
             params,
@@ -244,7 +242,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         params: &IDkgTranscriptParams,
         signed_dealing: &SignedIDkgDealing,
     ) -> Result<(), IDkgVerifyDealingPublicError> {
-        let log_id = get_log_id(&self.logger, module_path!());
+        let log_id = get_log_id(&self.logger);
         let logger = new_logger!(&self.logger;
             crypto.log_id => log_id,
             crypto.trait_name => "IDkgProtocol",
@@ -282,7 +280,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         params: &IDkgTranscriptParams,
         signed_dealing: &SignedIDkgDealing,
     ) -> Result<(), IDkgVerifyDealingPrivateError> {
-        let log_id = get_log_id(&self.logger, module_path!());
+        let log_id = get_log_id(&self.logger);
         let logger = new_logger!(&self.logger;
             crypto.log_id => log_id,
             crypto.trait_name => "IDkgProtocol",
@@ -295,7 +293,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         );
         let start_time = self.metrics.now();
         let result = dealing::verify_dealing_private(
-            &self.csp,
+            &self.vault,
             &self.node_id,
             self.registry_client.as_ref(),
             params,
@@ -321,7 +319,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         params: &IDkgTranscriptParams,
         initial_dealings: &InitialIDkgDealings,
     ) -> Result<(), IDkgVerifyInitialDealingsError> {
-        let log_id = get_log_id(&self.logger, module_path!());
+        let log_id = get_log_id(&self.logger);
         let logger = new_logger!(&self.logger;
             crypto.log_id => log_id,
             crypto.trait_name => "IDkgProtocol",
@@ -359,7 +357,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         params: &IDkgTranscriptParams,
         dealings: &BatchSignedIDkgDealings,
     ) -> Result<IDkgTranscript, IDkgCreateTranscriptError> {
-        let log_id = get_log_id(&self.logger, module_path!());
+        let log_id = get_log_id(&self.logger);
         let logger = new_logger!(&self.logger;
             crypto.log_id => log_id,
             crypto.trait_name => "IDkgProtocol",
@@ -373,6 +371,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         let start_time = self.metrics.now();
         let result = transcript::create_transcript(
             &self.csp,
+            self.vault.as_ref(),
             self.registry_client.as_ref(),
             params,
             dealings,
@@ -407,7 +406,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         params: &IDkgTranscriptParams,
         transcript: &IDkgTranscript,
     ) -> Result<(), IDkgVerifyTranscriptError> {
-        let log_id = get_log_id(&self.logger, module_path!());
+        let log_id = get_log_id(&self.logger);
         let logger = new_logger!(&self.logger;
             crypto.log_id => log_id,
             crypto.trait_name => "IDkgProtocol",
@@ -421,6 +420,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         let start_time = self.metrics.now();
         let result = transcript::verify_transcript(
             &self.csp,
+            self.vault.as_ref(),
             self.registry_client.as_ref(),
             params,
             transcript,
@@ -451,7 +451,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         &self,
         transcript: &IDkgTranscript,
     ) -> Result<Vec<IDkgComplaint>, IDkgLoadTranscriptError> {
-        let log_id = get_log_id(&self.logger, module_path!());
+        let log_id = get_log_id(&self.logger);
         let logger = new_logger!(&self.logger;
             crypto.log_id => log_id,
             crypto.trait_name => "IDkgProtocol",
@@ -463,11 +463,39 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         );
         let start_time = self.metrics.now();
         let result = transcript::load_transcript(
-            &self.csp,
+            &self.vault,
             &self.node_id,
             self.registry_client.as_ref(),
             transcript,
         );
+        if let Err(error) = &result {
+            match error {
+                IDkgLoadTranscriptError::PrivateKeyNotFound { .. }
+                | IDkgLoadTranscriptError::InvalidArguments { .. }
+                | IDkgLoadTranscriptError::MalformedPublicKey { .. }
+                | IDkgLoadTranscriptError::SerializationError { .. }
+                | IDkgLoadTranscriptError::PublicKeyNotFound { .. } => {
+                    // Errors that may lead to the key being lost.
+                    // If enough nodes on the same subnet report a failure, raise an alert.
+                    warn!(
+                        logger,
+                        "iDKG load_transcript error: transcript_id={:?}, transcript_type={:?}, error={:?}",
+                        transcript.transcript_id,
+                        transcript.transcript_type,
+                        error
+                    );
+                    self.metrics
+                        .observe_idkg_load_transcript_error(transcript.transcript_id.id());
+                }
+                IDkgLoadTranscriptError::InsufficientOpenings { .. }
+                | IDkgLoadTranscriptError::InternalError { .. }
+                | IDkgLoadTranscriptError::UnsupportedAlgorithm { .. }
+                | IDkgLoadTranscriptError::RegistryError(_)
+                | IDkgLoadTranscriptError::TransientInternalError { .. } => {
+                    // Errors that should not lead to the key being lost
+                }
+            }
+        }
         self.metrics.observe_parameter_size(
             MetricsDomain::IdkgProtocol,
             "load_transcript",
@@ -501,7 +529,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         complainer_id: NodeId,
         complaint: &IDkgComplaint,
     ) -> Result<(), IDkgVerifyComplaintError> {
-        let log_id = get_log_id(&self.logger, module_path!());
+        let log_id = get_log_id(&self.logger);
         let logger = new_logger!(&self.logger;
             crypto.log_id => log_id,
             crypto.trait_name => "IDkgProtocol",
@@ -515,7 +543,6 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         );
         let start_time = self.metrics.now();
         let result = complaint::verify_complaint(
-            &self.csp,
             self.registry_client.as_ref(),
             transcript,
             complaint,
@@ -549,7 +576,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         complainer_id: NodeId,
         complaint: &IDkgComplaint,
     ) -> Result<IDkgOpening, IDkgOpenTranscriptError> {
-        let log_id = get_log_id(&self.logger, module_path!());
+        let log_id = get_log_id(&self.logger);
         let logger = new_logger!(&self.logger;
             crypto.log_id => log_id,
             crypto.trait_name => "IDkgProtocol",
@@ -563,7 +590,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         );
         let start_time = self.metrics.now();
         let result = transcript::open_transcript(
-            &self.csp,
+            &self.vault,
             &self.node_id,
             self.registry_client.as_ref(),
             transcript,
@@ -600,7 +627,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         opening: &IDkgOpening,
         complaint: &IDkgComplaint,
     ) -> Result<(), IDkgVerifyOpeningError> {
-        let log_id = get_log_id(&self.logger, module_path!());
+        let log_id = get_log_id(&self.logger);
         let logger = new_logger!(&self.logger;
             crypto.log_id => log_id,
             crypto.trait_name => "IDkgProtocol",
@@ -614,7 +641,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
             crypto.complaint => format!("{:?}", complaint),
         );
         let start_time = self.metrics.now();
-        let result = transcript::verify_opening(&self.csp, transcript, opener, opening, complaint);
+        let result = transcript::verify_opening(transcript, opener, opening, complaint);
         self.metrics.observe_parameter_size(
             MetricsDomain::IdkgProtocol,
             "verify_opening",
@@ -642,7 +669,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         transcript: &IDkgTranscript,
         openings: &BTreeMap<IDkgComplaint, BTreeMap<NodeId, IDkgOpening>>,
     ) -> Result<(), IDkgLoadTranscriptError> {
-        let log_id = get_log_id(&self.logger, module_path!());
+        let log_id = get_log_id(&self.logger);
         let logger = new_logger!(&self.logger;
             crypto.log_id => log_id,
             crypto.trait_name => "IDkgProtocol",
@@ -655,7 +682,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         );
         let start_time = self.metrics.now();
         let result = transcript::load_transcript_with_openings(
-            &self.csp,
+            &self.vault,
             &self.node_id,
             self.registry_client.as_ref(),
             transcript,
@@ -687,7 +714,7 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
         &self,
         active_transcripts: &HashSet<IDkgTranscript>,
     ) -> Result<(), IDkgRetainKeysError> {
-        let log_id = get_log_id(&self.logger, module_path!());
+        let log_id = get_log_id(&self.logger);
         let logger = new_logger!(&self.logger;
             crypto.log_id => log_id,
             crypto.trait_name => "IDkgProtocol",
@@ -708,9 +735,10 @@ impl<C: CryptoServiceProvider> IDkgProtocol for CryptoComponentImpl<C> {
             transcripts_len += transcript.internal_transcript_raw.len();
         }
         let result = retain_active_keys::retain_keys_for_transcripts(
-            &self.csp,
+            &self.vault,
             &self.node_id,
             self.registry_client.as_ref(),
+            &self.metrics,
             active_transcripts,
         );
         self.metrics.observe_parameter_size(

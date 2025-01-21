@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used)]
-
 //! Tests for multisignatures
 
 use crate::{
@@ -7,6 +5,7 @@ use crate::{
     types::IndividualSignature, types::PublicKey, types::SecretKey, types::SecretKeyBytes,
 };
 use ic_crypto_internal_bls12_381_type::G1Projective;
+use ic_crypto_test_utils_reproducible_rng::reproducible_rng;
 
 fn check_single_point_signature_verifies(
     secret_key: &SecretKey,
@@ -64,7 +63,7 @@ mod stability {
     fn public_key_to_g1() {
         let mut csprng = ChaCha20Rng::seed_from_u64(42);
         let (_secret_key, public_key) = multi_crypto::keypair_from_rng(&mut csprng);
-        let public_key_bytes = PublicKeyBytes::from(public_key);
+        let public_key_bytes = PublicKeyBytes::from(&public_key);
         assert_eq!(
             hex::encode(multi_crypto::hash_public_key_to_g1(&public_key_bytes.0[..]).serialize()),
             "b02fd0d54faab7498924d7e230f84b00519ea7f3846cd30f82b149c1f172ad79ee68adb2ea2fc8a2d40ffdf3fd5df02a"
@@ -75,14 +74,14 @@ mod stability {
     fn secret_key_from_fixed_rng() {
         let mut csprng = ChaCha20Rng::seed_from_u64(9000);
         let (secret_key, public_key) = multi_crypto::keypair_from_rng(&mut csprng);
-        let secret_key_bytes = SecretKeyBytes::from(secret_key);
+        let secret_key_bytes = SecretKeyBytes::from(&secret_key);
 
         assert_eq!(
             hex::encode(serde_cbor::to_vec(&secret_key_bytes).unwrap()),
             "582020bfd7f85be7ce1f54ea1b0d750ae3324ab7897fde3235e189ec697f0fade983"
         );
 
-        let public_key_bytes = PublicKeyBytes::from(public_key);
+        let public_key_bytes = PublicKeyBytes::from(&public_key);
 
         assert_eq!(
             hex::encode(serde_cbor::to_vec(&public_key_bytes).unwrap()),
@@ -112,8 +111,8 @@ mod basic_functionality {
 
         #[test]
         fn keypair_from_rng_works(seed: [u8; 32]) {
-            let mut rng = ChaCha20Rng::from_seed(seed);
-            multi_crypto::keypair_from_rng(&mut rng);
+            let rng = &mut ChaCha20Rng::from_seed(seed);
+            multi_crypto::keypair_from_rng(rng);
         }
     }
 
@@ -140,11 +139,11 @@ mod basic_functionality {
     #[test]
     fn test_distinct_public_keys_yield_distinct_hashes() {
         let number_of_public_keys = 100;
-        let mut csprng = ChaCha20Rng::seed_from_u64(42);
+        let rng = &mut reproducible_rng();
         let points: HashSet<_> = (0..number_of_public_keys as u64)
             .map(|_| {
-                let (_secret_key, public_key) = multi_crypto::keypair_from_rng(&mut csprng);
-                let public_key_bytes = PublicKeyBytes::from(public_key);
+                let (_secret_key, public_key) = multi_crypto::keypair_from_rng(rng);
+                let public_key_bytes = PublicKeyBytes::from(&public_key);
                 let g1 = multi_crypto::hash_public_key_to_g1(&public_key_bytes.0[..]);
                 let bytes = g1.serialize();
                 // It suffices to prove that the first 32 bytes are distinct.  More requires a
@@ -195,10 +194,10 @@ mod advanced_functionality {
     fn verify_pop_throws_error_on_public_key_bytes_with_unset_compressed_flag() {
         let (secret_key, public_key) = multi_crypto::keypair_from_seed([1, 2, 3, 4]);
         let pop = multi_crypto::create_pop(&public_key, &secret_key);
-        let pop_bytes = PopBytes::from(pop);
-        let mut public_key_bytes = PublicKeyBytes::from(public_key);
+        let pop_bytes = PopBytes::from(&pop);
+        let mut public_key_bytes = PublicKeyBytes::from(&public_key);
         public_key_bytes.0[G2Bytes::FLAG_BYTE_OFFSET] &= !G2Bytes::COMPRESSED_FLAG;
-        match api::verify_pop(pop_bytes, public_key_bytes) {
+        match api::verify_pop(&pop_bytes, &public_key_bytes) {
             Err(e) => assert!(e.to_string().contains("Point decoding failed")),
             Ok(_) => panic!("error should have been thrown"),
         }
@@ -208,8 +207,8 @@ mod advanced_functionality {
     fn verify_pop_throws_error_on_public_key_bytes_not_on_curve() {
         let (secret_key, public_key) = multi_crypto::keypair_from_seed([1, 2, 3, 4]);
         let pop = multi_crypto::create_pop(&public_key, &secret_key);
-        let pop_bytes = PopBytes::from(pop);
-        let mut public_key_bytes = PublicKeyBytes::from(public_key);
+        let pop_bytes = PopBytes::from(&pop);
+        let mut public_key_bytes = PublicKeyBytes::from(&public_key);
         // Zero out the bytes, set the compression flag.
         // This represents x = 0, which happens to have no solution
         // on the G2 curve.
@@ -217,7 +216,7 @@ mod advanced_functionality {
             public_key_bytes.0[i] = 0;
         }
         public_key_bytes.0[G2Bytes::FLAG_BYTE_OFFSET] |= G2Bytes::COMPRESSED_FLAG;
-        match api::verify_pop(pop_bytes, public_key_bytes) {
+        match api::verify_pop(&pop_bytes, &public_key_bytes) {
             Err(e) => assert!(e.to_string().contains("Point decoding failed")),
             Ok(_) => panic!("error should have been thrown"),
         }
@@ -227,8 +226,8 @@ mod advanced_functionality {
     fn verify_pop_throws_error_on_public_key_bytes_not_in_subgroup() {
         let (secret_key, public_key) = multi_crypto::keypair_from_seed([1, 2, 3, 4]);
         let pop = multi_crypto::create_pop(&public_key, &secret_key);
-        let pop_bytes = PopBytes::from(pop);
-        let mut public_key_bytes = PublicKeyBytes::from(public_key);
+        let pop_bytes = PopBytes::from(&pop);
+        let mut public_key_bytes = PublicKeyBytes::from(&public_key);
         // By manual rejection sampling, we found an x-coordinate with a
         // solution, which is unlikely to have order r.
         for i in 0..G2Bytes::SIZE {
@@ -236,7 +235,7 @@ mod advanced_functionality {
         }
         public_key_bytes.0[G2Bytes::FLAG_BYTE_OFFSET] |= G2Bytes::COMPRESSED_FLAG;
         public_key_bytes.0[5] = 3;
-        match api::verify_pop(pop_bytes, public_key_bytes) {
+        match api::verify_pop(&pop_bytes, &public_key_bytes) {
             Err(e) => assert!(e.to_string().contains("Point decoding failed")),
             Ok(_) => panic!("error should have been thrown"),
         }

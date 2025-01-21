@@ -6,15 +6,15 @@
 //! otherwise errors out.
 //!
 use candid::{CandidType, Deserialize};
-use ic_ic00_types::CanisterHttpRequestArgs;
+use ic_management_canister_types::CanisterHttpRequestArgs;
 
-#[derive(CandidType, Deserialize, Debug, Clone)]
+#[derive(Clone, Debug, CandidType, Deserialize)]
 pub struct RemoteHttpRequest {
     pub request: CanisterHttpRequestArgs,
     pub cycles: u64,
 }
 
-#[derive(CandidType, Deserialize, Debug, Clone)]
+#[derive(Clone, Debug, CandidType, Deserialize)]
 pub struct RemoteHttpResponse {
     pub status: u128,
     pub headers: Vec<(String, String)>,

@@ -1,32 +1,18 @@
-use std::convert::TryFrom;
-
-use prost::Message;
-
 use dfn_core::api::call;
 use ic_base_types::{PrincipalId, SubnetId};
 use ic_nns_constants::REGISTRY_CANISTER_ID;
 use ic_protobuf::registry::subnet::v1::{SubnetListRecord, SubnetRecord};
 use ic_registry_keys::{make_subnet_list_record_key, make_subnet_record_key};
-use ic_registry_transport::pb::v1::{Precondition, RegistryAtomicMutateResponse, RegistryMutation};
 use ic_registry_transport::{
     deserialize_get_latest_version_response, deserialize_get_value_response,
+    pb::v1::{Precondition, RegistryAtomicMutateResponse, RegistryMutation},
     serialize_atomic_mutate_request, serialize_get_value_request, Error,
 };
 use on_wire::bytes;
+use prost::Message;
+use std::convert::TryFrom;
 
 pub const MAX_NUM_SSH_KEYS: usize = 50;
-
-/// Wraps around Message::encode and panics on error.
-pub fn encode_or_panic<T: Message>(msg: &T) -> Vec<u8> {
-    let mut buf = Vec::<u8>::new();
-    msg.encode(&mut buf)
-        .expect("Encoding input as Protobuf failed");
-    buf
-}
-
-pub fn decode_or_panic<T: Message + Default>(msg: Vec<u8>) -> T {
-    T::decode(msg.as_slice()).expect("could not decode byte vector as PB Message")
-}
 
 /// Returns the deserialized value associated with the given key and version.
 /// If the version is `None`, then the "latest" version is returned.

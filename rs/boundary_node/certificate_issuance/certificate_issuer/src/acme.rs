@@ -1,10 +1,14 @@
+use std::time::Duration;
+
 use anyhow::{anyhow, Context, Error};
 use async_trait::async_trait;
 use instant_acme::{
     Account, Authorization, Challenge, ChallengeType, Identifier, NewOrder, OrderStatus,
 };
 use mockall::automock;
-use rcgen::{Certificate, CertificateParams, DistinguishedName};
+use rcgen::{CertificateParams, DistinguishedName, KeyPair};
+use tokio::time::sleep;
+use zeroize::Zeroize;
 
 #[automock]
 #[async_trait]
@@ -110,27 +114,33 @@ impl Finalize for Acme {
             .await
             .context("failed to create new order")?;
 
-        let state = order.state();
+        let state = order
+            .refresh()
+            .await
+            .context("failed to refresh order state")?;
 
         if state.status != OrderStatus::Ready {
             return Err(FinalizeError::OrderNotReady(format!("{:?}", state.status)));
         }
 
-        let cert = Certificate::from_params({
-            let mut params = CertificateParams::new(vec![name.to_string()]);
-            params.distinguished_name = DistinguishedName::new();
-            params
-        })
-        .context("failed to generate certificate")?;
+        let mut key_pair = KeyPair::generate().context("failed to create key pair")?;
 
-        let csr = cert
-            .serialize_request_der()
-            .context("failed to create certificate signing request")?;
+        let csr = {
+            let mut params = CertificateParams::new(vec![name.to_string()])
+                .context("failed to create certificate params")?;
+
+            params.distinguished_name = DistinguishedName::new();
+            params.serialize_request(&key_pair)
+        }
+        .context("failed to generate certificate signing request")?;
 
         order
-            .finalize(&csr)
+            .finalize(csr.der().as_ref())
             .await
             .context("failed to finalize order")?;
+
+        // Inject artificial delay of 5 seconds to allow certificate processing to complete
+        sleep(Duration::from_secs(5)).await;
 
         let cert_chain_pem = match order
             .certificate()
@@ -146,9 +156,11 @@ impl Finalize for Acme {
             }
         };
 
+        let key_pair_pem = key_pair.serialize_pem();
+        key_pair.zeroize();
         Ok((
-            cert_chain_pem,                   // Certificate Chain
-            cert.serialize_private_key_pem(), // Private Key
+            cert_chain_pem, // Certificate Chain
+            key_pair_pem,   // Key pair
         ))
     }
 }

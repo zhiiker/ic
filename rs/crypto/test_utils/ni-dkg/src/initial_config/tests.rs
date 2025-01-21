@@ -1,7 +1,7 @@
-#![allow(clippy::unwrap_used)]
-
 use super::*;
+use ic_crypto_internal_bls12_381_type::{verify_bls_signature, G1Affine, G2Affine};
 use ic_crypto_test_utils::{map_of, set_of};
+use ic_crypto_test_utils_reproducible_rng::reproducible_rng;
 use ic_interfaces_registry::RegistryClient;
 use ic_protobuf::registry::subnet::v1::{CatchUpPackageContents, InitialNiDkgTranscriptRecord};
 use ic_registry_client_fake::FakeRegistryClient;
@@ -10,8 +10,10 @@ use ic_registry_keys::make_catch_up_package_contents_key;
 use ic_registry_proto_data_provider::ProtoRegistryDataProvider;
 use ic_types::crypto::threshold_sig::ni_dkg::config::receivers::NiDkgReceivers;
 use ic_types::crypto::threshold_sig::ni_dkg::config::NiDkgThreshold;
+use ic_types::crypto::threshold_sig::ThresholdSigPublicKey;
 use ic_types::{Height, NumberOfNodes, RegistryVersion, SubnetId};
 use ic_types_test_utils::ids::{node_test_id, NODE_1, SUBNET_1};
+use rand::Rng;
 use std::sync::Arc;
 
 const REG_V1: RegistryVersion = RegistryVersion::new(1);
@@ -39,11 +41,17 @@ fn should_correctly_create_initial_dkg_config_for_single_node() {
     let dkg_tag = NiDkgTag::LowThreshold;
     let target_id = target_id();
 
-    let config = InitialNiDkgConfig::new(&nodes_set, dealer_subnet, dkg_tag, target_id, REG_V1);
+    let config = InitialNiDkgConfig::new(
+        &nodes_set,
+        dealer_subnet,
+        dkg_tag.clone(),
+        target_id,
+        REG_V1,
+    );
 
     assert_eq!(
         config.get().dkg_id(),
-        NiDkgId {
+        &NiDkgId {
             start_block_height: Height::new(0),
             dealer_subnet,
             dkg_tag,
@@ -72,11 +80,17 @@ fn should_correctly_create_initial_dkg_config() {
     let dkg_tag = NiDkgTag::LowThreshold;
     let target_id = target_id();
 
-    let config = InitialNiDkgConfig::new(&nodes_set, dealer_subnet, dkg_tag, target_id, REG_V1);
+    let config = InitialNiDkgConfig::new(
+        &nodes_set,
+        dealer_subnet,
+        dkg_tag.clone(),
+        target_id,
+        REG_V1,
+    );
 
     assert_eq!(
         config.get().dkg_id(),
-        NiDkgId {
+        &NiDkgId {
             start_block_height: Height::new(0),
             dealer_subnet,
             dkg_tag,
@@ -106,7 +120,9 @@ fn should_panic_if_receiver_keys_dont_match_config_receivers() {
     let initial_dkg_config =
         InitialNiDkgConfig::new(&nodes_set, SUBNET_1, dkg_tag, target_id(), REG_V1);
 
-    initial_dkg_transcript(initial_dkg_config, &BTreeMap::new());
+    let rng = &mut reproducible_rng();
+
+    initial_dkg_transcript(initial_dkg_config, &BTreeMap::new(), rng);
 }
 
 // This test acts as reminder that the CBOR representation of the
@@ -127,8 +143,8 @@ fn should_have_stable_internal_csp_transcript_cbor_serialization() {
 fn should_correctly_retrieve_initial_low_threshold_ni_dkg_transcript_from_registry() {
     let mut transcript = transcript();
     let dkg_tag = NiDkgTag::LowThreshold;
-    transcript.dkg_id.dkg_tag = dkg_tag;
-    let registry = registry_with_ni_dkg_transcript(
+    transcript.dkg_id.dkg_tag = dkg_tag.clone();
+    let registry = registry_with_initial_ni_dkg_transcript(
         InitialNiDkgTranscriptRecord::from(transcript.clone()),
         dkg_tag,
         SUBNET_1,
@@ -150,8 +166,8 @@ fn should_correctly_retrieve_initial_low_threshold_ni_dkg_transcript_from_regist
 fn should_correctly_retrieve_initial_high_threshold_ni_dkg_transcript_from_registry() {
     let mut transcript = transcript();
     let dkg_tag = NiDkgTag::HighThreshold;
-    transcript.dkg_id.dkg_tag = dkg_tag;
-    let registry = registry_with_ni_dkg_transcript(
+    transcript.dkg_id.dkg_tag = dkg_tag.clone();
+    let registry = registry_with_initial_ni_dkg_transcript(
         InitialNiDkgTranscriptRecord::from(transcript.clone()),
         dkg_tag,
         SUBNET_1,
@@ -169,6 +185,57 @@ fn should_correctly_retrieve_initial_high_threshold_ni_dkg_transcript_from_regis
     );
 }
 
+#[test]
+fn should_get_master_key_associated_with_transcript_public_key() {
+    use ic_interfaces::crypto::KeyManager;
+
+    let nodes = [node_id(3), node_id(5)];
+    let nodes_set: BTreeSet<NodeId> = nodes.iter().cloned().collect();
+    let dealer_subnet = SUBNET_1;
+    let dkg_tag = NiDkgTag::LowThreshold;
+    let target_id = target_id();
+
+    let rng = &mut reproducible_rng();
+
+    let config = InitialNiDkgConfig::new(&nodes_set, dealer_subnet, dkg_tag, target_id, REG_V1);
+
+    let mut receiver_keys = BTreeMap::new();
+
+    for node_id in nodes {
+        let temp_crypto = TempCryptoComponent::builder()
+            .with_node_id(node_id)
+            .with_keys(ic_crypto_temp_crypto::NodeKeysToGenerate::only_dkg_dealing_encryption_key())
+            .with_rng(ChaCha20Rng::from_seed(rng.gen()))
+            .build();
+        let dkg_dealing_encryption_pubkey = temp_crypto
+            .current_node_public_keys()
+            .expect("Failed to retrieve node public keys")
+            .dkg_dealing_encryption_public_key
+            .expect("missing dkg_dealing_encryption_pk");
+
+        receiver_keys.insert(node_id, dkg_dealing_encryption_pubkey);
+    }
+
+    let (transcript, secret) = initial_dkg_transcript_and_master_key(config, &receiver_keys, rng);
+
+    let pk = ThresholdSigPublicKey::try_from(&transcript)
+        .expect("should extract public key from high threshold transcript");
+
+    let test_message = rng.gen::<[u8; 32]>();
+
+    let signature = sign_message(&test_message, &secret);
+
+    let signature_bytes: [u8; 48] = signature.as_ref().try_into().expect("Invalid size");
+
+    let pk_g2 = G2Affine::deserialize(&pk.into_bytes()).expect("Invalid public key point");
+    let sig_g1 = G1Affine::deserialize(&signature_bytes).expect("Invalid signature point");
+
+    let dst = b"BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_";
+    let msg_g1 = G1Affine::hash(dst, &test_message);
+
+    assert!(verify_bls_signature(&sig_g1, &pk_g2, &msg_g1));
+}
+
 /// Returns a transcript without empty or default data so that it can be used
 /// for tests whose aim is to detect changes in the serialization of the
 /// transcript.
@@ -178,7 +245,6 @@ fn transcript_without_empty_or_default_data() -> NiDkgTranscript {
         EncryptedShares, PublicCoefficientsBytes, Transcript, NUM_CHUNKS,
     };
     use ic_crypto_internal_types::sign::threshold_sig::ni_dkg::CspNiDkgTranscript;
-    use ic_crypto_internal_types::sign::threshold_sig::public_key::bls12_381::PublicKeyBytes;
 
     let encrypted_shares = EncryptedShares {
         rand_r: [G1Bytes([1; G1Bytes::SIZE]); NUM_CHUNKS],
@@ -209,7 +275,7 @@ fn transcript() -> NiDkgTranscript {
     transcript_without_empty_or_default_data()
 }
 
-fn registry_with_ni_dkg_transcript(
+fn registry_with_initial_ni_dkg_transcript(
     transcript_record: InitialNiDkgTranscriptRecord,
     dkg_tag: NiDkgTag,
     subnet_id: SubnetId,
@@ -227,6 +293,9 @@ fn registry_with_ni_dkg_transcript(
             cup_contents.initial_ni_dkg_transcript_high_threshold = Some(transcript_record);
             cup_contents.initial_ni_dkg_transcript_low_threshold =
                 Some(InitialNiDkgTranscriptRecord::from(transcript()));
+        }
+        NiDkgTag::HighThresholdForKey(_master_public_key_id) => {
+            unimplemented!("not an initial NI-DKG transcript tag")
         }
     }
     let registry_data = ProtoRegistryDataProvider::new();

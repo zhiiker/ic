@@ -7,11 +7,11 @@ package(default_visibility = ["//visibility:public"])
 exports_files(["buf"])
 """
 
-VERSION = "1.16.0"
+VERSION = "1.46.0"
 SHA256 = {
-    "Darwin-arm64": "17493c1013184554d5ca3cb886f0afdb109255cb71af6294f2119cb7c25c4b9c",
-    "Darwin-x86_64": "18c51116c8b0bc420f095f548726d77f81898b58dd54574f78dd8d50a1a111b1",
-    "Linux-x86_64": "07ea21f7dc6299da93fce571c53b06e86ab8cfe2b765c64e5b3175ea1a6962e0",
+    "Darwin-arm64": "bb039f69ed1e00dd07ab4f1ee88cdceb663f448150ca8092f9348e2f66df475f",
+    "Darwin-x86_64": "95a4b42bbf808194ffe5807fa869d622b6af37893c500d8ba4e3cfe2fe662e97",
+    "Linux-x86_64": "04c92815f92431bea637d834bee9d2941e979b1c821c59805667c032e2e8fc1f",
 }
 
 URL = "https://github.com/bufbuild/buf/releases/download/v{version}/buf-{platform}"

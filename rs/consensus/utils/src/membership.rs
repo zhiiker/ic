@@ -1,5 +1,5 @@
 use crate::{
-    active_high_threshold_transcript, active_low_threshold_transcript, registry_version_at_height,
+    active_high_threshold_committee, active_low_threshold_committee, registry_version_at_height,
 };
 use ic_crypto_prng::{Csprng, RandomnessPurpose};
 use ic_interfaces::consensus_pool::ConsensusPoolCache;
@@ -15,7 +15,7 @@ use ic_types::{
 use rand::seq::SliceRandom;
 use std::sync::Arc;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub enum MembershipError {
     NodeNotFound(NodeId),
     RegistryClientError(RegistryClientError),
@@ -26,8 +26,8 @@ pub enum MembershipError {
 /// what its rank is and what committees it belongs to.
 pub struct Membership {
     consensus_cache: Arc<dyn ConsensusPoolCache>,
-    pub(crate) registry_client: Arc<dyn RegistryClient>,
-    pub(crate) subnet_id: SubnetId,
+    pub registry_client: Arc<dyn RegistryClient>,
+    pub subnet_id: SubnetId,
 }
 
 impl Membership {
@@ -67,7 +67,7 @@ impl Membership {
     // derived from the genesis random beacon at height 1 is predictable,
     // because the beacon from the genesis height is preconstructed and known in
     // advance
-    fn get_shuffled_nodes(
+    pub fn get_shuffled_nodes(
         &self,
         height: Height,
         previous_beacon: &RandomBeacon,
@@ -85,7 +85,7 @@ impl Membership {
         Ok(node_ids)
     }
 
-    /// Return the the block maker rank of the given node id at the given
+    /// Return the block maker rank of the given node id at the given
     /// height. If the returned rank is None, it means the node id is not a
     /// block maker at this height.
     pub fn get_block_maker_rank(
@@ -206,8 +206,8 @@ impl Membership {
         node_id: NodeId,
         height: Height,
     ) -> Result<bool, MembershipError> {
-        match active_low_threshold_transcript(self.consensus_cache.as_ref(), height) {
-            Some(transcript) => Ok(transcript.committee.position(node_id).is_some()),
+        match active_low_threshold_committee(self.consensus_cache.as_ref(), height) {
+            Some((_, committee)) => Ok(committee.position(node_id).is_some()),
             None => Err(MembershipError::UnableToRetrieveDkgSummary(height)),
         }
     }
@@ -219,8 +219,8 @@ impl Membership {
         node_id: NodeId,
         height: Height,
     ) -> Result<bool, MembershipError> {
-        match active_high_threshold_transcript(self.consensus_cache.as_ref(), height) {
-            Some(transcript) => Ok(transcript.committee.position(node_id).is_some()),
+        match active_high_threshold_committee(self.consensus_cache.as_ref(), height) {
+            Some((_, committee)) => Ok(committee.position(node_id).is_some()),
             None => Err(MembershipError::UnableToRetrieveDkgSummary(height)),
         }
     }
@@ -241,8 +241,8 @@ impl Membership {
         &self,
         height: Height,
     ) -> Result<Threshold, MembershipError> {
-        match active_low_threshold_transcript(self.consensus_cache.as_ref(), height) {
-            Some(transcript) => Ok(transcript.threshold.get().get() as usize),
+        match active_low_threshold_committee(self.consensus_cache.as_ref(), height) {
+            Some((threshold, _)) => Ok(threshold),
             None => Err(MembershipError::UnableToRetrieveDkgSummary(height)),
         }
     }
@@ -252,8 +252,8 @@ impl Membership {
         &self,
         height: Height,
     ) -> Result<Threshold, MembershipError> {
-        match active_high_threshold_transcript(self.consensus_cache.as_ref(), height) {
-            Some(transcript) => Ok(transcript.threshold.get().get() as usize),
+        match active_high_threshold_committee(self.consensus_cache.as_ref(), height) {
+            Some((threshold, _)) => Ok(threshold),
             None => Err(MembershipError::UnableToRetrieveDkgSummary(height)),
         }
     }
@@ -276,7 +276,7 @@ pub fn get_notarization_threshold_for_subnet_of_size(subnet_size: usize) -> Thre
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use ic_test_utilities::types::ids::node_test_id;
+    use ic_test_utilities_types::ids::node_test_id;
     use ic_types::consensus::*;
 
     #[test]
@@ -304,8 +304,8 @@ pub mod test {
 
     #[test]
     fn test_notarization_threshold_for_safety_and_liveness() {
-        // This test is written assuming that the finalization treshold and
-        // the notarization treshold are the same.
+        // This test is written assuming that the finalization threshold and
+        // the notarization threshold are the same.
         let finalization_uses_notarization_threshold =
             FinalizationContent::committee() == NotarizationContent::committee();
         assert!(finalization_uses_notarization_threshold);

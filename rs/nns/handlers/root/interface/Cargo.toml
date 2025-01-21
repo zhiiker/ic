@@ -1,0 +1,13 @@
+[package]
+name = "ic-nns-handler-root-interface"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = { workspace = true }
+candid = { workspace = true }
+ic-base-types = { path = "../../../../types/base_types" }
+ic-cdk = { workspace = true }
+ic-nervous-system-clients = { path = "../../../../nervous_system/clients" }
+ic-nns-constants = { path = "../../../../nns/constants" }
+serde = { workspace = true }
